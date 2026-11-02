@@ -16,7 +16,7 @@ const connect = directive("connect-src");
 if (!csp) problems.push("index.html has no Content-Security-Policy meta");
 else if (!connect) problems.push("CSP has no connect-src (default-src 'self' would block every provider fetch)");
 else {
-  for (const need of ["'self'", "http://*:11434", "https://*:11434", "https://api.anthropic.com", "https://api.openai.com", "https://openrouter.ai"]) if (!connect.includes(need)) problems.push(`CSP connect-src missing ${need}`);
+  for (const need of ["'self'", "http://*:11434", "https://*:11434", "http://*:1234", "https://api.anthropic.com", "https://api.openai.com", "https://openrouter.ai"]) if (!connect.includes(need)) problems.push(`CSP connect-src missing ${need}`);
   for (const extra of (process.env.BH_CONNECT_SRC ?? "").split(/[\s,]+/).filter(Boolean)) if (!connect.includes(extra.replace(/\/$/, ""))) problems.push(`CSP connect-src missing BH_CONNECT_SRC origin ${extra}`);
   if (connect.some((c) => c === "ws:" || c === "wss:")) problems.push("CSP connect-src has dev-only ws:/wss:");
 }

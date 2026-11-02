@@ -2,8 +2,8 @@
 // All provider hosts are answered by request interception (no real network, no paid calls). CSP is
 // enforced before a request leaves the page, so an intercepted response proves connect-src allows it.
 //   1. Ollama on a LAN IP (http://192.168.0.114:11434): app detects models and chats through it
-//   2. api.openai.com / api.anthropic.com / openrouter.ai fetches are not CSP-blocked
-//   3. an origin outside connect-src (http://192.168.0.114:1234) IS blocked (CSP actually enforced)
+//   2. LM Studio on a LAN IP (:1234) and api.openai.com / api.anthropic.com / openrouter.ai are not CSP-blocked
+//   3. an origin outside connect-src (http://192.168.0.114:9999) IS blocked (CSP actually enforced)
 // Needs playwright-core (devDependency not added; set PLAYWRIGHT_CORE=/path/to/playwright-core) and
 // Chrome (CHROME=/path, default /usr/bin/google-chrome). Skips with exit 0 if either is missing.
 import { createServer } from "node:http";
@@ -51,7 +51,7 @@ try {
     const json = (body) => route.fulfill({ status: 200, headers: { ...cors, "content-type": "application/json" }, body: JSON.stringify(body) });
     if (url === `${OLLAMA}/api/tags`) return json({ models: [{ name: "fake-llama:1b", details: { parameter_size: "1B" } }] });
     if (url === `${OLLAMA}/api/chat`) return json({ message: { content: "FAKE-OLLAMA-REPLY what do you like about that?" } });
-    if (/api\.openai\.com|openrouter\.ai/.test(url)) return json({ choices: [{ message: { content: "fake" } }] });
+    if (/api\.openai\.com|openrouter\.ai|:1234\//.test(url)) return json({ choices: [{ message: { content: "fake" } }] });
     if (/api\.anthropic\.com/.test(url)) return json({ content: [{ type: "text", text: "fake" }] });
     return route.abort(); // never touch the real network
   });
@@ -75,16 +75,16 @@ try {
   if (detected !== 1) failures.push(`Ollama /api/tags fetch: ${detected}`);
 
   // 2. hosted APIs allowed by connect-src
-  for (const u of ["https://api.openai.com/v1/chat/completions", "https://api.anthropic.com/v1/messages", "https://openrouter.ai/api/v1/chat/completions"]) {
+  for (const u of ["http://192.168.0.114:1234/v1/chat/completions", "https://api.openai.com/v1/chat/completions", "https://api.anthropic.com/v1/messages", "https://openrouter.ai/api/v1/chat/completions"]) {
     const r = await page.evaluate(async (u) => { try { return (await fetch(u, { method: "POST", headers: { "content-type": "application/json", "x-test": "1" }, body: "{}" })).status; } catch (e) { return String(e); } }, u);
     if (r !== 200) failures.push(`${u}: ${r}`);
   }
   // 3. an origin outside connect-src is blocked by CSP (proves the policy is live)
-  const blocked = await page.evaluate(async () => { try { await fetch("http://192.168.0.114:1234/v1/models"); return "allowed"; } catch { return "blocked"; } });
+  const blocked = await page.evaluate(async () => { try { await fetch("http://192.168.0.114:9999/v1/models"); return "allowed"; } catch { return "blocked"; } });
   await page.waitForTimeout(200);
-  const extraAllowed = (process.env.BH_CONNECT_SRC ?? "").includes(":1234");
-  if (!extraAllowed && (blocked !== "blocked" || !violations.some((v) => v.includes("192.168.0.114:1234")))) failures.push(`outside origin not CSP-blocked (${blocked})`);
-  const unexpected = violations.filter((v) => !v.includes(":1234"));
+  const extraAllowed = (process.env.BH_CONNECT_SRC ?? "").includes(":9999");
+  if (!extraAllowed && (blocked !== "blocked" || !violations.some((v) => v.includes("192.168.0.114:9999")))) failures.push(`outside origin not CSP-blocked (${blocked})`);
+  const unexpected = violations.filter((v) => !v.includes(":9999"));
   if (unexpected.length) failures.push(`unexpected CSP violations: ${unexpected.join(", ")}`);
   if (!hits.some((h) => h === `POST ${OLLAMA}/api/chat`)) failures.push("app never called Ollama /api/chat");
 
@@ -97,4 +97,4 @@ if (failures.length) {
   console.error("csp-smoke FAILED:\n  " + failures.join("\n  "));
   process.exit(1);
 }
-console.log("csp-smoke OK: LAN Ollama + OpenAI/Anthropic/OpenRouter allowed, other origins blocked");
+console.log("csp-smoke OK: LAN Ollama + LM Studio :1234 + OpenAI/Anthropic/OpenRouter allowed, other origins blocked");

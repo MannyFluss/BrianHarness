@@ -10,10 +10,10 @@ const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 // Web/PWA CSP connect-src. The Electron renderer keeps its tight index.html CSP (default-src 'self',
 // no network: it talks to the core over IPC only).
-export const WEB_CONNECT_SRC = ["'self'", "http://*:11434", "https://*:11434", "https://api.anthropic.com", "https://api.openai.com", "https://openrouter.ai"];
+export const WEB_CONNECT_SRC = ["'self'", "http://*:11434", "https://*:11434", "http://*:1234", "https://api.anthropic.com", "https://api.openai.com", "https://openrouter.ai"];
 /**
  * Extra origins for a custom OpenAI-compatible server (LM Studio, llama.cpp, vLLM, ...), e.g.
- *   BH_CONNECT_SRC="http://192.168.0.114:1234 https://llm.example.com" npm run build:web
+ *   BH_CONNECT_SRC="http://192.168.0.114:8080 https://llm.example.com" npm run build:web
  * Space- or comma-separated scheme://host[:port] entries (host may be * or *.domain).
  */
 export function webConnectSrc(extra = process.env.BH_CONNECT_SRC ?? "", dev = false): string {

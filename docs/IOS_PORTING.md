@@ -167,18 +167,18 @@ pi-ai is **not** bundled for web/iOS; the browser path uses the small fetch back
   Alternative: CapacitorHttp (native HTTP, no CORS), which can be added later behind `fetchImpl`.
 - **CSP**. The Electron renderer (`apps/desktop/index.html`) stays at `default-src 'self'` with no network,
   because it only talks over IPC. The web/PWA build (`web/index.html`, filled in by `vite.config.ts`) has:
-  `connect-src 'self' http://*:11434 https://*:11434 https://api.anthropic.com https://api.openai.com https://openrouter.ai`.
-  This covers Ollama on any LAN host at :11434 and the hosted APIs.
-  - A **custom OpenAI-compatible server** (LM Studio :1234, llama.cpp, vLLM, a non-11434 Ollama) must be
+  `connect-src 'self' http://*:11434 https://*:11434 http://*:1234 https://api.anthropic.com https://api.openai.com https://openrouter.ai`.
+  This covers Ollama on any LAN host at :11434, LM Studio on any LAN host at :1234 (http), and the hosted APIs.
+  - Any **other OpenAI-compatible server** (llama.cpp :8080, vLLM, a non-11434 Ollama) must be
     added at build time:
-    `BH_CONNECT_SRC="http://192.168.0.114:1234 https://llm.example.com" npm run build:web`
+    `BH_CONNECT_SRC="http://192.168.0.114:8080 https://llm.example.com" npm run build:web`
     (space or comma separated; each entry is validated as `scheme://host[:port]`). Without it, the fetch is
     CSP-blocked and the provider shows as unreachable.
   - `check-web-bundle.mjs` fails the build if connect-src is missing, any default origin is missing, any
     BH_CONNECT_SRC origin is missing, or dev-only `ws:` leaks in.
   - `scripts/csp-smoke.mjs` (`npm run test:web-csp`) loads dist-web in headless Chromium and checks three
-    things: a LAN Ollama chat is not CSP-blocked, OpenAI/Anthropic/OpenRouter fetches are not blocked, and
-    `:1234` IS blocked. Every host is answered by request interception, so it makes no real network calls.
+    things: a LAN Ollama chat is not CSP-blocked, LM Studio :1234 and OpenAI/Anthropic/OpenRouter fetches are
+    not blocked, and `:9999` IS blocked. Every host is answered by request interception, so it makes no real network calls.
   - On iOS, CapacitorHttp (passed as `fetchImpl`) makes native requests, so neither the WebView CSP nor CORS
     applies to them. Keep the CSP anyway for the PWA.
 - **Secure context**: the LAN PWA is plain http, so `crypto.subtle`, `crypto.randomUUID`, service workers and
