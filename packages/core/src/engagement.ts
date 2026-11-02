@@ -154,16 +154,26 @@ export function estimateEngagement(f: FeatureMap, ctx: EngagementContext = {}): 
     curiosity: clamp01(f["text.questions"] ?? 0),
     hesitation: clamp01(((f["typing.deletionRatio"] ?? 0) - 0.15) / 0.35),
   };
+  // Down-weighting of dictated / pasted / autocorrected / predictive turns: fluency (pauses) and
+  // hesitation (deletion ratio) only mean something for characters typed key by key, so their
+  // weights scale with typing.timingReliability (share of inserted chars that were keyed). r = 1
+  // (all keyed, or a log/sim without input sources) leaves the score bit-identical; r = 0 (fully
+  // dictated or pasted) drops both and the remaining features are renormalised. Latency stays:
+  // the time to the first edit is still real. typing.charsPerSec is not an engagement input.
+  const r = clamp01(f["typing.timingReliability"] ?? 1);
+  const wFluency = r === 1 ? W.fluency : W.fluency * r;
+  const wHesitation = r === 1 ? W.hesitation : W.hesitation * r;
+  if (r !== 1) parts.timingReliability = r;
   let score =
     W.length * parts.length! +
     W.relLength * parts.relLength! +
     W.latency * parts.latency! +
-    W.fluency * parts.fluency! +
+    wFluency * parts.fluency! +
     W.elaboration * parts.elaboration! +
     W.curiosity * parts.curiosity! -
-    W.hesitation * parts.hesitation!;
+    wHesitation * parts.hesitation!;
   // normalise positive weight mass to 1
-  score = score / (W.length + W.relLength + W.latency + W.fluency + W.elaboration + W.curiosity);
+  score = score / (W.length + W.relLength + W.latency + wFluency + W.elaboration + W.curiosity);
   score = clamp01(score);
   parts.typingScore = score;
   if (f["eeg.engagementIndex"] !== undefined) {

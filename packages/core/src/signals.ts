@@ -31,10 +31,59 @@ export interface SignalSource {
 /** Gap between key events that counts as a "thinking pause". */
 export const PAUSE_MS = 2000;
 
+const KINDS = new Set(["insert", "delete", "paste", "nav", "submit", "focus", "blur"]);
+const SOURCES = new Set(["hardware-key", "soft-keyboard", "autocorrect", "predictive", "composition", "dictation", "paste", "drop", "programmatic", "unknown"]);
+
+/**
+ * Privacy whitelist: a TypingEvent is {t, kind, len, source?, chars?} and nothing else. Anything
+ * else a renderer (or a buggy plugin) attaches, e.g. `data`, the key or the text, is dropped here,
+ * before features, logs (rawEvents) or the replay file ever see it.
+ */
+export function sanitizeTypingEvent(raw: unknown): TypingEvent | null {
+  const e = raw as Partial<TypingEvent> | null;
+  if (!e || typeof e.t !== "number" || !Number.isFinite(e.t) || typeof e.kind !== "string" || !KINDS.has(e.kind)) return null;
+  const out: TypingEvent = { t: e.t, kind: e.kind, len: typeof e.len === "number" && Number.isFinite(e.len) ? e.len : 0 };
+  if (typeof e.source === "string" && SOURCES.has(e.source)) out.source = e.source;
+  if (typeof e.chars === "number" && Number.isFinite(e.chars) && e.chars >= 0) out.chars = e.chars;
+  return out;
+}
+export function sanitizeTypingEvents(events: unknown): TypingEvent[] {
+  if (!Array.isArray(events)) return [];
+  const out: TypingEvent[] = [];
+  for (const e of events) {
+    const s = sanitizeTypingEvent(e);
+    if (s) out.push(s);
+  }
+  return out;
+}
+
+/** Edits that arrive without per-key timing: their speed / deletion features are not keystroke behaviour. */
+const UNTIMED_SOURCES = new Set(["paste", "drop", "dictation", "autocorrect", "predictive"]);
+const isKey = (e: TypingEvent) => e.kind === "insert" || e.kind === "delete" || e.kind === "paste";
+/**
+ * IME composition rewrites its own provisional text (deleteCompositionText / replaced marked text):
+ * that is not the user deleting, so it is not a deletion.
+ */
+const isCompositionDelete = (e: TypingEvent) => e.kind === "delete" && e.source === "composition";
+
+/** Inter-key gaps (ms, rounded) between consecutive edit events inside the window. Timings only. */
+export function keyGaps(events: TypingEvent[], window: TimeWindow): number[] {
+  const keys = events.filter((e) => e.t >= window.from && e.t <= window.to && isKey(e) && !isCompositionDelete(e)).sort((a, b) => a.t - b.t);
+  const gaps: number[] = [];
+  for (let i = 1; i < keys.length; i++) gaps.push(Math.round(keys[i]!.t - keys[i - 1]!.t));
+  return gaps;
+}
+
+const quantile = (sorted: number[], q: number) => {
+  if (!sorted.length) return 0;
+  const i = (sorted.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+  return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (i - lo);
+};
+
 /** Pure function so the sim runner and tests can use it without a source instance. */
 export function summarizeTyping(events: TypingEvent[], window: TimeWindow): FeatureMap {
   const ev = events.filter((e) => e.t >= window.from && e.t <= window.to).sort((a, b) => a.t - b.t);
-  const keys = ev.filter((e) => e.kind === "insert" || e.kind === "delete" || e.kind === "paste");
+  const keys = ev.filter((e) => isKey(e) && !isCompositionDelete(e));
   const first = keys[0];
   const firstKeyAt = first ? first.t : window.to;
   let inserts = 0, deletions = 0, pastes = 0, edits = 0, pauses = 0, longestPause = 0, pauseTotal = 0;
@@ -83,8 +132,37 @@ export function summarizeTyping(events: TypingEvent[], window: TimeWindow): Feat
     const timed = ins.filter((e) => e.source === "hardware-key" || e.source === "soft-keyboard").reduce((a, e) => a + Math.min(1, chars(e)), 0);
     src["typing.src.timedShare"] = total ? timed / total : 1;
   }
+  // Explicit reply latencies (window.from = completeAt: the reply fully shown) and the flags that
+  // mark turns whose speed / deletion features are not keystroke behaviour (see engagement.ts).
+  const charsOf = (e: TypingEvent) => e.chars ?? 1;
+  let totalChars = 0, untimedChars = 0, dictated = 0, autocorrections = 0;
+  for (const e of keys) {
+    if (e.source === "dictation") dictated = 1;
+    if (e.source === "autocorrect") autocorrections++;
+    if (e.kind === "delete") continue;
+    totalChars += charsOf(e);
+    if (e.kind === "paste" || (e.source !== undefined && UNTIMED_SOURCES.has(e.source))) untimedChars += charsOf(e);
+  }
+  const gaps: number[] = [];
+  for (let i = 1; i < keys.length; i++) gaps.push(keys[i]!.t - keys[i - 1]!.t);
+  const sortedGaps = [...gaps].sort((a, b) => a - b);
+  const audit: FeatureMap = {
+    "typing.latencyToFirstKeyMs": Math.max(0, firstKeyAt - window.from),
+    "typing.latencyToSubmitMs": Math.max(0, window.to - window.from),
+    "typing.gapCount": gaps.length,
+    "typing.gapMeanMs": gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0,
+    "typing.gapMedianMs": quantile(sortedGaps, 0.5),
+    "typing.gapP90Ms": quantile(sortedGaps, 0.9),
+    "typing.dictated": dictated,
+    "typing.pasted": pastes > 0 || keys.some((e) => e.source === "paste" || e.source === "drop") ? 1 : 0,
+    "typing.autocorrections": autocorrections,
+    "typing.predictive": keys.filter((e) => e.source === "predictive").length,
+    // share of inserted characters that WERE typed key by key (1 = all of them; 1 when nothing typed)
+    "typing.timingReliability": totalChars ? 1 - untimedChars / totalChars : 1,
+  };
   return {
     ...src,
+    ...audit,
     "typing.replyLatencyMs": Math.max(0, firstKeyAt - window.from),
     "typing.composeMs": composeMs,
     "typing.totalMs": Math.max(0, window.to - window.from),
@@ -106,8 +184,8 @@ export class TypingSignalSource implements SignalSource {
   readonly kind = "typing" as const;
   private events: TypingEvent[] = [];
   push(sample: unknown): void {
-    const e = sample as TypingEvent;
-    if (typeof e?.t === "number" && typeof e?.kind === "string") this.events.push(e);
+    const e = sanitizeTypingEvent(sample);
+    if (e) this.events.push(e);
   }
   pushMany(events: TypingEvent[]): void {
     for (const e of events) this.push(e);

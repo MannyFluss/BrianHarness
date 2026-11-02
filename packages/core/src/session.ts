@@ -4,14 +4,15 @@
  *   -> interest map update (+autosave) -> Director plans -> state note -> backend speaks
  * Used identically by the desktop app (Electron main process) and the sim runner.
  */
-import type { ChatMessage, DirectorPlan, FeatureMap, FrameState, LogEvent, TypingEvent } from "./types.js";
+import type { ChatMessage, DirectorPlan, FeatureMap, FrameState, LogEvent, RatingRecord, TypingEvent } from "./types.js";
 import { DIRECTOR_SYSTEM_PROMPT, type ModelBackend } from "./backends.js";
-import { OPEN_TOPIC, planTurn, type DirectorPolicyOptions } from "./director.js";
+import { OPEN_TOPIC, baselineRotation, planBaselineTurn, planTurn, type DirectorPolicyOptions } from "./director.js";
 import { estimateEngagement, eegQuality, textFeatures, type EegBlendOptions, type EngagementContext } from "./engagement.js";
 import { InterestMap } from "./interest-map.js";
 import { makeRng, type Rng } from "./rng.js";
-import { TypingSignalSource, type SignalSource } from "./signals.js";
-import { buildStateNote } from "./state-note.js";
+import { TypingSignalSource, keyGaps, sanitizeTypingEvents, type SignalSource } from "./signals.js";
+import { buildBaselineStateNote, buildStateNote } from "./state-note.js";
+import type { Adaptation } from "./study.js";
 import type { HarnessStorage } from "./platform/storage.js";
 import { randomId, systemClock, type Clock } from "./platform/env.js";
 import { createTagger, type TopicTag, type TopicTagger, type TopicTaggerSpec } from "./tagger.js";
@@ -35,6 +36,14 @@ export interface HarnessSessionOptions {
   /** store raw typing events in the JSONL (bigger logs, full replay) */
   logRawEvents?: boolean;
   sessionId?: string;
+  /**
+   * "adaptive" (default everywhere: app, sim, sidecar) or "baseline" (Phase D no-adaptation: fixed
+   * topic rotation, plan-only state note, interest ledger off: updates go to an in-memory shadow
+   * copy that is logged but never read by the Director and never saved). Never logged.
+   */
+  adaptation?: Adaptation;
+  /** blinded study session: logged in session_start; plans / state notes are sealed in the log */
+  study?: { id: string; index: number; total: number; scheduleHash: string };
 }
 
 export interface DirectorTurnResult {
@@ -67,6 +76,8 @@ export interface HudState {
   hypothesis: string | null;
   topTopics: Array<[string, number, number]>;
   topStyles: Array<[string, number, number]>;
+  /** blinded study session (the interest map, plan and hypothesis are withheld from the HUD) */
+  study?: { index: number; total: number };
 }
 
 const nowIso = () => new Date().toISOString();
@@ -95,6 +106,8 @@ export class HarnessSession {
   readonly tagger: TopicTagger;
   private rng: Rng;
   private clock: () => number;
+  private readonly baseline: boolean;
+  private rotation: string[] = [];
 
   constructor(private opts: HarnessSessionOptions) {
     this.userId = opts.userId;
@@ -102,6 +115,12 @@ export class HarnessSession {
     this.rng = makeRng(opts.seed ?? 1);
     this.id = opts.sessionId ?? opts.store?.newSessionId() ?? `mem-${randomId(6)}`;
     this.map = opts.map ?? opts.store?.loadMap(opts.userId) ?? InterestMap.fresh(opts.userId);
+    this.baseline = opts.adaptation === "baseline";
+    if (this.baseline) {
+      // ledger off: a shadow copy takes this session's updates (logged as usual), the saved map is untouched
+      this.map = InterestMap.fromJSON(JSON.parse(JSON.stringify(this.map.toJSON())));
+      this.rotation = baselineRotation(makeRng(((opts.seed ?? 1) ^ 0x9e3779b9) >>> 0));
+    }
     this.sources = [this.typing, ...(opts.sources ?? [])];
     const t = opts.tagger;
     this.tagger = t && "tag" in t ? t : createTagger(t as TopicTaggerSpec | undefined);
@@ -123,7 +142,8 @@ export class HarnessSession {
   async start(opts: TurnOptions = {}): Promise<DirectorTurnResult> {
     this.map.data.sessions += 1;
     for (const s of this.sources) await s.start?.();
-    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`) });
+    const st = this.opts.study;
+    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash } } : {}) });
     return this.directorTurn(opts);
   }
 
@@ -138,8 +158,8 @@ export class HarnessSession {
   }
 
   private async directorTurn(opts: TurnOptions = {}): Promise<DirectorTurnResult> {
-    const plan = planTurn(this.turn, this.map, this.frame, this.plans, this.rng, this.opts.policy);
-    const stateNote = buildStateNote(this.frame, this.map, plan);
+    const plan = this.baseline ? planBaselineTurn(this.turn, this.plans, this.rotation, this.opts.policy) : planTurn(this.turn, this.map, this.frame, this.plans, this.rng, this.opts.policy);
+    const stateNote = this.baseline ? buildBaselineStateNote(plan) : buildStateNote(this.frame, this.map, plan);
     const messages: ChatMessage[] = [
       { role: "system", content: DIRECTOR_SYSTEM_PROMPT },
       ...this.transcript,
@@ -169,17 +189,18 @@ export class HarnessSession {
     const genMs = systemClock() - t0;
     this.plans.push(plan);
     this.transcript.push({ role: "assistant", content: text });
-    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, plan, stateNote, text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}) });
+    const sealed = !!this.opts.study;
+    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealed ? { sealed } : { plan, stateNote }), text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}) });
     // server-side defaults; the renderer overrides both via markShown() with what it displayed
     this.promptShownAt = this.clock();
     this.promptFirstTokenAt = streamed ? firstTokenClock : undefined;
-    return { text, plan, stateNote, genMs, ...(streamed ? { firstTokenMs } : {}) };
+    return { text, plan, stateNote: sealed ? "" : stateNote, genMs, ...(streamed ? { firstTokenMs } : {}) };
   }
 
   /** Process the user's reply and its telemetry, then produce the Director's next turn. */
   async reply(text: string, events: TypingEvent[] = [], sentAt = this.clock(), opts: TurnOptions = {}): Promise<{ user: UserTurnResult; director: DirectorTurnResult }> {
     const tags = await this.tagger.tag(text);
-    const user = this.observeUser(text, events, sentAt, tags);
+    const user = this.observeUser(text, sanitizeTypingEvents(events), sentAt, tags);
     this.turn += 1;
     const director = await this.directorTurn(opts);
     return { user, director };
@@ -269,16 +290,42 @@ export class HarnessSession {
       mentionedTopics: mentioned,
       prompt: { ...(this.promptFirstTokenAt !== undefined ? { firstTokenAt: this.promptFirstTokenAt } : {}), completeAt: this.promptShownAt },
       ...(this.opts.logRawEvents ? { rawEvents: events } : {}),
+      keyGaps: keyGaps(events, window),
     });
     this.log({ type: "interest_update", t: nowIso(), turn: this.turn, topTopics: this.map.topTopics(5).map(([t, m]) => [t, m]), hypothesis });
-    this.opts.store?.saveMap(this.map);
+    if (!this.baseline) this.opts.store?.saveMap(this.map);
     return { frame: this.frame, hypothesis };
   }
 
   async end(): Promise<void> {
     for (const s of this.sources) await s.stop?.();
     this.log({ type: "session_end", t: nowIso(), turns: this.turn });
-    this.opts.store?.saveMap(this.map);
+    if (!this.baseline) this.opts.store?.saveMap(this.map);
+  }
+
+  /**
+   * Log one absorption rating prompt (answered or not). Evaluation only: this writes ONE log line
+   * and touches nothing else (no engagement, frame, interest map, Director or state note).
+   */
+  logRating(r: Partial<Omit<RatingRecord, "type" | "t">>): RatingRecord {
+    const v = typeof r.value === "number" && Number.isInteger(r.value) && r.value >= 1 && r.value <= 5 ? r.value : null;
+    const rec: RatingRecord = {
+      type: "rating",
+      t: nowIso(),
+      scope: r.scope === "session" ? "session" : "turn",
+      turn: typeof r.turn === "number" ? r.turn : this.turn,
+      value: v,
+      shownAt: typeof r.shownAt === "number" ? r.shownAt : this.clock(),
+      answeredAt: v !== null && typeof r.answeredAt === "number" ? r.answeredAt : null,
+      dismissed: v === null ? true : !!r.dismissed,
+      ...(typeof r.reason === "string" && r.reason ? { reason: r.reason.slice(0, 40) } : {}),
+    };
+    if (rec.scope === "session") {
+      if (typeof r.hooked === "string" && r.hooked.trim()) rec.hooked = r.hooked.trim().slice(0, 2000);
+      if (this.opts.study) rec.blindGuess = r.blindGuess === "adaptive" || r.blindGuess === "baseline" || r.blindGuess === "no-idea" ? r.blindGuess : null;
+    }
+    this.log(rec);
+    return rec;
   }
 
   /** Top-k final guesses at the user's interests (no LLM call; see final-guesses.ts). */
@@ -287,6 +334,11 @@ export class HarnessSession {
   }
 
   hud(): HudState {
+    const st = this.opts.study;
+    if (st) {
+      // blinded: what the Director learned / plans would reveal the mode; typing features stay
+      return { sessionId: this.id, userId: this.userId, backend: this.backend.id, turn: this.turn, frame: this.frame, plan: null, hypothesis: null, topTopics: [], topStyles: [], study: { index: st.index, total: st.total } };
+    }
     return {
       sessionId: this.id,
       userId: this.userId,

@@ -10,6 +10,8 @@
 import type { DirectorPlan, FrameState, QuestionStyle } from "./types.js";
 import type { InterestMap } from "./interest-map.js";
 import type { Rng } from "./rng.js";
+import { TOPICS } from "./topics.js";
+import { QUESTION_STYLES } from "./types.js";
 
 /** Pseudo-topic for broad "what are you into?" questions that let the user steer. */
 export const OPEN_TOPIC = "_open";
@@ -138,4 +140,32 @@ export function planTurn(
   const plan: DirectorPlan = { turn, mode: "explore", topic, style, reason: "scouting the least-known promising topic" };
   if (style === "either-or") plan.altTopic = ranked[1]?.[0];
   return plan;
+}
+
+/**
+ * No-adaptation baseline (Phase D "baseline": interest ledger and adaptation off). Same opener, same
+ * plan shape, same periodic open question; every other turn explores the next topic of a FIXED
+ * rotation over the built-in lexicon (seeded shuffle per session) with a rotating question style.
+ * Reads nothing learned: no interest map, no engagement, no mentions. Deterministic given rng.
+ */
+export function planBaselineTurn(turn: number, history: DirectorPlan[], rotation: string[], opts: DirectorPolicyOptions = {}): DirectorPlan {
+  const { openEvery = 4 } = opts;
+  if (turn === 0) return { turn, mode: "explore", topic: OPEN_TOPIC, style: "open", reason: "opener: let them pick the direction" };
+  const exploreTurns = history.filter((p) => p.mode === "explore").length;
+  if (exploreTurns > 0 && exploreTurns % openEvery === 0 && history[history.length - 1]?.style !== "open") {
+    return { turn, mode: "explore", topic: OPEN_TOPIC, style: "open", reason: "periodic open question so the user can steer" };
+  }
+  const k = history.filter((p) => p.topic !== OPEN_TOPIC).length;
+  const styles = QUESTION_STYLES.filter((s) => s !== "either-or" && s !== "open");
+  return { turn, mode: "explore", topic: rotation[k % rotation.length]!, style: styles[k % styles.length]!, reason: "next topic" };
+}
+
+/** Seeded shuffle of the lexicon topics: the baseline's fixed rotation for one session. */
+export function baselineRotation(rng: Rng): string[] {
+  const r = [...TOPICS];
+  for (let i = r.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [r[i], r[j]] = [r[j]!, r[i]!];
+  }
+  return r;
 }

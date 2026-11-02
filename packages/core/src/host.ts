@@ -9,7 +9,10 @@ import { HarnessSession } from "./session.js";
 import type { HarnessStorage } from "./platform/storage.js";
 import { systemClock, type Clock } from "./platform/env.js";
 import { isFillerOnly, sessionTitle } from "./title.js";
-import type { TypingEvent } from "./types.js";
+import type { RatingRecord, TypingEvent } from "./types.js";
+import type { StudyAssignment, StudyStatus } from "./study.js";
+import type { ExportFile } from "./zip.js";
+import { randomId } from "./platform/env.js";
 import type { TopicTagger, TopicTaggerSpec } from "./tagger.js";
 
 export interface SessionListItem {
@@ -39,14 +42,32 @@ export class HarnessHost {
       tagger?: TopicTagger | TopicTaggerSpec;
       seed?: () => number;
       clock?: Clock;
+      /** Phase D blinded study (StudyController); absent = every session adaptive, no study fields */
+      study?: { assign(sessionId: string, lastTurns: (id: string) => number): Promise<StudyAssignment | null>; status?(): Promise<StudyStatus> };
+      /** called after a session ended (new chat, app exit): e.g. iOS BHExport.saveToDocuments */
+      onSessionEnd?: (sessionId: string) => void | Promise<void>;
     },
   ) {
     this.clock = cfg.clock ?? systemClock;
   }
 
   async newSession(opts: TurnOptions = {}): Promise<{ sessionId: string; director: DirectorTurnResult; hud: HudState; title: string }> {
-    if (this.session) await this.session.end();
+    if (this.session) {
+      const prev = this.session;
+      await prev.end();
+      await this.cfg.storage?.flush?.();
+      await this.notifyEnd(prev.id);
+    }
+    const sessionId = this.cfg.storage?.newSessionId() ?? `mem-${randomId(6)}`;
+    let study: StudyAssignment | null = null;
+    try {
+      study = (await this.cfg.study?.assign(sessionId, (id) => this.userTurns(id))) ?? null;
+    } catch (err) {
+      console.warn("[brianharness] study assignment failed; this session runs adaptive, unlogged:", (err as Error).message);
+    }
     this.session = new HarnessSession({
+      sessionId,
+      ...(study ? { adaptation: study.adaptation, study: { id: study.study, index: study.index, total: study.total, scheduleHash: study.scheduleHash } } : {}),
       userId: this.cfg.userId,
       backend: await this.cfg.backend(),
       store: this.cfg.storage,
@@ -77,6 +98,49 @@ export class HarnessHost {
     return { director: out.director, hud, engagement: out.user.frame.engagement, title: sessionTitle(t) };
   }
 
+  private userTurns(id: string): number {
+    if (this.session?.id === id) return this.session.turn;
+    try {
+      return this.cfg.storage?.readSession(id).filter((e) => e.type === "user_turn").length ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async notifyEnd(id: string) {
+    try {
+      await this.cfg.onSessionEnd?.(id);
+    } catch (err) {
+      console.warn("[brianharness] session-end hook failed:", (err as Error).message);
+    }
+  }
+
+  /** Log an absorption rating to the CURRENT session (evaluation only; see RatingRecord). */
+  async rate(r: Partial<Omit<RatingRecord, "type" | "t">>): Promise<{ ok: boolean }> {
+    if (!this.session) return { ok: false };
+    this.session.logRating(r);
+    await this.cfg.storage?.flush?.();
+    return { ok: true };
+  }
+
+  /** One session's JSONL file (as stored; blinded: contains no mode). */
+  sessionFile(id: string): ExportFile | null {
+    const st = this.cfg.storage;
+    if (!st) return null;
+    const events = st.readSession(id);
+    if (!events.length) return null;
+    return { name: `sessions/${id}.jsonl`, content: events.map((e) => JSON.stringify(e)).join("\n") + "\n", mimeType: "application/x-ndjson" };
+  }
+
+  /** Every session JSONL + the interest map (the save game), for "Export logs". */
+  exportFiles(): ExportFile[] {
+    const st = this.cfg.storage;
+    if (!st) return [];
+    const files = st.listSessions().map((id) => this.sessionFile(id)).filter((f): f is ExportFile => !!f);
+    files.push({ name: `saves/${this.cfg.userId}.json`, content: JSON.stringify(st.loadMap(this.cfg.userId).toJSON(), null, 1) + "\n", mimeType: "application/json" });
+    return files;
+  }
+
   hud(): HudState | null {
     return this.session?.hud() ?? null;
   }
@@ -105,7 +169,9 @@ export class HarnessHost {
   }
 
   async end() {
-    await this.session?.end();
+    const s = this.session;
+    await s?.end();
     await this.cfg.storage?.flush?.();
+    if (s) await this.notifyEnd(s.id);
   }
 }

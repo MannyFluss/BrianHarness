@@ -35,3 +35,9 @@ export function buildStateNote(frame: FrameState | null, map: InterestMap, plan:
   lines.push(`Plan: ${plan.mode.toUpperCase()} ${target}, ask a ${plan.style} question. (${plan.reason})`);
   return lines.join("\n");
 }
+
+/** Baseline (no-adaptation) state note: the plan only; no engagement, typing, mentions or interest map. */
+export function buildBaselineStateNote(plan: DirectorPlan): string {
+  const target = topicLabel(plan.topic);
+  return [`[DIRECTOR STATE · turn ${plan.turn}]`, `Plan: ${plan.mode.toUpperCase()} ${target}, ask a ${plan.style} question. (${plan.reason})`].join("\n");
+}

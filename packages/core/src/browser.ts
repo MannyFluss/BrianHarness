@@ -18,6 +18,8 @@ export * from "./final-guesses.js";
 export * from "./tagger.js";
 export * from "./title.js";
 export * from "./host.js";
+export * from "./study.js";
+export * from "./zip.js";
 export * from "./platform/env.js";
 export * from "./platform/kv.js";
 export * from "./platform/storage.js";

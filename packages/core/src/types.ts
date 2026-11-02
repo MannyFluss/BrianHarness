@@ -84,15 +84,53 @@ export interface InterestMapData {
   updatedAt: string;
 }
 
+/**
+ * Ground-truth absorption rating (evaluation only: never an input to engagement, the Director,
+ * the interest map or the state note). Every prompt that was SHOWN gets one record, answered or not.
+ *   scope "turn":    per-turn probe "How absorbed are you right now?"; turn = user turns so far
+ *   scope "session": end-of-session "Overall, how absorbed were you?" (+ optional hooked text and
+ *                    the blinding check in study sessions)
+ */
+export interface RatingRecord {
+  type: "rating";
+  t: string;
+  scope: "turn" | "session";
+  turn: number;
+  /** 1..5, null when skipped / dismissed */
+  value: number | null;
+  /** epoch ms (renderer clock) the prompt appeared */
+  shownAt: number;
+  /** epoch ms of the tap; null when not answered */
+  answeredAt: number | null;
+  dismissed: boolean;
+  /** why it went away unanswered: "skip" | "typed" | "sent" | "closed" | "new-chat" | ... */
+  reason?: string;
+  /** session scope only: optional free text "What hooked you?" (user-written, kept verbatim) */
+  hooked?: string;
+  /** session scope, study sessions only: blinding check */
+  blindGuess?: "adaptive" | "baseline" | "no-idea" | null;
+}
+
 /** Lines written to sessions/<sessionId>.jsonl */
 export type LogEvent =
-  | { type: "session_start"; t: string; sessionId: string; userId: string; backend: string; sources: string[] }
+  | {
+      type: "session_start";
+      t: string;
+      sessionId: string;
+      userId: string;
+      backend: string;
+      sources: string[];
+      /** blinded study session: index (1..total) + sha256 of the sealed schedule. NEVER the mode. */
+      study?: { id: string; index: number; total: number; scheduleHash: string };
+    }
   | {
       type: "director_turn";
       t: string;
       turn: number;
-      plan: DirectorPlan;
-      stateNote: string;
+      /** omitted (sealed: true) in blinded study sessions: plan / state note would reveal the mode */
+      plan?: DirectorPlan;
+      stateNote?: string;
+      sealed?: boolean;
       text: string;
       backend: string;
       /** request start -> generate() resolved (whole reply) */
@@ -117,6 +155,9 @@ export type LogEvent =
        */
       prompt?: { firstTokenAt?: number; completeAt: number };
       rawEvents?: TypingEvent[];
+      /** inter-key gaps (ms) inside the reply window, in order: timings only, never content */
+      keyGaps?: number[];
     }
+  | RatingRecord
   | { type: "interest_update"; t: string; turn: number; topTopics: Array<[string, number]>; hypothesis: string | null }
   | { type: "session_end"; t: string; turns: number };
