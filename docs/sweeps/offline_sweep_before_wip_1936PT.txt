@@ -1,4 +1,7 @@
-
+# Offline sweep BEFORE the EEG z-scoring/quality changes (item 3/7).
+# Provenance: produced from the UNCOMMITTED working tree at ~7:36 PM PT on Nov 1 2026 (the WIP build that was
+# committed a few minutes later, with further edits, as 9e90e20). It is NOT output of 34f22ac; this file was
+# previously misnamed offline_sweep_before_34f22ac.txt. Not reproducible from any single commit.
 == eeg weight 0.25, per-user normalisation OFF (harness as-is), profile consumer ==
 typing-only (no EEG source)                    informative: found  87% top3  91% | flat-chatty: found   5% top3  37% | flat-terse: found   0% top3  64%
 sham: noise (d=0, same artifacts)              informative: found  90% top3  94% | flat-chatty: found   2% top3  36% | flat-terse: found   0% top3  58%
