@@ -27,7 +27,7 @@ export const LEAD_EEG_Z = 1.645;
 export const LEAD_EEG_MIN_TURNS = 4;
 
 /** reorder `ranked` (best first) by EEG engagement on cited turns; see LEAD_EEG_Z. Returns a new array. */
-export function eegReorder(ranked: string[], cites: number[][], history: TurnSnapshot[], z = LEAD_EEG_Z): string[] {
+export function eegReorder(ranked: string[], cites: number[][], history: TurnSnapshot[], z = LEAD_EEG_Z, atThreshold = false): string[] {
   const ln = history.map((h) => h.eegLn).filter((v): v is number => v !== undefined && Number.isFinite(v));
   if (ln.length < LEAD_EEG_MIN_TURNS) return [...ranked];
   const mu = ln.reduce((a, b) => a + b, 0) / ln.length;
@@ -42,11 +42,63 @@ export function eegReorder(ranked: string[], cites: number[][], history: TurnSna
   for (let i = 1; i < idx.length; i++) {
     for (let j = i; j > 0; j--) {
       const a = stat[idx[j - 1]!], b = stat[idx[j]!];
-      if (!a || !b || b.m - a.m <= z * Math.sqrt(1 / a.k + 1 / b.k)) break;
+      if (!a || !b) break;
+      const need = z * Math.sqrt(1 / a.k + 1 / b.k);
+      if (atThreshold ? b.m - a.m < need : b.m - a.m <= need) break;
       [idx[j - 1], idx[j]] = [idx[j]!, idx[j - 1]!];
     }
   }
   return idx.map((i) => ranked[i]!);
+}
+
+/** one extractor label for rankLeadEeg (as in its JSON answer) */
+export interface LeadEegLabel { label: string; confidence?: number; turns?: number[] }
+export interface LeadEegOptions {
+  /**
+   * blend weight. 0 / undefined = pure EEG reorder (eegReorder: the extractor's order, a label climbs only past
+   * labels it beats by margin * sqrt(1/k_a + 1/k_b) in mean z). w > 0 = blend: score = confidence + w * mean z
+   * over the cited turns (0 if none), sorted by score (the Researcher's prototype rule, PREREG_leadeeg §5).
+   */
+  w?: number;
+  /** exact-tie rule. "extractor" (default) = extractor list order; "eeg" = higher mean z first (blend) / a
+   *  margin exactly at the threshold also moves (pure) */
+  tie_break?: "extractor" | "eeg";
+  /**
+   * pure mode: the one-sided z of the reorder test (default LEAD_EEG_Z = 1.645).
+   * blend mode: score units; the extractor's #1 keeps #1 unless the new leader beats its score by MORE than
+   * margin (default 0), the rest of the blend order unchanged.
+   */
+  margin?: number;
+}
+
+/**
+ * Pure, deterministic, no I/O. labels in extractor order; eeg[i] = eeg.engagementIndex of user turn i+1 (null /
+ * NaN = no usable EEG that turn). Returns every label, reordered. Within-session z of ln(EI) over the turns given:
+ * pure mode = sample SD and >= LEAD_EEG_MIN_TURNS EEG turns (exactly eegReorder); blend mode = population SD
+ * (1 if 0) and duplicate cited turns counted as given (exactly the prototype rank_proto).
+ */
+export function rankLeadEeg(labels: LeadEegLabel[], eeg: Array<number | null | undefined>, opts: LeadEegOptions = {}): string[] {
+  const names = labels.map((l) => l.label);
+  const tb = opts.tie_break ?? "extractor";
+  const lnAt = eeg.map((v) => (typeof v === "number" && Number.isFinite(v) ? Math.log(Math.max(1e-6, v)) : undefined));
+  if (!opts.w) {
+    const history: TurnSnapshot[] = lnAt.map((v) => ({ turn: 0, hypothesis: null, top: [], ...(v !== undefined ? { eegLn: v } : {}) }));
+    return eegReorder(names, labels.map((l) => l.turns ?? []), history, opts.margin ?? LEAD_EEG_Z, tb === "eeg");
+  }
+  if (!labels.length) return [];
+  const w = opts.w, mg = opts.margin ?? 0;
+  const ln = lnAt.filter((v): v is number => v !== undefined);
+  const mu = ln.length ? ln.reduce((a, b) => a + b, 0) / ln.length : 0;
+  const sd = ln.length ? Math.sqrt(ln.reduce((a, b) => a + (b - mu) ** 2, 0) / ln.length) || 1 : 1;
+  const zbar = labels.map((l) => {
+    const zz = (l.turns ?? []).filter((t) => t >= 1 && t <= lnAt.length && lnAt[t - 1] !== undefined).map((t) => (lnAt[t - 1]! - mu) / sd);
+    return zz.length ? zz.reduce((a, b) => a + b, 0) / zz.length : 0;
+  });
+  const sc = labels.map((l, i) => (l.confidence ?? 0) + w * zbar[i]!);
+  const r9 = (x: number) => Math.round(x * 1e9) / 1e9;
+  let order = labels.map((_, i) => i).sort((a, b) => r9(sc[b]!) - r9(sc[a]!) || (tb === "eeg" ? zbar[b]! - zbar[a]! : 0) || a - b);
+  if (order[0] !== 0 && sc[order[0]!]! - sc[0]! <= mg) order = [0, ...order.filter((i) => i !== 0)];
+  return order.map((i) => names[i]!);
 }
 
 /** "Alright" / "alright" / "kp:alright-2": one final guess per shown label */

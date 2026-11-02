@@ -1,0 +1,22 @@
+rankLeadEeg parity on Track 2 answers (turn 6 + 12) x synth_cache rows (24 sessions, 9600 EEG row sets): 338400 rankings
+| mode | opts | rankings | mismatches |
+|---|---|---|---|
+| blend | `{"w": 0.25, "tie_break": "extractor", "margin": 0}` | 18800 | 0 |
+| blend | `{"w": 0.25, "tie_break": "extractor", "margin": 0.05}` | 18800 | 0 |
+| blend | `{"w": 0.25, "tie_break": "extractor", "margin": 0.1}` | 18800 | 0 |
+| blend | `{"w": 0.25, "tie_break": "extractor", "margin": 0.2}` | 18800 | 0 |
+| blend | `{"w": 0.25, "tie_break": "extractor", "margin": 0.4}` | 18800 | 0 |
+| blend | `{"w": 0.25, "tie_break": "eeg", "margin": 0}` | 18800 | 0 |
+| blend | `{"w": 0.25, "tie_break": "eeg", "margin": 0.05}` | 18800 | 0 |
+| blend | `{"w": 0.25, "tie_break": "eeg", "margin": 0.1}` | 18800 | 0 |
+| blend | `{"w": 0.25, "tie_break": "eeg", "margin": 0.2}` | 18800 | 0 |
+| blend | `{"w": 0.25, "tie_break": "eeg", "margin": 0.4}` | 18800 | 0 |
+| blend | `{"w": 0.05, "tie_break": "extractor", "margin": 0.0}` | 18800 | 0 |
+| blend | `{"w": 0.1, "tie_break": "extractor", "margin": 0.0}` | 18800 | 0 |
+| blend | `{"w": 0.5, "tie_break": "extractor", "margin": 0.0}` | 18800 | 0 |
+| pure | `{"margin": 1.645}` | 18800 | 0 |
+| pure | `{"margin": 1.0}` | 18800 | 0 |
+| pure | `{"margin": 0.5}` | 18800 | 0 |
+| pure | `{"margin": 0.0}` | 18800 | 0 |
+| pure | `{}` | 18800 | 0 |
+TOTAL mismatches: 0 / 338400
