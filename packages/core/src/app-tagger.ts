@@ -19,7 +19,15 @@ import { normalizeSpiderUrl, spiderFetch } from "./providers/spider-cloud.js";
 
 /** the extractor model the Researcher scored */
 export const APP_EXTRACTOR_MODEL = "gemma4:cloud";
-/** default shared cap on extractor network calls (same as the sidecar's BH_LLM_MAX_CALLS default) */
+/**
+ * Study sessions: per-session budget of logical extractor calls (10 = one every 6 user turns up to 60 turns),
+ * at most 1 retry per logical call, and a hard per-session HTTP ceiling. No device-wide counter, so practice
+ * (non-study) use can never consume study budget.
+ */
+export const STUDY_EXTRACTOR_BUDGET = 10;
+export const STUDY_EXTRACTOR_RETRIES = 1;
+export const STUDY_EXTRACTOR_HTTP_CEILING = 20;
+/** non-study sessions: default shared cap on extractor network calls (same as the sidecar's BH_LLM_MAX_CALLS default) */
 export const APP_EXTRACTOR_MAX_CALLS = 50;
 export const APP_EXTRACTOR_CALLS_KEY = "llm-extract/calls";
 
@@ -72,6 +80,8 @@ export interface AppTaggerInput {
   canReachSpider?: boolean;
   /** extractor cadence (default 6 = every 6th user turn, as in the sim) */
   everyN?: number;
+  /** a study session: per-session budget (STUDY_EXTRACTOR_*) instead of the device-wide `counter` */
+  study?: boolean;
 }
 
 export interface AppTaggerChoice {
@@ -90,7 +100,9 @@ export function appTaggerSpec(i: AppTaggerInput): AppTaggerChoice {
   const common: LlmExtractorOptions = {
     model: APP_EXTRACTOR_MODEL, rank: "lead", base: "keyphrase-idf", everyN: i.everyN ?? 6,
     promptVersion: i.promptVersion ?? DEFAULT_EXTRACTOR_PROMPT_VERSION,
-    ...(i.counter ? { reserveCall: () => i.counter!.reserve() } : {}),
+    ...(i.study
+      ? { budget: STUDY_EXTRACTOR_BUDGET, retries: STUDY_EXTRACTOR_RETRIES, httpCeiling: STUDY_EXTRACTOR_HTTP_CEILING }
+      : i.counter ? { reserveCall: () => i.counter!.reserve() } : {}),
     ...(i.cache ? { cache: i.cache } : {}),
     ...(i.fetchImpl ? { fetchImpl: i.fetchImpl } : {}),
   };

@@ -141,7 +141,7 @@ test("study index never passes 10: reissue reuses the index, and after 10 valid 
   assert.equal(await s2.assign("t12", () => valid), null);
 });
 
-test("upload bodies: exactly the Worker f71cc53 allowlist; jsonl byte-identical; committed sample agrees", async () => {
+test("upload bodies: exactly the Worker 2ef027e allowlist; jsonl byte-identical; committed sample agrees", async () => {
   const { readFileSync } = await import("node:fs");
   const { sessionUploadBody, studyStartUploadBody, SESSION_UPLOAD_KEYS, STUDY_START_UPLOAD_KEYS, findUploadSecret } = await import("../src/index.js");
   const jsonl = readFileSync(new URL("../../../docs/samples/phaseD_sample_export.jsonl", import.meta.url), "utf8");
@@ -161,7 +161,9 @@ test("upload bodies: exactly the Worker f71cc53 allowlist; jsonl byte-identical;
   const bare = sessionUploadBody([JSON.stringify({ ...lines[0], study: undefined }), ...jsonl.split("\n").slice(1)].join("\n"), { appVersion: "0.1.0", platform: "desktop" });
   assert.ok(!("studyIndex" in bare) && !("scheduleHash" in bare) && !("build" in bare));
   const s = studyStartUploadBody({ scheduleHash: "a".repeat(64), nSessions: 10, createdAt: "2026-11-02T00:00:00.000Z" }, { appVersion: "0.1.0", platform: "ios", build: 1439 });
-  assert.deepEqual(Object.keys(s).sort(), [...STUDY_START_UPLOAD_KEYS].sort());
-  assert.ok(!("protocol" in s));
+  assert.deepEqual(Object.keys(s).sort(), [...STUDY_START_UPLOAD_KEYS].filter((k) => k !== "protocol").sort(), "protocol omitted when absent");
+  const sp = studyStartUploadBody({ scheduleHash: "a".repeat(64), nSessions: 10, createdAt: "2026-11-02T00:00:00.000Z", protocol: 2 }, { appVersion: "0.1.0", platform: "ios", build: 1439 });
+  assert.deepEqual(Object.keys(sp).sort(), [...STUDY_START_UPLOAD_KEYS].sort(), "Worker 2ef027e allowlist incl. protocol");
+  assert.equal(sp.protocol, 2);
   assert.equal(findUploadSecret('{"apiKey":"sk-proj-abcdefghijklmnop1234"}') !== null, true);
 });

@@ -7,10 +7,11 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import {
   BRAND, HarnessHost, ProviderHub, SessionStore, StudyController, backendSpecFromEnv, createBackend, credentialSecretStore, zipFiles,
   APP_EXTRACTOR_MAX_CALLS, DEFAULT_EXTRACTOR_PROMPT_VERSION, appTaggerSpec, kvCallCounter, normalizeOllamaBaseUrl, SPIDER_CREDENTIAL_ID, DEFAULT_OLLAMA_URL, parsePromptVersion, readApiKey,
+  UploadQueue, normalizeSpiderUrl, STUDY_PROTOCOL_VERSION,
 } from "@brianharness/core";
 import { runDemo } from "./demo.mjs";
 
@@ -69,7 +70,8 @@ const extractorCache = new Map();
 const envPromptVersion = parsePromptVersion(process.env.BH_LLM_PROMPT_VERSION);
 const promptVersionSetting = () => envPromptVersion ?? parsePromptVersion(hub?.settings().extractorPromptVersion) ?? DEFAULT_EXTRACTOR_PROMPT_VERSION;
 let taggerReason = "keyphrase-idf";
-async function chooseTagger() {
+/** @param {{ study?: boolean }} [ctx] study sessions: per-session extractor budget; others: the device-wide counter */
+async function chooseTagger(ctx = {}) {
   const s = hub.settings();
   const cloud = ["ollama-cloud", "openai", "anthropic"].includes(s.provider);
   const c = appTaggerSpec({
@@ -81,12 +83,41 @@ async function chooseTagger() {
     spiderUrl: s.spiderCloudUrl,
     promptVersion: promptVersionSetting(),
     counter: extractorCalls,
+    study: !!ctx.study,
     cache: { get: (k) => extractorCache.get(k), set: (k, v) => void extractorCache.set(k, v) },
   });
   taggerReason = c.reason;
   return { spec: c.spec, fallback: c.fallback };
 }
+// ---- auto-upload queue (POST /v1/sessions): <userData>/pending-uploads/, one 0600 file per key ----
+const uploadsDir = () => join(app.getPath("userData"), "pending-uploads");
+const keyFile = (k) => join(uploadsDir(), encodeURIComponent(k));
+const uploadKV = {
+  get: async (k) => { try { return readFileSync(keyFile(k), "utf8"); } catch { return null; } },
+  set: async (k, v) => { mkdirSync(uploadsDir(), { recursive: true, mode: 0o700 }); writeFileSync(keyFile(k), v, { mode: 0o600 }); },
+  remove: async (k) => rmSync(keyFile(k), { force: true }),
+  keys: async (p = "") => { try { return readdirSync(uploadsDir()).map(decodeURIComponent).filter((k) => k.startsWith(p)); } catch { return []; } },
+};
+const uploads = new UploadQueue(uploadKV, {
+  meta: { appVersion: app.getVersion(), platform: `desktop-${process.platform}`, build: null },
+  target: async () => {
+    const token = process.env.BH_SPIDER_TOKEN || (await readApiKey(hub.credentials, SPIDER_CREDENTIAL_ID).catch(() => null));
+    return token ? { url: `${normalizeSpiderUrl(hub.settings().spiderCloudUrl)}/v1/sessions`, token } : null;
+  },
+});
+/** study sessions only: practice logs never upload */
+const isStudyFile = (f) => {
+  for (const line of f.content.split("\n")) {
+    if (!line.trim()) continue;
+    try { const r = JSON.parse(line); if (r.type === "session_start") return !!r.study && typeof r.study === "object"; } catch {}
+  }
+  return false;
+};
 const host = new HarnessHost({ userId, storage: store, backend: () => ensureBackend(), logRawEvents: true, seed: () => Date.now() % 100000, study, tagger: chooseTagger,
+  onSessionEnd: async (id) => {
+    const f = host.sessionFile(id);
+    if (f && isStudyFile(f)) { await uploads.enqueueSession(f).catch((e) => console.error(`[${BRAND.slug}] upload queue: ${e?.message}`)); void uploads.flush().catch(() => {}); }
+  },
   onExtractorWarning: (msg, { sessionId, reason }) => console.error(`[${BRAND.slug}] ${msg} [session ${sessionId}, ${reason}]`) });
 /** @type {BrowserWindow | null} */
 let mainWin = null;
@@ -150,13 +181,19 @@ ipcMain.handle("harness:exportLogs", async (e) => {
 ipcMain.handle("study:status", () => study.status());
 ipcMain.handle("study:enable", async () => {
   try {
-    await study.enable();
+    const s = await study.enable();
+    void uploads.enqueueStudyStart({ scheduleHash: s.scheduleHash, nSessions: 10, createdAt: s.createdAt, protocol: s.protocol ?? STUDY_PROTOCOL_VERSION }).then(() => uploads.flush()).catch(() => {});
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err?.message ?? String(err) };
   }
 });
 ipcMain.handle("study:disable", async () => (await study.disable(), { ok: true }));
+ipcMain.handle("study:reissue", (_e, { n, confirm, reason }) => study.requestReissue(Number(n), String(confirm ?? ""), reason == null ? undefined : String(reason)));
+ipcMain.handle("study:cancelReissue", async () => (await study.cancelReissue(), { ok: true }));
+ipcMain.handle("uploads:status", () => uploads.summary());
+ipcMain.handle("uploads:flush", () => uploads.flush({ force: true }));
+app.whenReady().then(() => uploads.flush()).catch(() => {}); // launch: retry what's left
 ipcMain.handle("study:hash", () => (studyDebug ? study.hash() : null));
 ipcMain.handle("study:unseal", (_e, confirm) => {
   if (!studyDebug) throw new Error("unseal is a dev/debug command (BH_STUDY_DEBUG=1)");
@@ -174,6 +211,7 @@ ipcMain.handle("providers:select", async (_e, { provider, model }) => {
 });
 ipcMain.handle("providers:apiKey", async (_e, { provider, key }) => {
   await hub.setApiKey(provider, String(key ?? ""));
+  if (provider === SPIDER_CREDENTIAL_ID) void uploads.flush().catch(() => {}); // a new token resumes a 401 pause
   return { ok: true };
 });
 ipcMain.handle("providers:endpoint", async (_e, { provider, url }) => {

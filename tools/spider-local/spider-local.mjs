@@ -109,7 +109,7 @@ try {
 
   if (process.argv.includes("--sessions")) {
     const { runSessions } = await import(pathToFileURL(resolve(here, "sessions-local.mjs")).href);
-    await runSessions({ W, admin, check, core });
+    await runSessions({ W, admin, check, core, adminSecret: ADMIN });
   }
   const leaked = [FAKE_KEY, ADMIN, token].some((k) => workerLog.includes(k));
   check(!leaked, "no throwaway secret or device token in the Worker output");

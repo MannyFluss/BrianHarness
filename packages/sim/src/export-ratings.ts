@@ -22,9 +22,10 @@ export interface UnsealedSchedule { order: string[]; scheduleHash?: string }
 const META = ["sessionId", "studyIndex", "scheduleHash", "turn", "userTurn", "t", "engagement", "baseline", "text.words", "text.chars"] as const;
 const RATING = ["turn_rating", "turn_rating_dismissed", "turn_rating_reason", "turn_rating_shownAt", "turn_rating_answeredAt", "session_rating", "session_rating_dismissed", "session_hooked", "session_blindGuess"] as const;
 /** study_protocol: STUDY_PROTOCOL_VERSION (session_start.study.protocol, also in final); empty = practice build (1438) -> exclude.
- * reissue_of: the invalid previous session this one re-runs (same index). */
+ * reissue_of: the invalid previous session this one re-runs (same index), or "manual" (Settings > Redo);
+ * reissue_reason: the optional free-text reason of a manual redo. */
 /** interest labels: running top-1 after this turn (interest_update.top1) + the session's {type:'final'} record */
-const LABELS = ["top1_running", "final_top1", "final_top3", "extractor_prompt_version", "extractor_model", "effective_tagger", "extractor_fallback", "extractor_fallback_reason", "extractor_calls_attempted", "extractor_calls_ok", "extractor_calls_failed", "extractor_calls_capped", "study_protocol", "reissue_of"] as const;
+const LABELS = ["top1_running", "final_top1", "final_top3", "extractor_prompt_version", "extractor_model", "effective_tagger", "extractor_fallback", "extractor_fallback_reason", "extractor_calls_attempted", "extractor_calls_ok", "extractor_calls_failed", "extractor_calls_capped", "study_protocol", "reissue_of", "reissue_reason"] as const;
 
 export function readSessionLogs(paths: string[]): SessionLog[] {
   const files: string[] = [];
@@ -47,7 +48,7 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
   const featureKeys = new Set<string>();
   const hashes = new Set<string>();
   for (const { events } of logs) {
-    const start = events.find((e) => e.type === "session_start") as (Ev & { sessionId?: string; study?: { index?: number; scheduleHash?: string; protocol?: number }; reissueOf?: string }) | undefined;
+    const start = events.find((e) => e.type === "session_start") as (Ev & { sessionId?: string; study?: { index?: number; scheduleHash?: string; protocol?: number }; reissueOf?: string; reissueReason?: string }) | undefined;
     if (!start) continue;
     const study = start.study;
     if (study?.scheduleHash) hashes.add(study.scheduleHash);
@@ -96,6 +97,7 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
         extractor_calls_capped: fin?.extractorCalls?.capped,
         study_protocol: study?.protocol ?? (fin as { protocol?: number } | undefined)?.protocol,
         reissue_of: start.reissueOf,
+        reissue_reason: start.reissueReason,
       });
     }
   }

@@ -20,6 +20,10 @@ export const STUDY_SESSIONS = 10;
 export const STUDY_SCHEDULE_KEY = "study/phaseD/schedule";
 export const STUDY_PROGRESS_KEY = "study/phaseD/progress";
 export const UNSEAL_PHRASE = "UNSEAL phaseD";
+/** confirmation phrase for a manual reissue of index n ("Redo study session n") */
+export const reissuePhrase = (n: number) => `REISSUE ${n}`;
+/** optional free-text reason for a manual redo (logged as session_start.reissueReason) */
+export const REISSUE_REASON_MAX = 120;
 /**
  * Study protocol (freeze) version, stored in the sealed schedule as `protocol` and logged in session_start.study,
  * study_start and final. 1 = practice builds (<= 1438 / 11c71d1, which wrote no `protocol` field): a schedule
@@ -53,8 +57,14 @@ export interface StudyAssignment {
   scheduleHash: string;
   adaptation: Adaptation;
   protocol: number;
-  /** the previous study session was invalid (< STUDY_MIN_USER_TURNS user turns or no session rating): same index (and mode) again */
+  /**
+   * the previous study session was invalid (< STUDY_MIN_USER_TURNS user turns or no session rating): same index
+   * (and mode) again; "manual" = the participant asked to redo this index (Settings > Study, manualReissue true)
+   */
   reissueOf?: string;
+  manualReissue?: true;
+  /** manual redo only: the participant's short reason (<= REISSUE_REASON_MAX chars) */
+  reissueReason?: string;
 }
 export interface StudyStatus {
   enabled: boolean;
@@ -65,6 +75,8 @@ export interface StudyStatus {
   scheduled: boolean;
   /** secure store unavailable (e.g. iOS Keychain -34018): the study cannot run */
   error?: string;
+  /** a manual redo is pending: the next study session gets this index */
+  pendingReissue?: number;
 }
 
 /** Exactly n/2 adaptive + n/2 baseline, Fisher-Yates with the seeded RNG. */
@@ -136,8 +148,11 @@ function randomSeed(): number {
 interface Progress {
   enabled: boolean;
   next: number;
-  /** session that holds index next-1 (reused if it ended with no user replies) */
+  /** the latest study session and its index (checked for validity when the next one starts) */
   last?: { sessionId: string; index: number };
+  /** manual redo requested (Settings > Study): the next study session gets this index, then it is cleared */
+  manualReissue?: number;
+  manualReissueReason?: string;
 }
 
 export class StudyController {
@@ -192,7 +207,7 @@ export class StudyController {
     try { await this.ensureProtocol(); } catch { /* reported below via scheduled/error */ }
     const p = await this.progress();
     try {
-      return { enabled: p.enabled, next: p.next, total: STUDY_SESSIONS, scheduled: !!(await this.rawSchedule()) };
+      return { enabled: p.enabled, next: p.next, total: STUDY_SESSIONS, scheduled: !!(await this.rawSchedule()), ...(p.manualReissue ? { pendingReissue: p.manualReissue } : {}) };
     } catch (err) {
       return { enabled: p.enabled, next: p.next, total: STUDY_SESSIONS, scheduled: false, error: (err as Error).message };
     }
@@ -235,11 +250,22 @@ export class StudyController {
     const p = await this.progress();
     if (!p.enabled) return null;
     let index = p.next;
+    let next = p.next;
     let reissueOf: string | undefined;
+    let lastInvalid = false;
     if (p.last) {
       const info = last(p.last.sessionId);
-      const invalid = typeof info === "number" ? info === 0 : info.userTurns < STUDY_MIN_USER_TURNS || !info.sessionRated;
-      if (invalid) { index = p.last.index; reissueOf = p.last.sessionId; }
+      lastInvalid = typeof info === "number" ? info === 0 : info.userTurns < STUDY_MIN_USER_TURNS || !info.sessionRated;
+      if (lastInvalid) { index = p.last.index; reissueOf = p.last.sessionId; }
+    }
+    const manual = typeof p.manualReissue === "number" && p.manualReissue >= 1 && p.manualReissue <= STUDY_SESSIONS ? p.manualReissue : null;
+    if (manual !== null) {
+      index = manual;
+      reissueOf = "manual";
+      // an invalid previous session still owes its index: it comes right after the redo
+      next = lastInvalid && p.last ? Math.min(p.next, p.last.index) : p.next;
+    } else {
+      next = index + 1;
     }
     if (index > STUDY_SESSIONS) return null;
     let sch: Awaited<ReturnType<StudyController["schedule"]>>;
@@ -249,8 +275,39 @@ export class StudyController {
       return null;
     }
     if (!sch) return null;
-    await this.saveProgress({ enabled: true, next: index + 1, last: { sessionId, index } });
-    return { study: STUDY_ID, index, total: STUDY_SESSIONS, scheduleHash: await sha256Hex(sch.raw), adaptation: sch.s.order[index - 1]!, protocol: sch.s.protocol ?? STUDY_PROTOCOL_VERSION, ...(reissueOf ? { reissueOf } : {}) };
+    await this.saveProgress({ enabled: true, next, last: { sessionId, index } });
+    return {
+      study: STUDY_ID, index, total: STUDY_SESSIONS, scheduleHash: await sha256Hex(sch.raw), adaptation: sch.s.order[index - 1]!, protocol: sch.s.protocol ?? STUDY_PROTOCOL_VERSION,
+      ...(reissueOf ? { reissueOf } : {}), ...(manual !== null ? { manualReissue: true as const, ...(p.manualReissueReason ? { reissueReason: p.manualReissueReason } : {}) } : {}),
+    };
+  }
+
+  /**
+   * Manual redo (Settings > Study "Redo study session n"): the next study session gets index n again (same mode,
+   * never shown) and logs reissueOf "manual" + manualReissue true. Needs the phrase reissuePhrase(n) and an index
+   * that was already assigned (1..next-1, at most 10). Persisted in the study progress; the schedule and its hash
+   * are untouched. A later request replaces a pending one.
+   */
+  async requestReissue(n: number, confirm: string, reason?: string): Promise<{ ok: true; index: number } | { ok: false; error: string }> {
+    await this.ensureProtocol();
+    if (!Number.isInteger(n) || n < 1 || n > STUDY_SESSIONS) return { ok: false, error: `study session must be 1..${STUDY_SESSIONS}` };
+    if (confirm.trim() !== reissuePhrase(n)) return { ok: false, error: `type "${reissuePhrase(n)}" to confirm` };
+    const why = (reason ?? "").replace(/\s+/g, " ").trim();
+    if (why.length > REISSUE_REASON_MAX) return { ok: false, error: `reason: at most ${REISSUE_REASON_MAX} characters` };
+    if (!(await this.rawSchedule())) return { ok: false, error: "no study schedule (start the study first)" };
+    const p = await this.progress();
+    if (n > p.next - 1) return { ok: false, error: `study session ${n} has not been run yet` };
+    const { manualReissueReason: _old, ...rest } = p;
+    void _old;
+    await this.saveProgress({ ...rest, manualReissue: n, ...(why ? { manualReissueReason: why } : {}) });
+    return { ok: true, index: n };
+  }
+
+  /** drop a pending manual redo */
+  async cancelReissue(): Promise<void> {
+    const { manualReissue: _drop, manualReissueReason: _r, ...p } = await this.progress();
+    void _drop; void _r;
+    await this.saveProgress(p);
   }
 
   /** sha256 of the stored schedule (safe to print: reveals nothing about the order). */

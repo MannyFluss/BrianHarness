@@ -42,8 +42,8 @@ export class HarnessHost {
       storage: HarnessStorage | null;
       backend: () => Promise<ModelBackend>;
       logRawEvents?: boolean;
-      /** a spec / tagger, or a factory called once per new session (e.g. re-read the selected provider) */
-      tagger?: TopicTagger | TopicTaggerSpec | (() => HostTaggerChoice | Promise<HostTaggerChoice>);
+      /** a spec / tagger, or a factory called once per new session (e.g. re-read the selected provider; ctx.study = a study session) */
+      tagger?: TopicTagger | TopicTaggerSpec | ((ctx: { study: boolean }) => HostTaggerChoice | Promise<HostTaggerChoice>);
       /** extractor unavailable this session (Electron: stderr). The HUD shows it in study sessions. */
       onExtractorWarning?: (message: string, info: { sessionId: string; reason: string }) => void;
       seed?: () => number;
@@ -57,11 +57,11 @@ export class HarnessHost {
     this.clock = cfg.clock ?? systemClock;
   }
 
-  private async sessionTagger(): Promise<{ tagger?: TopicTagger | TopicTaggerSpec; fallback?: "no_key" | "mock_or_local" }> {
+  private async sessionTagger(ctx: { study: boolean }): Promise<{ tagger?: TopicTagger | TopicTaggerSpec; fallback?: "no_key" | "mock_or_local" }> {
     const t = this.cfg.tagger;
     if (typeof t !== "function") return { tagger: t };
     try {
-      const c = await t();
+      const c = await t(ctx);
       if (c && typeof c === "object" && "spec" in c) return { tagger: c.spec, ...(c.fallback ? { fallback: c.fallback } : {}) };
       return { tagger: c as TopicTagger | TopicTaggerSpec | undefined };
     } catch (err) {
@@ -86,14 +86,14 @@ export class HarnessHost {
     }
     this.session = new HarnessSession({
       sessionId,
-      ...(study ? { adaptation: study.adaptation, study: { id: study.study, index: study.index, total: study.total, scheduleHash: study.scheduleHash, protocol: study.protocol, ...(study.reissueOf ? { reissueOf: study.reissueOf } : {}) } } : {}),
+      ...(study ? { adaptation: study.adaptation, study: { id: study.study, index: study.index, total: study.total, scheduleHash: study.scheduleHash, protocol: study.protocol, ...(study.reissueOf ? { reissueOf: study.reissueOf } : {}), ...(study.manualReissue ? { manualReissue: true as const } : {}), ...(study.reissueReason ? { reissueReason: study.reissueReason } : {}) } } : {}),
       userId: this.cfg.userId,
       backend: await this.cfg.backend(),
       store: this.cfg.storage,
       logRawEvents: this.cfg.logRawEvents ?? true,
       seed: this.cfg.seed ? this.cfg.seed() : this.clock() % 100000,
       ...(await (async () => {
-        const c = await this.sessionTagger();
+        const c = await this.sessionTagger({ study: !!study });
         return { tagger: c.tagger, ...(c.fallback ? { taggerFallback: c.fallback } : {}) };
       })()),
       onExtractorWarning: (message, reason) => this.cfg.onExtractorWarning?.(message, { sessionId, reason }),
@@ -128,7 +128,8 @@ export class HarnessHost {
       const ev = this.cfg.storage?.readSession(id) ?? [];
       return {
         userTurns: ev.filter((e) => e.type === "user_turn").length,
-        sessionRated: ev.some((e) => e.type === "rating" && (e as RatingRecord).scope === "session" && (e as RatingRecord).value !== null),
+        // the LAST session-scope rating decides (a later dismissal / null replaces an earlier answer)
+        sessionRated: (() => { const r = ev.filter((e) => e.type === "rating" && (e as RatingRecord).scope === "session") as RatingRecord[]; return r.length > 0 && r[r.length - 1]!.value !== null && r[r.length - 1]!.value !== undefined; })(),
       };
     } catch {
       return { userTurns: 0, sessionRated: false };

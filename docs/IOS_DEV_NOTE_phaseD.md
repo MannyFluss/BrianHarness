@@ -64,7 +64,7 @@ What to check, with Safari Web Inspector on the device, `localStorage["bh.debug"
   CapacitorHttp `fetchImpl` as the backends (POST `https://ollama.com/api/chat`, Bearer key). Mock, a LAN
   Ollama without a `:cloud` model, or OpenAI/Anthropic without an Ollama Cloud key -> keyphrase-idf (no call).
   A failed / refused call keeps keyphrase-idf labels; the session never breaks.
-- One hard cap of **50 extractor calls** shared by all sessions on the device (settings KV key
+- Non-study sessions: one hard cap of **50 extractor calls** shared on the device (study sessions use a per-session budget, see Freeze build (E)) (settings KV key
   `llm-extract/calls`). Model picker -> "interest extractor prompt: v2 / v1 (rollback)"; the line below it
   names the tagger the next session uses.
 - Each session JSONL now ends with `{type:"final", top1, top3, top3Ids, tagger, extractorPromptVersion?, model?}`
@@ -127,3 +127,24 @@ New provider row "Spider Cloud" (details in `IOS_PORTING.md` → Spider Cloud). 
 token once via model picker → Spider Cloud → key (Keychain `credentials/spider`). It needs native fetch (no CORS)
 and works only after Manny deploys the Worker; until then it fails with a clear message and the study extractor
 falls back (banner "Interest AI unavailable this session (…)"). Nothing to add natively beyond BHStream.
+
+## Freeze build (E): auto-upload, manual redo, extractor budget
+
+- **Auto-upload.** Ended study sessions and the study_start record (with `protocol`) are POSTed to
+  `<Spider Cloud URL>/v1/sessions` with the `bhd_` device token, through the same native `fetchImpl`
+  (CapacitorHttp). Practice sessions never upload. Retry rules and the "N logs waiting to upload" /
+  "M need Export logs" row: `PHASE_D_LOG_SCHEMA.md` → Auto-upload queue. The Documents session file
+  (saveToDocuments) is written first and never removed, so BHExport always has every log.
+- **Queue storage (native contract, optional).** By default the queue lives in the WebView's IndexedDB
+  (`brianharness-uploads`). To keep it in `Documents/pending-uploads/` instead, pass
+  `uploadKV` to `createInProcessTransport` in `nativeTransportOptions`: a `KeyValueStore`
+  (`get/set/remove/keys`) over Capacitor Filesystem, one UTF-8 file per key,
+  file name = `encodeURIComponent(key)` (keys: `uploads/index`, `uploads/pause`, `uploads/body/<id>`), mark
+  the folder excluded from iCloud backup if you prefer. Also pass `appVersion` (CFBundleShortVersionString)
+  and `build` (CFBundleVersion) so the Worker rows say which TestFlight build sent them.
+- **Manual redo.** Settings → "Redo a study session…": pick N (only already assigned), optional reason
+  (≤ 120 chars), type `REISSUE N`. The next study session reuses index N; `session_start` logs
+  `reissueOf:"manual"`, `manualReissue:true`, `reissueReason?`. Pending redo shows "Next study session redoes N · cancel".
+- **Validity.** A session counts as rated only if its **last** session rating has a value (a later dismissal undoes it).
+- **Extractor budget.** Study sessions: 10 logical calls per session, 1 retry each, 20 HTTP attempts max; no
+  device-wide counter. Practice sessions keep the device-wide 50-call counter (`llm-extract/calls`).

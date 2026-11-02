@@ -62,8 +62,9 @@ excluded.** Export CSV column: `study_protocol`.
 
 ## Index reissue (validity)
 
-A study session is **valid** when it has >= 8 `user_turn` records **and** a session-scope `rating` with a
-`value` (1..5; a dismissed card does not count). When the previous study session is invalid, the next session
+A study session is **valid** when it has >= 8 `user_turn` records **and** its **last** session-scope `rating`
+has a non-null `value` (1..5). A later dismissal / null rating replaces an earlier answer (same rule as the box
+analysis: the last session rating wins). When the previous study session is invalid, the next session
 gets the **same index** (so the same mode) and logs `reissueOf: <previous sessionId>` in `session_start`.
 `reissueOf` is a **top-level** `session_start` field, omitted when the session is not a reissue. A reissue never
 advances the index; the index never exceeds 10, and after 10 valid sessions the study is finished (`assign()`
@@ -71,6 +72,36 @@ returns null: later sessions are ordinary non-study sessions). Dedupe on the las
 CSV column: `reissue_of`. Reissued sessions share `bh-session-<idx>-…`, but the `<tag>` keeps their file names
 distinct even within the same second, so no file overwrites another (`exportFiles()` also suffixes `-2` as a
 last-resort guard). Native code needs no collision handling.
+
+## Manual reissue (Settings > Study > "Redo a study session…")
+
+The participant picks an already assigned index N (1..`next-1`, never above 10), may type a short reason
+(free text, trimmed, whitespace collapsed, **<= 120 chars**) and must type the exact phrase `REISSUE N`. The
+request is stored in the study progress (`manualReissue: N`, `manualReissueReason?`), shown as "Next study
+session redoes N · cancel", and consumed by the **next** study session, which gets index N (so N's mode, never
+shown) and logs, top-level in `session_start`:
+
+```ts
+{ type: "session_start", …, study: { id, index: N, total, scheduleHash, protocol }, reissueOf: "manual", manualReissue: true, reissueReason?: string }
+```
+
+It never changes the schedule or its hash, and the index sequence continues where it was (the redo is an extra
+session). Analysis: dedupe on the last valid session per index, as for automatic reissues. CSV columns
+`reissue_of` (= `manual`) and `reissue_reason`. **Worker note:** `reissueReason` is free text; it must be on the
+Worker's blinding exemption list (like `reason`), otherwise a reason that is exactly "baseline"/"adaptive" would
+be rejected as `blinding:arm_value`.
+
+## Interest extractor budget
+
+- **Study sessions:** a per-session budget of **10 logical extractor calls** (every 6th user turn: enough for 60
+  turns), counted per session. A logical call = one cache miss sent to the network; its HTTP retry does not count.
+  At most **1 retry** per logical call (5xx only), and a hard per-session ceiling of **20 HTTP attempts**. No
+  device-wide counter: practice can never use study budget.
+- **Non-study sessions:** the existing device-wide counter (50, settings key `llm-extract/calls`; desktop
+  `<userData>/llm-extract-calls.json`), each HTTP attempt reserved, up to 2 retries. Study sessions never read
+  or write it.
+- `final/session_end.extractorCalls` as before; `fallbackReason: "cap_reached"` in a study session now means the
+  per-session budget (or the HTTP ceiling) was exhausted.
 
 ## Samples
 
@@ -88,7 +119,8 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
 { type: "session_start", t: string, sessionId: string, userId: string, backend: string, // e.g. "spider-cloud:gemma4:cloud"
   sources: string[],                                       // ["typing:typing"]
   study?: { id: "phaseD", index: number /*1..10*/, total: 10, scheduleHash: string /*64 hex*/, protocol?: number /*2*/ },
-  reissueOf?: string }                                     // study only: the invalid previous session
+  reissueOf?: string,                                      // study only: the invalid previous session, or "manual"
+  manualReissue?: true, reissueReason?: string }           // manual redo only (see Manual reissue)
 
 // director_turn
 { type: "director_turn", t: string, turn: number /*0-based, = user replies so far*/, text: string, backend: string,
@@ -140,16 +172,37 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
 // study_start (one per sealed schedule, written when "Start study" runs; uploaded, not part of a session file)
 { kind: "study_start", id: string /* "phaseD-<scheduleHash[0:16]>" */, scheduleHash: string, nSessions: 10,
   appVersion: string, build: string|number|null, platform: "ios"|"desktop"|"web", createdAt: string /* schedule createdAt */,
-  protocol: number }                                       // local record; see the upload note
+  protocol: number }                                       // uploaded since Worker 2ef027e (optional int 1..100)
 ```
 
 No record carries API keys, device tokens or the Authorization header.
 
 ## Upload body (`POST /v1/sessions`)
 
-See the Worker's `docs/SESSIONS_API.md` (allowlist as of Worker f71cc53; builders: core `sessionUploadBody` /
+See the Worker's `docs/SESSIONS_API.md` (allowlist as of Worker 2ef027e; builders: core `sessionUploadBody` /
 `studyStartUploadBody`, which emit exactly the allowed keys). Session: `{kind:"session", sessionId, studyIndex?, scheduleHash?,
 appVersion, platform, build?, jsonl}` with `jsonl` = the file bytes above. study_start:
-`{kind:"study_start", id, scheduleHash, nSessions, appVersion, build, platform, createdAt}`. The Worker rejects
-unknown fields, so `protocol` is **not** in the study_start upload body until the Worker allowlists it; sessions
-carry it inside `jsonl` (`session_start.study.protocol`).
+`{kind:"study_start", id, scheduleHash, nSessions, appVersion, build, platform, createdAt, protocol?}` (`protocol`
+= the sealed STUDY_PROTOCOL_VERSION). Sessions carry the protocol inside `jsonl` (`session_start.study.protocol`).
+
+### Auto-upload queue (core `UploadQueue`)
+
+Only **study** sessions (session_start has `study`) and the `study_start` record are queued; practice sessions
+never upload. A session is queued when it ends, the study_start when "Start study" seals a schedule; the queue
+is flushed then, at launch, when a Spider Cloud device token is saved, and on its own backoff timer. It needs
+the device token (`credentials/spider`) and native fetch (the Worker sends no CORS headers). Rules:
+
+| Response | Action |
+|---|---|
+| 201, 409 `session_exists` | done (queued body deleted) |
+| 401 | stays queued; the whole queue pauses until a different token is saved |
+| 429 | stays queued; the whole queue pauses for `Retry-After` (default 60 s) |
+| any other 4xx (400, 413, 422 `upload_rejected`, …) | **needs export**: never retried, body deleted, the session file is untouched for BHExport |
+| 5xx | backoff 30 s doubling to 30 min; after 5 consecutive 5xx on a body > 500 KB: needs export |
+| network error / no token | stays queued |
+
+Client pre-check before queueing: a body with a secret pattern (`findUploadSecret`) or > 1 MiB is needs-export
+without being sent. Storage: desktop `<userData>/pending-uploads/` (one 0600 file per key: `uploads/index`,
+`uploads/pause`, `uploads/body/<id>`); web/iOS IndexedDB `brianharness-uploads` unless the native shell passes
+`uploadKV` (iOS: Documents/pending-uploads, see IOS_DEV_NOTE_phaseD.md). Settings > Study shows
+"N logs waiting to upload (reason)" and "M need Export logs"; tapping it retries now.

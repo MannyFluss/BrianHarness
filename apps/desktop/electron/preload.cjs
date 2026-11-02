@@ -35,6 +35,12 @@ contextBridge.exposeInMainWorld("eeg", {
     disable: () => ipcRenderer.invoke("study:disable"),
     hash: () => ipcRenderer.invoke("study:hash"),
     unseal: (confirm) => ipcRenderer.invoke("study:unseal", confirm),
+    reissue: (n, confirm, reason) => ipcRenderer.invoke("study:reissue", { n, confirm, reason }),
+    cancelReissue: () => ipcRenderer.invoke("study:cancelReissue"),
+  },
+  uploads: {
+    status: () => ipcRenderer.invoke("uploads:status"),
+    flush: () => ipcRenderer.invoke("uploads:flush"),
   },
   providers: {
     status: () => ipcRenderer.invoke("providers:status"),

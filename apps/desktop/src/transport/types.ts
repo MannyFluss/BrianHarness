@@ -49,7 +49,13 @@ export interface BHExportPlugin {
 /** ok:false + dismissed:true is a user cancel (no error toast); `error` is a friendly message. */
 export type ExportResult = { ok: boolean; files: number; via: "share-sheet" | "save-dialog" | "download" | "none"; detail?: string; dismissed?: boolean; error?: string; code?: string };
 /** Phase D study status as the UI may show it: never the mode or the schedule. */
-export type StudyStatusView = { enabled: boolean; next: number; total: number; scheduled: boolean; error?: string };
+export type StudyStatusView = { enabled: boolean; next: number; total: number; scheduled: boolean; error?: string; pendingReissue?: number };
+/** auto-upload queue (POST /v1/sessions): "N logs waiting to upload", plus finals that need "Export logs" */
+export type UploadStatusView = {
+  pending: number; needsExport: number; done: number;
+  blocked?: "no-token" | "auth" | "rate-limited" | "offline";
+  items: Array<{ id: string; kind: "session" | "study_start"; name?: string; state: "pending" | "needs-export" | "done"; lastStatus?: number; lastError?: string }>;
+};
 export type SessionItem = { id: string; title: string; turns: number; startedAt: string | null; active: boolean };
 export type Info = {
   backend: string; paid: boolean; provider: string; model: string | null; dataDir: string; userId: string; platform: string; appName: string;
@@ -131,6 +137,14 @@ export interface EegBridge {
     /** dev/debug only: reveals the schedule; needs the confirmation phrase "UNSEAL phaseD" */
     unseal?(confirm: string): Promise<unknown>;
     exportSchedule?(confirm: string): Promise<ExportResult>;
+    /** manual redo: the next study session reuses index n (1..10, already assigned); confirm must be "REISSUE n" */
+    reissue?(n: number, confirm: string, reason?: string): Promise<{ ok: boolean; error?: string }>;
+    cancelReissue?(): Promise<{ ok: boolean }>;
+  };
+  /** study-log auto-upload to the Spider Cloud Worker (needs the device token) */
+  uploads?: {
+    status(): Promise<UploadStatusView>;
+    flush(): Promise<UploadStatusView>;
   };
 }
 

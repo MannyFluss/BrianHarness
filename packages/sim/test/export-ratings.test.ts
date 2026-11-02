@@ -43,10 +43,13 @@ test("export-ratings: one row per user turn, ratings joined, no mode column; --s
   for (const c of ["typing.latencyToFirstKeyMs", "typing.latencyToSubmitMs", "typing.gapMedianMs", "typing.timingReliability", "turn_rating", "session_rating", "session_blindGuess"]) assert.ok(head.split(",").includes(c), c);
   const rows = parseCsv(csv.replace(/"[^"]*(""[^"]*)*"/g, "Q")); // quoted cells -> placeholder for the naive split
   assert.equal(rows.length, 4);
-  const s1 = rows.filter((r) => r.sessionId === rows[0]!.sessionId);
+  // both sessions can start in the same second, so their file (= row) order is the random tag's: identify
+  // session 1 as the one that is not a reissue
+  const first = rows.find((r) => !r.reissue_of)!.sessionId;
+  const s1 = rows.filter((r) => r.sessionId === first);
   // session 1 had 3 user turns (< 8): invalid, so session 2 re-ran index 1 and says so
-  const s2 = rows.filter((r) => r.sessionId !== rows[0]!.sessionId);
-  assert.deepEqual([s2[0]!.studyIndex, s2[0]!.reissue_of, s2[0]!.study_protocol, s1[0]!.reissue_of, s1[0]!.study_protocol], ["1", rows[0]!.sessionId, "2", "", "2"]);
+  const s2 = rows.filter((r) => r.sessionId !== first);
+  assert.deepEqual([s2[0]!.studyIndex, s2[0]!.reissue_of, s2[0]!.study_protocol, s1[0]!.reissue_of, s1[0]!.study_protocol], ["1", first, "2", "", "2"]);
   assert.deepEqual(s1.map((r) => r.turn_rating), ["", "4", ""]);
   assert.equal(s1[2]!.turn_rating_dismissed, "true");
   assert.ok(s1.every((r) => r.session_rating === "5" && r.scheduleHash === scheduleHash));

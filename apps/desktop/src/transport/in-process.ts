@@ -45,9 +45,11 @@ import {
   SPIDER_CREDENTIAL_ID,
   listSpiderCloudModels,
   normalizeSpiderUrl,
+  UploadQueue,
+  STUDY_PROTOCOL_VERSION,
 } from "@brianharness/core/browser";
 import { saveViaBHExport, shareViaBHExport } from "./bh-export";
-import type { BHExportPlugin, EegBridge, ExportResult, Info, KeyProvider, ProviderId, ProviderStatus } from "./types";
+import type { BHExportPlugin, EegBridge, ExportResult, Info, KeyProvider, ProviderId, ProviderStatus, UploadStatusView } from "./types";
 
 /** Web fallback for "Export logs": one zip download (no share sheet in a plain browser). */
 export function downloadZip(files: ExportFile[], name: string, doc: Document | undefined = typeof document !== "undefined" ? document : undefined): boolean {
@@ -110,6 +112,28 @@ export interface InProcessOptions {
   bhExport?: BHExportPlugin;
   /** web fallback for Export logs (tests); default downloadZip */
   download?: (files: ExportFile[], name: string) => boolean;
+  /**
+   * upload-queue store (state + queued bodies). iOS: a Capacitor Filesystem KV over Documents/pending-uploads
+   * (IOS_DEV_NOTE_phaseD.md); default IndexedDB "brianharness-uploads" (memory if unavailable).
+   */
+  uploadKV?: KeyValueStore;
+  /** upload body metadata (Worker items.app_version / build); default "0.1.0" / null */
+  appVersion?: string;
+  build?: string | number | null;
+  /** auto-upload timer (default true; tests pass false and call uploads.flush()) */
+  uploadAutoSchedule?: boolean;
+}
+export const APP_VERSION_DEFAULT = "0.1.0";
+/** a session file whose session_start carries the study block */
+export function isStudySessionFile(f: ExportFile): boolean {
+  for (const line of f.content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const r = JSON.parse(line) as { type?: string; study?: unknown };
+      if (r.type === "session_start") return !!r.study && typeof r.study === "object";
+    } catch { /* skip */ }
+  }
+  return false;
 }
 
 type HostTagger = ConstructorParameters<typeof HarnessHost>[0]["tagger"];
@@ -226,7 +250,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       const s = await loadSettings();
       tagger = { ...tagger, baseUrl: tagger.baseUrl ?? normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL), fetchImpl: tagger.fetchImpl ?? fetchImpl };
     }
-    if (!tagger) tagger = async () => { const c = await chooseTagger(); return { spec: c.spec, fallback: c.fallback }; };
+    if (!tagger) tagger = async (ctx) => { const c = await chooseTagger(ctx); return { spec: c.spec, fallback: c.fallback }; };
     host = new HarnessHost({
       userId,
       storage,
@@ -234,21 +258,52 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       logRawEvents: true,
       tagger,
       study,
-      // iOS: every ended session's JSONL (ratings included, mode never) lands in Files automatically
-      onSessionEnd: opts.bhExport
-        ? async (id) => {
-            const f = host?.sessionFile(id);
-            if (f) await saveViaBHExport(opts.bhExport!, [f]); // bh-session-<idx>-<start>.jsonl, ratings included
-          }
-        : undefined,
+      // iOS: every ended session's JSONL (ratings included, mode never) lands in Files automatically;
+      // a study session's file is also queued for auto-upload (practice sessions never upload)
+      onSessionEnd: async (id) => {
+        const f = host?.sessionFile(id);
+        if (!f) return;
+        if (opts.bhExport) await saveViaBHExport(opts.bhExport, [f]).catch(() => {}); // bh-session-<idx>-<start>-<tag>.jsonl
+        await enqueueStudySession(f);
+      },
     });
     return host;
   };
 
-  // llm-extract: one persisted call cap shared by every session; answers cached for the app's lifetime
+  // ---- auto-upload (POST /v1/sessions) ----
+  const uploadKV: Promise<KeyValueStore> = opts.uploadKV
+    ? Promise.resolve(opts.uploadKV)
+    : IndexedDbKV.open("brianharness-uploads").catch(() => new MemoryKV() as KeyValueStore);
+  const uploadQueue: Promise<UploadQueue> = uploadKV.then((kv) => new UploadQueue(kv, {
+    meta: { appVersion: opts.appVersion ?? APP_VERSION_DEFAULT, platform, build: opts.build ?? null },
+    fetchImpl,
+    autoSchedule: opts.uploadAutoSchedule,
+    // the Worker sends no CORS headers: uploads need the native fetch + the Spider Cloud device token
+    target: async () => {
+      if (!nativeFetch) return null;
+      const token = await readApiKey(credentials, SPIDER_CREDENTIAL_ID).catch(() => null);
+      if (!token) return null;
+      return { url: `${normalizeSpiderUrl((await loadSettings()).spiderCloudUrl)}/v1/sessions`, token };
+    },
+  }));
+  const enqueueStudySession = async (f: ExportFile) => {
+    if (!isStudySessionFile(f)) return; // study sessions only
+    const q = await uploadQueue;
+    await q.enqueueSession(f).catch((e) => console.warn(`[brianharness] upload queue: ${(e as Error).message}`));
+    void q.flush().catch(() => {});
+  };
+  const enqueueStudyStart = async (s: { scheduleHash: string; protocol: number; createdAt: string }) => {
+    const q = await uploadQueue;
+    await q.enqueueStudyStart({ scheduleHash: s.scheduleHash, nSessions: 10, createdAt: s.createdAt, protocol: s.protocol ?? STUDY_PROTOCOL_VERSION });
+    void q.flush().catch(() => {});
+  };
+  void uploadQueue.then((q) => q.flush()).catch(() => {}); // launch: retry anything left over
+
+  // llm-extract: one persisted call cap shared by every NON-study session (study sessions use a per-session
+  // budget, so practice can't use up study calls); answers cached for the app's lifetime
   const extractorCalls = kvCallCounter(settingsKV, APP_EXTRACTOR_MAX_CALLS);
   const extractorCache = new Map<string, string>();
-  const chooseTagger = async () => {
+  const chooseTagger = async (ctx: { study?: boolean } = {}) => {
     const s = await loadSettings();
     const ollamaCloudKey = CLOUD_PROVIDERS.includes(s.provider) ? await readApiKey(credentials, "ollama-cloud").catch(() => null) : null;
     return appTaggerSpec({
@@ -263,6 +318,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       ollamaCloudUrl: opts.ollamaCloudUrl,
       promptVersion: parsePromptVersion(s.extractorPromptVersion),
       counter: extractorCalls,
+      study: !!ctx.study,
       cache: { get: (k) => extractorCache.get(k), set: (k, v) => void extractorCache.set(k, v) },
       fetchImpl,
     });
@@ -417,7 +473,8 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       status: () => study.status(),
       async enable() {
         try {
-          await study.enable();
+          const s = await study.enable();
+          void enqueueStudyStart(s).catch(() => {});
           return { ok: true };
         } catch (err) {
           return { ok: false, error: (err as Error).message };
@@ -436,6 +493,15 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         const ok = (opts.download ?? downloadZip)([f], `brianharness-schedule-${stamp()}.zip`);
         return { ok, files: 1, via: ok ? "download" : "none" };
       },
+      reissue: (n: number, confirm: string, reason?: string) => study.requestReissue(n, confirm, reason),
+      async cancelReissue() {
+        await study.cancelReissue();
+        return { ok: true };
+      },
+    },
+    uploads: {
+      status: async () => (await (await uploadQueue).summary()) as UploadStatusView,
+      flush: async () => (await (await uploadQueue).flush({ force: true })) as UploadStatusView,
     },
     providers: {
       async status() {
@@ -453,6 +519,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         const k = key.trim();
         if (!k) throw new Error("empty API key");
         await credentials.modify(provider, async () => ({ type: "api_key", key: k }));
+        if (provider === SPIDER_CREDENTIAL_ID) void uploadQueue.then((q) => q.flush()).catch(() => {}); // a new token resumes a 401 pause
         return { ok: true };
       },
       async setEndpoint(provider, url) {

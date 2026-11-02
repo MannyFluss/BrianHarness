@@ -1,5 +1,6 @@
 /**
- * POST /v1/sessions request bodies (Worker docs/SESSIONS_API.md, allowlist as of Worker f71cc53). The Worker
+ * POST /v1/sessions request bodies (Worker docs/SESSIONS_API.md, allowlist as of Worker 2ef027e: study_start takes
+ * an optional integer `protocol`; session bodies don't). The Worker
  * rejects unknown fields with 400, so these builders emit exactly the allowed keys. `jsonl` is the session file
  * content unchanged (byte-identical to the BHExport / Files copy). Browser-safe.
  */
@@ -10,10 +11,10 @@ export interface SessionUploadBody {
 }
 export interface StudyStartUploadBody {
   kind: "study_start"; id: string; scheduleHash: string; nSessions: number;
-  appVersion: string; build: string | number | null; platform: string; createdAt: string;
+  appVersion: string; build: string | number | null; platform: string; createdAt: string; protocol?: number;
 }
 export const SESSION_UPLOAD_KEYS = ["kind", "sessionId", "studyIndex", "scheduleHash", "appVersion", "platform", "build", "jsonl"] as const;
-export const STUDY_START_UPLOAD_KEYS = ["kind", "id", "scheduleHash", "nSessions", "appVersion", "build", "platform", "createdAt"] as const;
+export const STUDY_START_UPLOAD_KEYS = ["kind", "id", "scheduleHash", "nSessions", "appVersion", "build", "platform", "createdAt", "protocol"] as const;
 
 /** body for one session file: sessionId / studyIndex / scheduleHash are read from its session_start line */
 export function sessionUploadBody(jsonl: string, meta: UploadMeta): SessionUploadBody {
@@ -33,8 +34,11 @@ export function sessionUploadBody(jsonl: string, meta: UploadMeta): SessionUploa
 }
 
 /** study_start: id = "phaseD-" + first 16 hex of the schedule hash (stable per sealed schedule -> idempotent 409 on retry) */
-export function studyStartUploadBody(s: { scheduleHash: string; nSessions: number; createdAt: string }, meta: UploadMeta): StudyStartUploadBody {
-  return { kind: "study_start", id: `phaseD-${s.scheduleHash.slice(0, 16)}`, scheduleHash: s.scheduleHash, nSessions: s.nSessions, appVersion: meta.appVersion, build: meta.build ?? null, platform: meta.platform, createdAt: s.createdAt };
+export function studyStartUploadBody(s: { scheduleHash: string; nSessions: number; createdAt: string; protocol?: number }, meta: UploadMeta): StudyStartUploadBody {
+  return {
+    kind: "study_start", id: `phaseD-${s.scheduleHash.slice(0, 16)}`, scheduleHash: s.scheduleHash, nSessions: s.nSessions, appVersion: meta.appVersion,
+    build: meta.build ?? null, platform: meta.platform, createdAt: s.createdAt, ...(typeof s.protocol === "number" ? { protocol: s.protocol } : {}),
+  };
 }
 
 /** secret patterns that must never be in an upload (mirrors the Worker's guard; used by tests and as a client pre-check) */

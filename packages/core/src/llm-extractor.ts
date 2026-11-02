@@ -83,6 +83,14 @@ export interface LlmExtractorOptions {
   reserveCall?: () => boolean | Promise<boolean>;
   /** never touch the network: cache hits only (offline scoring of returned outputs) */
   offline?: boolean;
+  /**
+   * per-instance (= per-session) budget of LOGICAL network calls (cache misses that go to the network). Retries
+   * of a logical call do not count. Exhausted -> the call is refused and counted as capped (cap_reached). Used by
+   * study sessions instead of reserveCall.
+   */
+  budget?: number;
+  /** per-instance hard ceiling on HTTP attempts (first tries + retries); reached -> refused (capped / failed) */
+  httpCeiling?: number;
   /** retries after an HTTP 5xx, each reserved against the call cap like a first try (default 2; 4xx never retries) */
   retries?: number;
   /** backoff before retry i, doubled per retry (ms, default 500) */
@@ -231,6 +239,8 @@ export class LlmInterestExtractor implements TopicTagger {
    * refused it, offline = cache miss in offline mode. Feeds the session's effectiveTagger / fallback record.
    */
   readonly outcome = { attempted: 0, ok: 0, failed: 0, capped: 0, offline: 0 };
+  /** logical network calls made (budget accounting; retries excluded) */
+  logicalNetwork = 0;
   readonly calls = { network: 0, cached: 0, refused: 0, failed: 0, retried: 0, http: {} as Record<string, number>, lastError: null as string | null };
   private base: TopicTagger | null;
   private user: string[] = [];
@@ -341,7 +351,22 @@ export class LlmInterestExtractor implements TopicTagger {
     }
     const f = this.o.fetchImpl ?? fetch;
     const retries = Math.max(0, this.o.retries ?? 2);
+    if (this.o.budget !== undefined) {
+      if (this.logicalNetwork >= this.o.budget) {
+        this.calls.refused++;
+        this.calls.lastError = `session extractor budget reached (${this.o.budget} calls)`;
+        this.outcome.capped++;
+        return [];
+      }
+      this.logicalNetwork++;
+    }
     for (let attempt = 0; ; attempt++) {
+      if (this.o.httpCeiling !== undefined && this.calls.network >= this.o.httpCeiling) {
+        this.calls.refused++;
+        this.calls.lastError = `session HTTP ceiling reached (${this.o.httpCeiling} attempts)`;
+        if (attempt) this.outcome.failed++; else this.outcome.capped++;
+        return [];
+      }
       // the first try and every retry are reserved against the hard cap
       if (this.o.reserveCall && !(await this.o.reserveCall())) {
         this.calls.refused++;
