@@ -26,4 +26,5 @@ export * from "./providers/ollama.js";
 export * from "./providers/transcript.js";
 export * from "./providers/spec.js";
 export * from "./providers/anthropic-fetch.js";
+export * from "./providers/response-body.js";
 export * from "./providers/browser-factory.js";

@@ -5,13 +5,15 @@
  */
 import type { GenerateRequest, GenerateResult, ModelBackend } from "../backends.js";
 import { collapseTranscript } from "./transcript.js";
+import { readChatResponse } from "./response-body.js";
+import { timeoutSignal } from "../platform/env.js";
 
 export const ANTHROPIC_DEFAULT_URL = "https://api.anthropic.com";
 
 export class AnthropicFetchBackend implements ModelBackend {
   readonly id: string;
   readonly paid = true;
-  constructor(private cfg: { apiKey: string; model: string; baseUrl?: string; maxTokens?: number; temperature?: number; fetchImpl?: typeof fetch }) {
+  constructor(private cfg: { apiKey: string; model: string; baseUrl?: string; maxTokens?: number; temperature?: number; fetchImpl?: typeof fetch; timeoutMs?: number }) {
     this.id = `anthropic:${cfg.model}`;
   }
   async generate(req: GenerateRequest): Promise<GenerateResult> {
@@ -29,15 +31,13 @@ export class AnthropicFetchBackend implements ModelBackend {
       body: JSON.stringify({
         model: this.cfg.model,
         max_tokens: this.cfg.maxTokens ?? 400,
+        stream: false, // CapacitorHttp buffers responses anyway; never rely on SSE
         system,
         messages: [{ role: "user", content: prompt }],
         ...(this.cfg.temperature !== undefined ? { temperature: this.cfg.temperature } : {}),
       }),
-      signal: req.signal,
+      signal: req.signal ?? timeoutSignal(this.cfg.timeoutMs ?? 120_000), // never hang the UI
     });
-    if (!res.ok) throw new Error(`anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const body = (await res.json()) as { content?: Array<{ type: string; text?: string }>; usage?: { input_tokens?: number; output_tokens?: number } };
-    const text = (body.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("").trim();
-    return { text, usage: { inputTokens: body.usage?.input_tokens, outputTokens: body.usage?.output_tokens } };
+    return readChatResponse(res, "anthropic");
   }
 }

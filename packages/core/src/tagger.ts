@@ -9,6 +9,7 @@
  *  - OllamaTagger: asks a local Ollama model for 1-3 specific topic labels as JSON (free, local);
  *    falls back to the lexicon on any error. Lexicon hits are always unioned in.
  */
+import { parseChatBody } from "./providers/response-body.js";
 import { TOPIC_LEXICON, TOPICS, tokenize, topicHits } from "./topics.js";
 import { normalizeOllamaBaseUrl } from "./providers/ollama.js";
 import { timeoutSignal } from "./platform/env.js";
@@ -277,8 +278,7 @@ export class OllamaTagger implements TopicTagger {
         signal: signal ?? timeoutSignal(this.cfg.timeoutMs ?? 20_000),
       });
       if (!res.ok) throw new Error(`ollama ${res.status}`);
-      const body = (await res.json()) as { message?: { content?: string } };
-      const parsed = JSON.parse(body.message?.content ?? "{}") as { topics?: Array<{ label?: string; parent?: string }> };
+      const parsed = JSON.parse(parseChatBody(await res.text()).text || "{}") as { topics?: Array<{ label?: string; parent?: string }> };
       const out = [...lex];
       for (const t of (parsed.topics ?? []).slice(0, 3)) {
         const label = (t.label ?? "").trim().toLowerCase();

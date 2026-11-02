@@ -5,8 +5,10 @@ import "./styles.css";
 import { App } from "./App";
 import { setTransport } from "./bridge";
 import { createInProcessTransport } from "./transport/in-process";
+import { nativeTransportOptions } from "./transport/native";
 
-const transport = createInProcessTransport();
+// native iOS app (Capacitor + CapacitorHttp): native fetch, Ollama Cloud on; plain PWA: unchanged
+const transport = createInProcessTransport(nativeTransportOptions(window));
 setTransport(transport);
 document.documentElement.classList.add("eeg-web");
 document.documentElement.dataset.platform = transport.platform;

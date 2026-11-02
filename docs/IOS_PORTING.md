@@ -241,3 +241,17 @@ landscape left/right, `UIRequiresFullScreen`, `NSAppTransportSecurity/NSAllowsLo
 ## Licenses
 
 pi-ai is MIT. No LearnHarness (AGPL) code was copied for this work.
+
+## Native fetch and buffered responses (CapacitorHttp)
+
+- `main.web.tsx` calls `nativeTransportOptions(window)` (`transport/native.ts`): when
+  `window.Capacitor?.isNativePlatform?.()` is true it passes `{ nativeFetch: true, fetchImpl: (i, n) => window.fetch(i, n) }`
+  (late-bound, so it always hits CapacitorHttp's patched fetch). That enables Ollama Cloud. In a plain browser/PWA
+  nothing is passed, and Ollama Cloud shows "needs the native app (no CORS)".
+- CapacitorHttp buffers the whole response and may not expose `response.body`. Every fetch backend (Ollama,
+  Ollama Cloud, OpenAI-compatible, OpenAI, Anthropic, and the Ollama tagger) sends `stream: false`, reads the
+  response only with `res.text()`, and parses it with `parseChatBody` (`providers/response-body.ts`).
+  That accepts one JSON body, NDJSON, or SSE (`data:` lines, `[DONE]`, Anthropic events) arriving as one chunk,
+  so a server that ignores stream:false still works. Nothing relies on incremental tokens.
+- OpenAI-compatible and Anthropic now default to a 120 s timeout (Ollama already had one), so a stuck native
+  request surfaces as an error instead of hanging the UI.

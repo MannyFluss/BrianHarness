@@ -3,13 +3,14 @@
  * is the default and is fully offline; real providers are opt-in and require BOTH
  * EEG_BACKEND=openai and an API key, so a stray OPENAI_API_KEY never causes spend.
  */
+import { readChatResponse } from "./providers/response-body.js";
 import type { ChatMessage, DirectorPlan } from "./types.js";
 import { OPEN_TOPIC } from "./director.js";
 import { TOPIC_LEXICON, topicLabel } from "./topics.js";
 import { makeRng, pick, type Rng } from "./rng.js";
 import { OllamaBackend } from "./providers/ollama.js";
 import { isLocalUrl } from "./providers/transcript.js";
-import { defaultEnv, type Env } from "./platform/env.js";
+import { defaultEnv, timeoutSignal, type Env } from "./platform/env.js";
 
 export interface GenerateRequest {
   messages: ChatMessage[];
@@ -84,7 +85,7 @@ export class MockBackend implements ModelBackend {
 export class OpenAICompatibleBackend implements ModelBackend {
   readonly id: string;
   readonly paid: boolean;
-  constructor(private cfg: { apiKey?: string; baseUrl: string; model: string; maxTokens?: number; temperature?: number; seed?: number; paid?: boolean; fetchImpl?: typeof fetch }) {
+  constructor(private cfg: { apiKey?: string; baseUrl: string; model: string; maxTokens?: number; temperature?: number; seed?: number; paid?: boolean; fetchImpl?: typeof fetch; timeoutMs?: number }) {
     this.id = `openai-compatible:${cfg.model}`;
     this.paid = cfg.paid ?? !isLocalUrl(cfg.baseUrl);
   }
@@ -98,14 +99,12 @@ export class OpenAICompatibleBackend implements ModelBackend {
         messages: req.messages,
         max_tokens: this.cfg.maxTokens ?? 200,
         temperature: this.cfg.temperature ?? 0.8,
+        stream: false, // CapacitorHttp buffers responses anyway; never rely on SSE
         ...(this.cfg.seed !== undefined ? { seed: this.cfg.seed } : {}),
       }),
-      signal: req.signal,
+      signal: req.signal ?? timeoutSignal(this.cfg.timeoutMs ?? 120_000), // never hang the UI
     });
-    if (!res.ok) throw new Error(`model backend ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
-    const text = body.choices?.[0]?.message?.content?.trim() ?? "";
-    return { text, usage: { inputTokens: body.usage?.prompt_tokens, outputTokens: body.usage?.completion_tokens } };
+    return readChatResponse(res, "model backend");
   }
 }
 

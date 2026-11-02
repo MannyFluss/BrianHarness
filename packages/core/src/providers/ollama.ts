@@ -12,6 +12,7 @@
  */
 import { timeoutSignal } from "../platform/env.js";
 import type { GenerateRequest, GenerateResult, ModelBackend } from "../backends.js";
+import { parseChatBody } from "./response-body.js";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const OLLAMA_CLOUD_URL = "https://ollama.com";
@@ -57,7 +58,7 @@ export async function detectOllama(baseUrl = DEFAULT_OLLAMA_URL, timeoutMs = 120
   try {
     const res = await fetchImpl(`${base}/api/tags`, { headers: authHeaders(apiKey), signal: timeoutSignal(timeoutMs) });
     if (!res.ok) return { running: false, baseUrl: base, models: [], error: res.status === 401 || res.status === 403 ? `HTTP ${res.status} (API key rejected)` : `HTTP ${res.status}` };
-    const body = (await res.json()) as { models?: Array<{ name?: string; model?: string; size?: number; details?: { family?: string; parameter_size?: string } }> };
+    const body = JSON.parse((await res.text()) || "{}") as { models?: Array<{ name?: string; model?: string; size?: number; details?: { family?: string; parameter_size?: string } }> };
     const models = (body.models ?? [])
       .map((m) => ({ name: m.name ?? m.model ?? "", sizeBytes: m.size, family: m.details?.family, parameterSize: m.details?.parameter_size, cloud: isOllamaCloudModel(m.name ?? m.model ?? "") }))
       .filter((m) => m.name)
@@ -121,11 +122,9 @@ export class OllamaBackend implements ModelBackend {
         }),
         signal: opts.signal ?? timeoutSignal(this.cfg.timeoutMs ?? 120_000),
       });
-      if (res.ok) {
-        const body = (await res.json()) as { message?: { content?: string } };
-        return (body.message?.content ?? "").trim();
-      }
-      lastErr = new Error(`ollama ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      const raw = await res.text(); // text() only: CapacitorHttp may not expose a body stream
+      if (res.ok) return parseChatBody(raw).text;
+      lastErr = new Error(`ollama ${res.status}: ${raw.slice(0, 200)}`);
       if (res.status < 500) break;
       await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
     }
