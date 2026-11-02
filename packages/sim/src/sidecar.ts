@@ -16,8 +16,27 @@ import path from "node:path";
 import {
   HarnessSession, PreparedFeatureSource, SessionStore, createBackend, detectOllama, parseBackendRef,
   synthesizeTypingFromText, type BackendSpec, type EegBlendOptions, type FeatureMap, type ProviderKind, type TypingEvent,
-  type HarnessSession as HS, type TopicTaggerSpec, type LlmExtractorOptions, type ExtractorCache,
+  type HarnessSession as HS, type TopicTaggerSpec, type LlmExtractorOptions, type ExtractorCache, type FreqTable, parseZipf10,
 } from "@brianharness/core";
+
+/**
+ * Optional external IDF frequency table for keyphrase-idf (dev/research only; never bundled): a file in the
+ * "<zipf*10>:<words>" line format, e.g. research/wordfreq/wordfreq_small_en_zipf10.txt (CC BY-SA 4.0).
+ * Selected per session by tagger option "freqFile" (also "baseOptions.freqFile" for llm-extract), or for every
+ * session by env BH_IDF_FREQ_FILE. Default (neither set): the bundled CC0 Common Voice table in core.
+ */
+const FREQ_CACHE = new Map<string, FreqTable>();
+export function loadFreqFile(file: string): FreqTable {
+  const abs = path.resolve(file);
+  let t = FREQ_CACHE.get(abs);
+  if (!t) { t = parseZipf10(fs.readFileSync(abs, "utf8"), path.basename(abs)); FREQ_CACHE.set(abs, t); }
+  return t;
+}
+function withFreqFile<T extends object>(opts: T): T {
+  const { freqFile, ...rest } = opts as T & { freqFile?: string };
+  const file = freqFile ?? process.env.BH_IDF_FREQ_FILE;
+  return (file ? { ...rest, freqTable: loadFreqFile(file) } : rest) as T;
+}
 
 /** Sidecar-only (Node) options for {"kind":"llm-extract"} on top of the core LlmExtractorOptions. */
 export interface SidecarLlmExtractOptions extends LlmExtractorOptions {
@@ -83,7 +102,7 @@ export interface StartOptions {
   /**
    * topic tagger: {"kind":"lexicon"} (default) | {"kind":"keyphrase"} | {"kind":"keyphrase-only"} (leak-free:
    * no curated hobby list) | {"kind":"keyphrase-generic"} | {"kind":"lexicon-generic"} |
-   * {"kind":"keyphrase","lexicon":"full|generic|broad|none"} | {"kind":"keyphrase-idf"} (leak-free, IDF-weighted) |
+   * {"kind":"keyphrase","lexicon":"full|generic|broad|none"} | {"kind":"keyphrase-idf"} (leak-free, IDF-weighted; optional "freqFile": external dev-only frequency table) |
    * {"kind":"llm-extract", ...SidecarLlmExtractOptions} | {"kind":"ollama","model":"...","baseUrl":"..."}
    */
   tagger?: TopicTaggerSpec | ({ kind: "llm-extract" } & SidecarLlmExtractOptions);
@@ -111,7 +130,7 @@ export class Sidecar {
       case "reply":
         return this.reply(m);
       case "hud":
-        return { hud: this.need().hud(), ledger: this.ledger(), tagger: { kind: this.need().tagger.kind, ...("calls" in this.need().tagger ? { calls: (this.need().tagger as unknown as { calls: unknown }).calls } : {}) } };
+        return { hud: this.need().hud(), ledger: this.ledger(), tagger: { kind: this.need().tagger.kind, ...("freqTable" in this.need().tagger ? { freq: (this.need().tagger as unknown as { freqTable: { name: string } }).freqTable.name } : {}), ...("calls" in this.need().tagger ? { calls: (this.need().tagger as unknown as { calls: unknown }).calls } : {}) } };
       case "final_guesses":
         return { guesses: this.need().finalGuesses(Number(m.k ?? 3)) };
       case "end": {
@@ -158,6 +177,10 @@ export class Sidecar {
     if (tagger?.kind === "llm-extract") {
       // network calls spend Ollama-cloud quota: same double opt-in as paid backends; otherwise cache-only
       tagger = llmExtractSpec(tagger as SidecarLlmExtractOptions, !!(o.allowPaid && this.globalAllowPaid));
+      const t = tagger as LlmExtractorOptions;
+      if (t.base !== "none") tagger = { ...tagger, baseOptions: withFreqFile({ ...(t.baseOptions ?? {}) }) } as TopicTaggerSpec;
+    } else if (tagger?.kind === "keyphrase-idf") {
+      tagger = withFreqFile(tagger);
     }
     const engagement: EegBlendOptions = { ...(o.engagement ?? {}), ...(o.eegWeight !== undefined ? { weight: o.eegWeight } : {}) };
     this.src = new PreparedFeatureSource("eeg");

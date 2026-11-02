@@ -5,8 +5,11 @@
  * "remember") wins and one-off but telling names ("Justinian", "Constantinople", "Basil II") are dropped.
  *
  * How (no curated hobby list, no topic lexicon; every label is the user's own words):
- *  1. IDF prior: idf(w) = max(0, 6 - zipf(w)) from a general-English frequency list (wordfreq small_en,
- *     CC BY-SA 4.0, see wordfreq/WORDFREQ_LICENSE.md). Words not in the list count as rare (zipf 2.5).
+ *  1. IDF prior: idf(w) = max(0, 6 - zipf(w)) from a general-English frequency table. Default: the bundled
+ *     CC0 list computed from Mozilla Common Voice English sentences (wordfreq/cv-en.ts, FREQ_LICENSE.md).
+ *     Another table in the same "<zipf*10>:<words>" text format can be passed (option `freqTable`), e.g.
+ *     the dev-only wordfreq small_en research list (research/wordfreq/, CC BY-SA, never bundled).
+ *     Words not in the table count as rare (zipf 2.5).
  *  2. Candidates per message: proper-noun spans (capitalised mid-sentence tokens and title-case runs,
  *     incl. "Basil II", "Hagia Sophia"), content-word bigrams ("slime molds") and content unigrams.
  *     Stopwords, common verbs, time/discourse fillers and SHOUTED words are removed.
@@ -20,20 +23,38 @@
  *     carries more evidence than a filler mention.
  */
 import type { TopicTag, TopicTagger } from "./tagger.js";
-import { WORDFREQ_EN_ZIPF10 } from "./wordfreq/wordfreq-en.js";
+import { CV_EN_ZIPF10 } from "./wordfreq/cv-en.js";
 
-let ZIPF: Map<string, number> | null = null;
-/** Zipf frequency of a lowercase word (log10 per billion words), or undefined when below the list (Zipf < 3). */
-export function zipfOf(word: string): number | undefined {
-  if (!ZIPF) {
-    ZIPF = new Map();
-    for (const line of WORDFREQ_EN_ZIPF10.split("\n")) {
-      const i = line.indexOf(":");
-      const z = Number(line.slice(0, i)) / 10;
-      for (const w of line.slice(i + 1).split(" ")) if (w) ZIPF.set(w, z);
-    }
+/** A word -> Zipf frequency table (log10 occurrences per billion words; words below Zipf 3 are absent). */
+export interface FreqTable { readonly name: string; get(word: string): number | undefined; readonly size: number }
+
+/** Parse the "<zipf*10>:<space separated lowercase words>" line format used by the bundled list and research lists. */
+export function parseZipf10(text: string, name = "custom"): FreqTable {
+  const m = new Map<string, number>();
+  for (const line of text.split("\n")) {
+    const i = line.indexOf(":");
+    if (i <= 0) continue;
+    const z = Number(line.slice(0, i)) / 10;
+    if (!Number.isFinite(z)) throw new Error(`freq table ${name}: bad line "${line.slice(0, 40)}"`);
+    for (const w of line.slice(i + 1).split(" ")) if (w && !m.has(w)) m.set(w, z);
   }
-  return ZIPF.get(word);
+  if (!m.size) throw new Error(`freq table ${name}: no entries`);
+  return { name, get: (w) => m.get(w), size: m.size };
+}
+
+let DEFAULT: FreqTable | null = null;
+/** The bundled default table (CC0, Mozilla Common Voice English; see wordfreq/FREQ_LICENSE.md). */
+export function defaultFreqTable(): FreqTable {
+  return (DEFAULT ??= parseZipf10(CV_EN_ZIPF10, "cv-en-cc0"));
+}
+
+/** table used by the helpers below; set synchronously at the entry points (idfCandidates, tagger.tag) */
+let ACTIVE: FreqTable | null = null;
+const active = () => ACTIVE ?? defaultFreqTable();
+
+/** Zipf frequency of a lowercase word, or undefined when below the table (Zipf < 3). Default table unless given. */
+export function zipfOf(word: string, table?: FreqTable): number | undefined {
+  return (table ?? active()).get(word);
 }
 
 export const IDF_CEIL = 6;
@@ -45,7 +66,11 @@ function zipfOrStem(w: string): number {
   if (w.includes("-")) { const p = w.split("-").filter(Boolean); return p.reduce((a, x) => a + (zipfOf(x) ?? zipfOf(stem(x)) ?? MISSING_ZIPF), 0) / p.length; }
   return MISSING_ZIPF;
 }
-export const idf = (w: string) => Math.max(0, IDF_CEIL - zipfOrStem(w));
+export function idf(w: string, table?: FreqTable): number {
+  if (!table) return Math.max(0, IDF_CEIL - zipfOrStem(w));
+  const prev = ACTIVE; ACTIVE = table;
+  try { return Math.max(0, IDF_CEIL - zipfOrStem(w)); } finally { ACTIVE = prev; }
+}
 
 /** naive plural folding for grouping only ("molds" ~ "mold", "hives" ~ "hive") */
 export function stem(w: string): string {
@@ -99,6 +124,8 @@ export interface KeyphraseIdfOptions {
   maxZipf?: number;
   /** cluster-link threshold: summed idf of shared vocabulary (default 3 = one rare or two medium words) */
   link?: number;
+  /** word-frequency table for the IDF prior (default: bundled CC0 Common Voice list). Build with parseZipf10(). */
+  freqTable?: FreqTable;
 }
 
 function sentences(text: string): string[] {
@@ -133,7 +160,12 @@ function isVerbalIng(w: string): boolean {
 }
 
 /** Candidate terms in one message (exported for tests / diagnostics). */
-export function idfCandidates(text: string, maxZipf = 5.3): Cand[] {
+export function idfCandidates(text: string, maxZipf = 5.3, table?: FreqTable): Cand[] {
+  const prev = ACTIVE;
+  if (table) ACTIVE = table;
+  try { return idfCandidatesActive(text, maxZipf); } finally { ACTIVE = prev; }
+}
+function idfCandidatesActive(text: string, maxZipf: number): Cand[] {
   const out = new Map<string, Cand>();
   const add = (c: Cand) => {
     const prev = out.get(c.key);
@@ -171,7 +203,7 @@ export function idfCandidates(text: string, maxZipf = 5.3): Cand[] {
       i = j - 1;
       const contentWords = words.filter((w) => !CONNECTOR.has(w) && !/^(ii|iii|iv|vi|vii|viii|ix|xi|xii)$/.test(w));
       if (!contentWords.length || contentWords.every((w) => IDF_STOPWORDS.has(w))) continue;
-      const best = Math.max(...contentWords.map(idf));
+      const best = Math.max(...contentWords.map((w) => idf(w)));
       if (best < 1) continue; // "Monday", "English": very common capitalised words are not interests
       const score = best * PN_BONUS + 0.2 * Math.min(2, words.length - 1);
       add({ key: words.join(" "), label: words.join(" "), score, pn: true });
@@ -214,18 +246,20 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
 
 export class KeyphraseIdfTagger implements TopicTagger {
   readonly kind = "keyphrase-idf";
-  private o: Required<KeyphraseIdfOptions>;
+  private o: Required<Omit<KeyphraseIdfOptions, "freqTable">>;
+  readonly freqTable: FreqTable;
   private msgCount = new Map<string, number>();
   private clusters: Cluster[] = [];
   private turn = 0;
   private masses: number[] = [];
   constructor(opts: KeyphraseIdfOptions = {}) {
     this.o = { minScore: opts.minScore ?? 1.6, minRepeats: opts.minRepeats ?? 2, maxZipf: opts.maxZipf ?? 5.3, link: opts.link ?? 3 };
+    this.freqTable = opts.freqTable ?? defaultFreqTable();
   }
 
   /** Distinctive candidates of a message given the session so far (also updates the repeat counts). */
   private distinctive(text: string): { D: Cand[]; V: Map<string, number> } {
-    const cands = idfCandidates(text, this.o.maxZipf);
+    const cands = idfCandidates(text, this.o.maxZipf, this.freqTable);
     for (const c of cands) this.msgCount.set(c.key, (this.msgCount.get(c.key) ?? 0) + 1);
     const D = cands
       .filter((c) => {
@@ -242,6 +276,12 @@ export class KeyphraseIdfTagger implements TopicTagger {
   }
 
   async tag(text: string): Promise<TopicTag[]> {
+    // fully synchronous body: the active table cannot leak into another tagger's call
+    const prev = ACTIVE; ACTIVE = this.freqTable;
+    try { return this.tagSync(text); } finally { ACTIVE = prev; }
+  }
+
+  private tagSync(text: string): TopicTag[] {
     this.turn++;
     const { D, V } = this.distinctive(text);
     if (!D.length) return [];

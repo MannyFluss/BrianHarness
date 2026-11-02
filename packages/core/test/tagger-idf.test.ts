@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  HarnessSession, MockBackend, SPECIFIC_TOPICS, createTagger, idfCandidates, IDF_STOPWORDS, zipfOf,
+  HarnessSession, MockBackend, SPECIFIC_TOPICS, createTagger, idfCandidates, IDF_STOPWORDS, zipfOf, defaultFreqTable, parseZipf10, idf,
   LlmInterestExtractor, EXTRACTOR_SYSTEM_PROMPT, buildExtractorPrompt, promptKey, requestBody, parseExtractorResponse,
   KeyphraseIdfTagger,
 } from "../src/index.ts";
@@ -51,11 +51,26 @@ test("the stopword list contains no persona passion keyword", () => {
   assert.deepEqual(hits, []);
 });
 
-test("the bundled frequency list: common words are frequent, rare names are missing / rare", () => {
+test("the bundled frequency list (CC0 Common Voice): common words are frequent, rare names are missing / rare", () => {
+  assert.equal(defaultFreqTable().name, "cv-en-cc0");
+  assert.ok(defaultFreqTable().size > 30000);
   assert.ok((zipfOf("the") ?? 0) > 7);
   assert.ok((zipfOf("house") ?? 0) > 4.5);
-  assert.ok((zipfOf("constantinople") ?? 9) < 4);
+  assert.ok((zipfOf("constantinople") ?? 9) < 4.5);
   assert.equal(zipfOf("physarum"), undefined);
+});
+
+test("freqTable option: an external zipf10 table replaces the default, per tagger, without leaking", async () => {
+  const t = parseZipf10("70:the a\n60:physarum\n", "test-table");
+  assert.equal(zipfOf("physarum", t), 6);
+  assert.equal(idf("physarum", t), 0);
+  assert.ok(idf("physarum") > 3); // default table untouched
+  assert.ok(idfCandidates("I grew physarum again", 5.3).some((c) => c.key === "physarum"));
+  assert.ok(!idfCandidates("I grew physarum again", 5.3, t).some((c) => c.key === "physarum"));
+  const custom = createTagger({ kind: "keyphrase-idf", freqTable: t });
+  await custom.tag("I grew physarum on oat flakes");
+  assert.ok(idf("physarum") > 3); // active table restored after tag()
+  assert.throws(() => parseZipf10("", "empty"));
 });
 
 test("candidates keep proper nouns and multiword names, drop fillers and common verbs", () => {

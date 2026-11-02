@@ -128,9 +128,18 @@ can enter the interest map through the questions it asks, not through tagging.
 ### `keyphrase-idf` (leak-free, IDF-weighted)
 
 No curated hobby list. Words are weighted by IDF against a bundled general-English frequency list
-(`packages/core/src/wordfreq/`, from [wordfreq](https://github.com/rspeer/wordfreq) `small_en`, **CC BY-SA 4.0**,
-see `WORDFREQ_LICENSE.md`; regenerate with `scripts/gen-wordfreq.py`): `idf = max(0, 6 - zipf)`, words missing
-from the list (zipf < 3) count as rare. It keeps proper-noun spans and multiword names ("Basil II",
+(`packages/core/src/wordfreq/cv-en.ts`, computed from the [Mozilla Common Voice](https://github.com/common-voice/common-voice)
+English sentences, **CC0 1.0**, see `FREQ_LICENSE.md` and `NOTICE.md`; regenerate with `scripts/gen-freq-cv.py`):
+`idf = max(0, 6 - zipf)`, words missing from the list (zipf < 3) count as rare.
+
+Research-only alternative table (never bundled): wordfreq `small_en` (CC BY-SA 4.0) at
+`research/wordfreq/wordfreq_small_en_zipf10.txt`. Select it per session with
+`{"kind":"keyphrase-idf","freqFile":"research/wordfreq/wordfreq_small_en_zipf10.txt"}` (for llm-extract:
+`"baseOptions":{"freqFile":...}`), or for every session with env `BH_IDF_FREQ_FILE=<path>`. Any file in the same
+`<zipf*10>:<words>` line format works. `hud.tagger.freq` names the table in use. In code (core stays fs-free):
+`createTagger({ kind: "keyphrase-idf", freqTable: parseZipf10(text, "name") })`.
+
+It keeps proper-noun spans and multiword names ("Basil II",
 "Hagia Sophia"), drops stopwords / common verbs / fillers / mood words, and down-weights -ing verbs and
 -ed/-ous/-ful/... modifiers. Each message gets at most one `kp:` tag: its distinctive terms are threaded into
 a running cluster (shared words, sub-word matches like bees/honeybees/hive/hives, continuity with the last
