@@ -14,7 +14,9 @@
     "dist:mac": "npm run build && electron-builder --config electron-builder.cjs --mac --arm64",
     "build:web": "vite build --mode web && node scripts/check-web-bundle.mjs",
     "dev:web": "vite --mode web",
-    "preview:web": "vite preview --mode web"
+    "preview:web": "vite preview --mode web --host 0.0.0.0",
+    "serve:lan": "vite preview --mode web --host 0.0.0.0 --port ${PORT:-8090} --strictPort",
+    "test:web-csp": "node scripts/csp-smoke.mjs"
   },
   "dependencies": {
     "@brianharness/core": "0.1.0"

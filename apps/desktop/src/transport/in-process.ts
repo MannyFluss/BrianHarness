@@ -25,6 +25,8 @@ import {
   type KeyValueStore,
   type ModelBackend,
   type ProviderKind,
+  type TopicTagger,
+  type TopicTaggerSpec,
 } from "@brianharness/core/browser";
 import type { EegBridge, Info, KeyProvider, ProviderId, ProviderStatus } from "./types";
 
@@ -36,6 +38,14 @@ export interface InProcessOptions {
   credentialNote?: string;
   userId?: string;
   platform?: string;
+  /**
+   * fetch used by EVERY network path: provider detection (Ollama /api/tags), all model backends
+   * (Ollama, OpenAI-compatible, OpenAI, Anthropic) and an Ollama topic tagger. iOS: pass a
+   * CapacitorHttp-backed fetch to bypass WebView CORS/CSP. Default: the page's fetch.
+   */
+  fetchImpl?: typeof fetch;
+  /** topic tagger (default: offline lexicon). An Ollama spec gets fetchImpl and the settings' Ollama URL. */
+  tagger?: TopicTagger | TopicTaggerSpec;
 }
 
 type WebSettings = { provider: ProviderKind; model?: string; ollamaUrl?: string; openaiCompatibleUrl?: string };
@@ -62,6 +72,8 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   const userId = opts.userId ?? "local-user";
   const platform = opts.platform ?? guessPlatform();
   let storageName = "IndexedDB brianharness";
+  // unbound wrapper so a passed-in window.fetch is never invoked with another `this`
+  const fetchImpl: typeof fetch = opts.fetchImpl ?? ((input, init) => fetch(input, init));
 
   const ready: Promise<{ storage: HarnessStorage }> = (async () => {
     let kv = opts.storageKV;
@@ -97,14 +109,14 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       const baseUrl = normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL);
       let model = s.model;
       if (!model) {
-        const d = await detectOllama(baseUrl, 1500);
+        const d = await detectOllama(baseUrl, 1500, fetchImpl);
         model = (d.models.find((m) => !m.cloud) ?? d.models[0])?.name;
         if (!model) throw new Error(`No Ollama models reachable at ${baseUrl}`);
       }
-      return createBrowserBackend({ provider: "ollama", baseUrl, model });
+      return createBrowserBackend({ provider: "ollama", baseUrl, model, fetchImpl });
     }
-    if (p === "openai-compatible") return createBrowserBackend({ provider: p, baseUrl: s.openaiCompatibleUrl, model: s.model, apiKey: await readApiKey(credentials, p) });
-    if (p === "openai" || p === "anthropic") return createBrowserBackend({ provider: p, model: s.model, apiKey: await readApiKey(credentials, p) });
+    if (p === "openai-compatible") return createBrowserBackend({ provider: p, baseUrl: s.openaiCompatibleUrl, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl });
+    if (p === "openai" || p === "anthropic") return createBrowserBackend({ provider: p, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl });
     return createBrowserBackend({ provider: "mock", seed: 42 });
   };
   const ensureBackend = async () => {
@@ -122,7 +134,12 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   const getHost = async () => {
     if (host) return host;
     const { storage } = await ready;
-    host = new HarnessHost({ userId, storage, backend: ensureBackend, logRawEvents: true });
+    let tagger = opts.tagger;
+    if (tagger && !("tag" in tagger) && tagger.kind === "ollama") {
+      const s = await loadSettings();
+      tagger = { ...tagger, baseUrl: tagger.baseUrl ?? normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL), fetchImpl: tagger.fetchImpl ?? fetchImpl };
+    }
+    host = new HarnessHost({ userId, storage, backend: ensureBackend, logRawEvents: true, tagger });
     return host;
   };
 
@@ -135,7 +152,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
     const s = await loadSettings();
     const ollamaUrl = normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL);
     const [ollama, oaKey, anKey, ocKey] = await Promise.all([
-      detectOllama(ollamaUrl, 1500),
+      detectOllama(ollamaUrl, 1500, fetchImpl),
       readApiKey(credentials, "openai"),
       readApiKey(credentials, "anthropic"),
       readApiKey(credentials, "openai-compatible"),

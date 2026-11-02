@@ -84,12 +84,13 @@ export class MockBackend implements ModelBackend {
 export class OpenAICompatibleBackend implements ModelBackend {
   readonly id: string;
   readonly paid: boolean;
-  constructor(private cfg: { apiKey?: string; baseUrl: string; model: string; maxTokens?: number; temperature?: number; seed?: number; paid?: boolean }) {
+  constructor(private cfg: { apiKey?: string; baseUrl: string; model: string; maxTokens?: number; temperature?: number; seed?: number; paid?: boolean; fetchImpl?: typeof fetch }) {
     this.id = `openai-compatible:${cfg.model}`;
     this.paid = cfg.paid ?? !isLocalUrl(cfg.baseUrl);
   }
   async generate(req: GenerateRequest): Promise<GenerateResult> {
-    const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    const f = this.cfg.fetchImpl ?? fetch; // called unbound: a stored window.fetch must not get cfg as `this`
+    const res = await f(`${this.cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.cfg.apiKey ? { authorization: `Bearer ${this.cfg.apiKey}` } : {}) },
       body: JSON.stringify({

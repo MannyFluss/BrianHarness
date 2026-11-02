@@ -8,6 +8,21 @@ import { fileURLToPath } from "node:url";
 const brand = JSON.parse(readFileSync(new URL("../../packages/core/src/brand.json", import.meta.url), "utf8")) as { name: string };
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
+// Web/PWA CSP connect-src. The Electron renderer keeps its tight index.html CSP (default-src 'self',
+// no network: it talks to the core over IPC only).
+export const WEB_CONNECT_SRC = ["'self'", "http://*:11434", "https://*:11434", "https://api.anthropic.com", "https://api.openai.com", "https://openrouter.ai"];
+/**
+ * Extra origins for a custom OpenAI-compatible server (LM Studio, llama.cpp, vLLM, ...), e.g.
+ *   BH_CONNECT_SRC="http://192.168.0.114:1234 https://llm.example.com" npm run build:web
+ * Space- or comma-separated scheme://host[:port] entries (host may be * or *.domain).
+ */
+export function webConnectSrc(extra = process.env.BH_CONNECT_SRC ?? "", dev = false): string {
+  const add = extra.split(/[\s,]+/).filter(Boolean);
+  for (const o of add) if (!/^(https?|wss?):\/\/(\*|(\*\.)?[a-z0-9.-]+|\[[0-9a-f:]+\])(:(\d{1,5}|\*))?\/?$/i.test(o)) throw new Error(`BH_CONNECT_SRC: not an origin: ${o}`);
+  // dev server HMR websocket (same host); not in production builds
+  return [...new Set([...WEB_CONNECT_SRC, ...add.map((o) => o.replace(/\/$/, "")), ...(dev ? ["ws:", "wss:"] : [])])].join(" ");
+}
+
 // `vite build` (default)    -> dist/      Electron renderer (src/main.tsx, IPC transport)
 // `vite build --mode web`   -> dist-web/  static browser / PWA / Capacitor webDir bundle
 //                                         (web/index.html -> src/main.web.tsx, in-process core)
@@ -19,7 +34,14 @@ export default defineConfig(({ mode }) => {
     base: "./",
     root: web ? here("./web") : here("."),
     publicDir: here("./public"),
-    plugins: [react(), tailwindcss(), { name: "brand", transformIndexHtml: (html: string) => html.replaceAll("%BRAND_NAME%", brand.name) }],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: "brand-csp",
+        transformIndexHtml: (html: string, ctx: { server?: unknown }) => html.replaceAll("%BRAND_NAME%", brand.name).replaceAll("%CONNECT_SRC%", webConnectSrc(undefined, !!ctx.server)),
+      },
+    ],
     build: web
       ? { outDir: here("./dist-web"), emptyOutDir: true, target: ["safari15", "es2022"] }
       : { outDir: here("./dist"), emptyOutDir: true },

@@ -16,6 +16,8 @@ npm run build:web          # builds packages/core, then vite --mode web + bundle
 # output (Capacitor webDir): apps/desktop/dist-web/   (index.html at its root, relative ./assets paths)
 npm run dev:web            # dev server on 0.0.0.0:5174 (LAN-reachable)
 npm run preview:web -w @brianharness/desktop   # serve the built dist-web on 0.0.0.0:4174
+npm run serve:lan          # build:web, then serve dist-web on 0.0.0.0:8090 (PORT=xxxx to override)
+PLAYWRIGHT_CORE=/path/to/playwright-core npm run test:web-csp   # in-browser CSP smoke test (optional)
 ```
 
 Capacitor: `webDir: "apps/desktop/dist-web"` (or a path relative to wherever `capacitor.config.ts` lives).
@@ -23,8 +25,8 @@ The bundle is fully static: no SSR, no server routes, no Node at runtime. `scrip
 fails the build on `node:` imports, Node built-in requires, `crypto.subtle`/`randomUUID(`, Electron
 APIs, root-absolute asset paths, or a missing manifest/apple-touch-icon.
 
-LAN PWA test: `npm run build:web && npm run preview:web -w @brianharness/desktop`, open
-`http://<mac-lan-ip>:4174/` in Safari, Share -> Add to Home Screen.
+LAN PWA test: on the Mac run `npm run serve:lan`, then on the phone/iPad open
+**`http://192.168.0.114:8090/`** in Safari, Share -> Add to Home Screen.
 
 ## Repo layout / what's shared
 
@@ -78,6 +80,13 @@ interface EegBridge {
 Implementations: Electron IPC (`electron/preload.cjs` -> `main.mjs` -> `HarnessHost`) and
 `createInProcessTransport({ storageKV?, settingsKV?, credentials?, credentialNote?, userId?, platform? })`.
 IOS Dev's Capacitor build passes its own adapters there (see below); nothing else changes.
+
+`fetchImpl?: typeof fetch` is used by every network path: Ollama detection (`/api/tags`), the Ollama,
+OpenAI-compatible, OpenAI and Anthropic backends, and an Ollama topic tagger
+(`tagger: { kind: "ollama", model }`, which gets fetchImpl and the settings' Ollama URL). It is always
+called unbound, so passing `window.fetch` or a CapacitorHttp wrapper is safe.
+`apps/desktop/test/in-process-fetch.test.ts` replaces global fetch with a thrower and checks that every
+path above goes through fetchImpl.
 
 ## Storage interfaces
 
@@ -156,7 +165,22 @@ pi-ai is **not** bundled for web/iOS; the browser path uses the small fetch back
 - **CORS**: the Capacitor origin is `capacitor://localhost`; the LAN PWA origin is `http://<mac-ip>:4174`.
   Both must be in `OLLAMA_ORIGINS`. OpenAI and Anthropic APIs allow browser CORS (Anthropic with the header above).
   Alternative: CapacitorHttp (native HTTP, no CORS), which can be added later behind `fetchImpl`.
-- **CSP** (web/index.html): `connect-src 'self' http: https:` for the user-set endpoints.
+- **CSP**. The Electron renderer (`apps/desktop/index.html`) stays at `default-src 'self'` with no network,
+  because it only talks over IPC. The web/PWA build (`web/index.html`, filled in by `vite.config.ts`) has:
+  `connect-src 'self' http://*:11434 https://*:11434 https://api.anthropic.com https://api.openai.com https://openrouter.ai`.
+  This covers Ollama on any LAN host at :11434 and the hosted APIs.
+  - A **custom OpenAI-compatible server** (LM Studio :1234, llama.cpp, vLLM, a non-11434 Ollama) must be
+    added at build time:
+    `BH_CONNECT_SRC="http://192.168.0.114:1234 https://llm.example.com" npm run build:web`
+    (space or comma separated; each entry is validated as `scheme://host[:port]`). Without it, the fetch is
+    CSP-blocked and the provider shows as unreachable.
+  - `check-web-bundle.mjs` fails the build if connect-src is missing, any default origin is missing, any
+    BH_CONNECT_SRC origin is missing, or dev-only `ws:` leaks in.
+  - `scripts/csp-smoke.mjs` (`npm run test:web-csp`) loads dist-web in headless Chromium and checks three
+    things: a LAN Ollama chat is not CSP-blocked, OpenAI/Anthropic/OpenRouter fetches are not blocked, and
+    `:1234` IS blocked. Every host is answered by request interception, so it makes no real network calls.
+  - On iOS, CapacitorHttp (passed as `fetchImpl`) makes native requests, so neither the WebView CSP nor CORS
+    applies to them. Keep the CSP anyway for the PWA.
 - **Secure context**: the LAN PWA is plain http, so `crypto.subtle`, `crypto.randomUUID`, service workers and
   clipboard APIs are unavailable. The core uses `randomId()` (`getRandomValues` -> `Math.random` fallback)
   and `timeoutSignal()` (AbortSignal.timeout fallback); the bundle check enforces this. No service worker is

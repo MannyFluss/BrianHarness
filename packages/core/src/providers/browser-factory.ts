@@ -5,6 +5,7 @@
  *   openai-compatible  any /v1/chat/completions server (LM Studio, llama.cpp, OpenRouter, ...)
  *   openai             api.openai.com with the user's API key (CORS-enabled)
  *   anthropic          api.anthropic.com with the user's API key + direct-browser-access header
+ * Every network path takes `spec.fetchImpl` (iOS: CapacitorHttp-backed fetch); default is global fetch.
  * Not here (need native code): ChatGPT / Claude subscription sign-in (OAuth local callback
  * servers in pi-ai) and Claude Code (spawns a CLI). See docs/IOS_PORTING.md.
  */
@@ -24,10 +25,10 @@ export function createBrowserBackend(spec: BackendSpec & { fetchImpl?: typeof fe
       return new OllamaBackend({ model: spec.model ?? "llama3.2", baseUrl: spec.baseUrl ?? DEFAULT_OLLAMA_URL, temperature: spec.temperature, seed: spec.seed, fetchImpl: spec.fetchImpl });
     case "openai-compatible":
       if (!spec.baseUrl) throw new Error("set the server URL first (e.g. http://192.168.1.20:1234/v1)");
-      return new OpenAICompatibleBackend({ baseUrl: spec.baseUrl, apiKey: spec.apiKey, model: spec.model ?? "local-model", temperature: spec.temperature, seed: spec.seed, maxTokens: spec.maxTokens });
+      return new OpenAICompatibleBackend({ baseUrl: spec.baseUrl, apiKey: spec.apiKey, model: spec.model ?? "local-model", temperature: spec.temperature, seed: spec.seed, maxTokens: spec.maxTokens, fetchImpl: spec.fetchImpl });
     case "openai":
       if (!spec.apiKey) throw new Error("add an OpenAI API key first (ChatGPT sign-in needs the native app)");
-      return new OpenAICompatibleBackend({ baseUrl: spec.baseUrl ?? "https://api.openai.com/v1", apiKey: spec.apiKey, model: spec.model ?? BROWSER_DEFAULT_MODELS.openai!, temperature: spec.temperature, maxTokens: spec.maxTokens, paid: true });
+      return new OpenAICompatibleBackend({ baseUrl: spec.baseUrl ?? "https://api.openai.com/v1", apiKey: spec.apiKey, model: spec.model ?? BROWSER_DEFAULT_MODELS.openai!, temperature: spec.temperature, maxTokens: spec.maxTokens, paid: true, fetchImpl: spec.fetchImpl });
     case "anthropic":
       if (!spec.apiKey) throw new Error("add an Anthropic API key first (Claude sign-in needs the native app)");
       return new AnthropicFetchBackend({ apiKey: spec.apiKey, model: spec.model ?? BROWSER_DEFAULT_MODELS.anthropic!, baseUrl: spec.baseUrl, temperature: spec.temperature, maxTokens: spec.maxTokens, fetchImpl: spec.fetchImpl });

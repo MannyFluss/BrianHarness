@@ -19,7 +19,9 @@
     "postinstall": "node node_modules/electron/install.js",
     "screenshot": "npm run build && rm -rf /tmp/bh-shot && EEG_USER_DATA=/tmp/bh-shot EEG_SCREENSHOT=$PWD/docs/screenshot.png xvfb-run -a -s '-screen 0 1920x1080x24' electron apps/desktop --no-sandbox --disable-gpu",
     "build:web": "npm run build -w @brianharness/core && npm run build:web -w @brianharness/desktop",
-    "dev:web": "npm run build -w @brianharness/core && npm run dev:web -w @brianharness/desktop"
+    "dev:web": "npm run build -w @brianharness/core && npm run dev:web -w @brianharness/desktop",
+    "serve:lan": "npm run build:web && npm run serve:lan -w @brianharness/desktop",
+    "test:web-csp": "npm run build:web && npm run test:web-csp -w @brianharness/desktop"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
