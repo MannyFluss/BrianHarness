@@ -3,7 +3,7 @@
 //   get({ key }) -> { value: string | null }   set({ key, value })   remove({ key })   keys() -> { keys }
 // keychainKV adapts it to core's KeyValueStore, so KVCredentialStore (same JSON records and
 // "credentials/<provider>" keys as the web build) works unchanged on top.
-import { KVCredentialStore, type CredentialStoreLike, type KeyValueStore, type StoredCredential } from "@brianharness/core/browser";
+import { KVCredentialStore, MemoryKV, type CredentialStoreLike, type KeyValueStore, type StoredCredential } from "@brianharness/core/browser";
 
 export interface BHKeychainPlugin {
   get(o: { key: string }): Promise<{ value: string | null | undefined }>;
@@ -13,6 +13,28 @@ export interface BHKeychainPlugin {
 }
 
 export const KEYCHAIN_PREFIX = "credentials/";
+
+/** OSStatus from a BHKeychain rejection (Capacitor `code`, `data.status`, or a number in the message). */
+export function keychainStatus(err: unknown): number | undefined {
+  const e = err as { code?: unknown; status?: unknown; data?: { status?: unknown; code?: unknown }; message?: unknown };
+  for (const c of [e?.data?.status, e?.status, e?.data?.code, e?.code]) {
+    const n = typeof c === "number" ? c : typeof c === "string" && /^-?\d+$/.test(c.trim()) ? Number(c) : NaN;
+    if (Number.isFinite(n) && n !== 0) return n;
+  }
+  const m = /(-\d{4,5})\b/.exec(String(e?.message ?? err ?? ""));
+  return m ? Number(m[1]) : undefined;
+}
+/** -34018 errSecMissingEntitlement: unsigned simulator / missing keychain-access-groups entitlement */
+export const isMissingEntitlement = (err: unknown) => keychainStatus(err) === -34018 || /errSecMissingEntitlement|missing entitlement/i.test(String((err as Error)?.message ?? err));
+
+export const KEYCHAIN_UNAVAILABLE_NOTE =
+  "iOS Keychain unavailable on this build (OSStatus -34018 errSecMissingEntitlement, e.g. an unsigned simulator build). Keys you add are kept in memory for this launch only; keys saved earlier on this device still work.";
+
+export function keychainErrorMessage(op: string, err: unknown): string {
+  const st = keychainStatus(err);
+  if (isMissingEntitlement(err)) return `iOS Keychain ${op} failed: OSStatus -34018 errSecMissingEntitlement (this build has no keychain entitlement, e.g. an unsigned simulator build)`;
+  return `iOS Keychain ${op} failed${st !== undefined ? ` (OSStatus ${st})` : ""}: ${String((err as Error)?.message ?? err)}`;
+}
 
 export function keychainKV(plugin: BHKeychainPlugin): KeyValueStore {
   return {
@@ -60,7 +82,7 @@ export async function migrateCredentials(from: CredentialStoreLike, to: Credenti
       }
       await from.delete(providerId);
     } catch (err) {
-      report.failed.push({ providerId, error: (err as Error).message ?? String(err) });
+      report.failed.push({ providerId, error: keychainErrorMessage("write", err) });
     }
   }
   return report;
@@ -71,39 +93,103 @@ export async function migrateCredentials(from: CredentialStoreLike, to: Credenti
  * launch; every method waits for it). `legacy` is the old web store (localStorage
  * "brianharness/credentials/..."). If a provider failed to migrate, reads fall back to its
  * legacy copy so a Keychain hiccup never makes a saved key vanish.
+ *
+ * Degraded mode: when the Keychain answers -34018 (errSecMissingEntitlement, unsigned simulator
+ * builds) the store never throws on reads: it serves the legacy copies (never cleared, since
+ * migration failed) plus keys added this launch, which are kept IN MEMORY only (not written to
+ * localStorage). `unavailable` / `note()` explain why. Other Keychain errors on reads are logged
+ * and fall back the same way for that call; a failed save throws a clear message.
  */
-export function createKeychainCredentials(plugin: BHKeychainPlugin, legacy?: CredentialStoreLike, onReport?: (r: MigrationReport) => void): CredentialStoreLike & { migration: Promise<MigrationReport> } {
+export function createKeychainCredentials(
+  plugin: BHKeychainPlugin,
+  legacy?: CredentialStoreLike,
+  onReport?: (r: MigrationReport) => void,
+): CredentialStoreLike & { migration: Promise<MigrationReport>; readonly unavailable: string | null; note(): string } {
   const kc = new KVCredentialStore(keychainKV(plugin), KEYCHAIN_PREFIX);
+  const memory = new KVCredentialStore(new MemoryKV(), KEYCHAIN_PREFIX); // degraded-mode writes, this launch only
   const empty: MigrationReport = { migrated: [], alreadyInKeychain: [], failed: [] };
+  let unavailable: string | null = null;
+  let warned = false;
+  const degrade = (op: string, err: unknown) => {
+    const msg = keychainErrorMessage(op, err);
+    if (isMissingEntitlement(err)) unavailable = KEYCHAIN_UNAVAILABLE_NOTE;
+    if (!warned || !isMissingEntitlement(err)) console.warn(`[brianharness] ${msg}`);
+    warned = true;
+    return msg;
+  };
   const migration = legacy
     ? migrateCredentials(legacy, kc).then(
-        (r) => (onReport?.(r), r),
+        (r) => {
+          const missing = r.failed.find((f) => /-34018|errSecMissingEntitlement|missing entitlement/i.test(f.error));
+          if (missing) degrade("migration", new Error(missing.error));
+          onReport?.(r);
+          return r;
+        },
         () => empty,
       )
     : Promise.resolve(empty);
   const failed = async () => new Set((await migration).failed.map((f) => f.providerId));
+  const fallbackRead = async (id: string) => (await memory.read(id)) ?? (legacy ? await legacy.read(id).catch(() => undefined) : undefined);
   return {
     migration,
+    get unavailable() {
+      return unavailable;
+    },
+    note: () => unavailable ?? "Stored in the iOS Keychain on this device (BHKeychain).",
     async read(id) {
       await migration;
-      const v = await kc.read(id);
+      if (unavailable) return fallbackRead(id);
+      let v: StoredCredential | undefined;
+      try {
+        v = await kc.read(id);
+      } catch (err) {
+        degrade("read", err);
+        return fallbackRead(id);
+      }
       if (v || !legacy || !(await failed()).has(id)) return v;
       return legacy.read(id);
     },
     async list() {
       await migration;
-      const out = [...(await kc.list())];
-      if (legacy && (await failed()).size) for (const c of await legacy.list()) if (!out.some((o) => o.providerId === c.providerId)) out.push(c);
+      const out: Array<{ providerId: string; type: string }> = [];
+      const add = (xs: ReadonlyArray<{ providerId: string; type: string }>) => {
+        for (const c of xs) if (!out.some((o) => o.providerId === c.providerId)) out.push(c);
+      };
+      if (!unavailable) {
+        try {
+          add(await kc.list());
+        } catch (err) {
+          degrade("list", err);
+        }
+      }
+      add(await memory.list());
+      if (legacy && (unavailable || (await failed()).size)) add(await legacy.list().catch(() => []));
       return out;
     },
     async modify(id, fn) {
       await migration;
-      return kc.modify(id, fn);
+      if (unavailable) return memory.modify(id, async (cur) => fn(cur ?? (await fallbackRead(id))));
+      try {
+        return await kc.modify(id, fn);
+      } catch (err) {
+        const msg = degrade("save", err);
+        if (unavailable) return memory.modify(id, async (cur) => fn(cur ?? (await fallbackRead(id))));
+        throw new Error(msg);
+      }
     },
     async delete(id) {
       await migration;
-      await kc.delete(id);
-      if (legacy && (await failed()).has(id)) await legacy.delete(id).catch(() => undefined);
+      await memory.delete(id);
+      if (!unavailable) {
+        try {
+          await kc.delete(id);
+        } catch (err) {
+          const msg = degrade("delete", err);
+          if (!unavailable) throw new Error(msg);
+        }
+      }
+      // logout must remove a key that is still only in localStorage (failed migration / degraded)
+      if (legacy && (unavailable || (await failed()).has(id))) await legacy.delete(id).catch(() => undefined);
     },
   };
 }

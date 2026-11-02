@@ -12,7 +12,7 @@ import { capacitorPlugin, createNativeStreamFetch, type BHStreamPlugin } from ".
 import { createKeychainCredentials, type BHKeychainPlugin, type MigrationReport } from "./keychain";
 
 export { createNativeStreamFetch, type BHStreamPlugin, type BHStreamEvent } from "./native-stream";
-export { createKeychainCredentials, migrateCredentials, keychainKV, type BHKeychainPlugin } from "./keychain";
+export { createKeychainCredentials, migrateCredentials, keychainKV, keychainStatus, isMissingEntitlement, KEYCHAIN_UNAVAILABLE_NOTE, type BHKeychainPlugin } from "./keychain";
 
 type CapWindow = { Capacitor?: { isNativePlatform?: () => boolean }; fetch: typeof fetch };
 
@@ -76,7 +76,8 @@ export function nativeTransportOptions(
       if (r.failed.length) console.warn("[brianharness] keychain migration kept local copies for:", r.failed.map((f) => `${f.providerId} (${f.error})`).join(", "));
       hooks.onMigration?.(r);
     });
-    out.credentialNote = KEYCHAIN_NOTE;
+    const store = out.credentials as ReturnType<typeof createKeychainCredentials>;
+    out.credentialNote = () => store.note(); // switches to the -34018 explanation if the Keychain is unavailable
   }
   return out;
 }

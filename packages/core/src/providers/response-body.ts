@@ -86,6 +86,18 @@ export async function readChatResponse(res: Response, label: string): Promise<Ch
 
 export type TokenCallback = (delta: string) => void;
 
+/** raw is ONE JSON object spanning more than one line (single-line NDJSON/JSON parse fine as lines). */
+function isWholeJsonObject(raw: string): boolean {
+  const s = raw.replace(/^\uFEFF/, "").trim();
+  if (!s.startsWith("{") || !s.includes("\n")) return false;
+  try {
+    const v = JSON.parse(s);
+    return !!v && typeof v === "object" && !Array.isArray(v);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Incremental parser for a streamed chat body. push() takes decoded TEXT (any split, even
  * mid-line); every complete NDJSON line / SSE `data:` line is parsed and its new text delta is
@@ -98,8 +110,10 @@ export function createChatStreamParser(onDelta: TokenCallback, contentType = "")
   let raw = "";
   let parsedAny = false;
   const wholeJson = /application\/json/i.test(contentType) && !/ndjson|event-stream/i.test(contentType);
+  let emitted = false;
   const emit = (d: string) => {
     if (!d) return;
+    emitted = true;
     try {
       onDelta(d);
     } catch {
@@ -138,6 +152,14 @@ export function createChatStreamParser(onDelta: TokenCallback, contentType = "")
     finish(): ChatBody {
       if (!wholeJson && buf) handle(buf);
       buf = "";
+      // A whole JSON document (server ignored stream:true; URLSession delivered a small body in one
+      // chunk, possibly pretty-printed or labelled text/plain) is authoritative: line parsing may
+      // have matched an inner object like {"type":"text","text":".."} and missed the reply.
+      if (!wholeJson && parsedAny && isWholeJsonObject(raw)) {
+        const b = parseChatBody(raw);
+        if (!emitted) emit(b.text);
+        return b;
+      }
       if (!parsedAny) {
         const b = parseChatBody(raw);
         emit(b.text);

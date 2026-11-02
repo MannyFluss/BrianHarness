@@ -319,6 +319,12 @@ addListener("bhstream", ev):  per id, in order
   each URLSession chunk on its own, a multibyte character split across chunks turns into U+FFFD before JS sees it
   and cannot be repaired. Either send `b64`, or carry incomplete trailing UTF-8 bytes into the next chunk before
   decoding. (JS also holds a trailing lone high surrogate in `data` until the next chunk.)
+- Headers: Swift sends lowercased names; JS reads them only through `Headers` (case-insensitive). Values are
+  coerced to strings (arrays joined with ", "); names/values `Headers` rejects (e.g. HTTP/2 `:status`, control
+  characters) are skipped instead of failing the fetch.
+- Chunking: any split works, including byte-by-byte base64 SSE, many events per chunk, the whole response in one
+  chunk, and base64 with line breaks. A small JSON body that URLSession coalesces into one chunk (even labelled
+  `text/plain` or pretty-printed) is parsed as one JSON document.
 - Feature detection via `window.Capacitor` (no `@capacitor/core` import): `isPluginAvailable("BHStream")`, else
   `Capacitor.Plugins.BHStream`. Missing -> the buffered CapacitorHttp path. A plugin that rejects `start()` with
   `UNIMPLEMENTED` makes that and later requests fall back to the buffered fetch.
@@ -333,3 +339,10 @@ get({ key }) -> { value: string | null }   set({ key, value })   remove({ key })
   the old localStorage store (`brianharness/credentials/*`), write it to the Keychain, read it back, and only then
   delete the local copy. A failed write keeps the local copy (reads fall back to it; the next launch retries).
   If the Keychain already has that provider, the Keychain value wins and the local copy is dropped. Idempotent.
+- **-34018 (errSecMissingEntitlement, unsigned simulator builds):** detected from the rejection's `code`,
+  `data.status` or a `-34018` in the message. The store then degrades instead of throwing: existing
+  localStorage keys stay (never cleared) and keep working, keys added this launch live **in memory only** (not
+  written to localStorage), logout removes both, and the key dialog says "iOS Keychain unavailable on this build
+  (OSStatus -34018 ...)". Logged once. Other Keychain errors: reads fall back the same way for that call; a failed
+  save throws "iOS Keychain save failed (OSStatus N): ...". Please reject with `code` = the OSStatus as a string
+  (or `data.status`) so JS can tell them apart.

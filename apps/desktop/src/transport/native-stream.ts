@@ -59,6 +59,26 @@ function b64Bytes(b64: string): Uint8Array {
 const NULL_BODY = new Set([101, 103, 204, 205, 304]);
 const abortError = (signal?: AbortSignal) => (signal?.reason instanceof Error ? signal.reason : new DOMException("The operation was aborted.", "AbortError"));
 
+/**
+ * Response headers from Swift (names arrive lowercased; lookups go through Headers, which is
+ * case-insensitive anyway). Never throws: values are coerced to strings (arrays joined), and
+ * entries a Headers object rejects (HTTP/2 ":status", control characters) are skipped, so one odd
+ * header can't stop the Response from resolving.
+ */
+export function responseHeaders(raw: unknown): Headers {
+  const out = new Headers();
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (v === undefined || v === null) continue;
+    try {
+      out.append(String(k).toLowerCase(), Array.isArray(v) ? v.map(String).join(", ") : String(v));
+    } catch {
+      /* invalid name/value: skip */
+    }
+  }
+  return out;
+}
+
 function headerRecord(h: HeadersInit | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!h) return out;
@@ -150,7 +170,7 @@ export function createNativeStreamFetch(plugin: BHStreamPlugin): typeof fetch {
             if (settled) return;
             settled = true;
             const status = Number(ev.status) || 200;
-            const init: ResponseInit = { status: status >= 200 && status <= 599 ? status : 502, headers: ev.headers ?? {} };
+            const init: ResponseInit = { status: status >= 200 && status <= 599 ? status : 502, headers: responseHeaders(ev.headers) };
             resolve(new Response(NULL_BODY.has(status) ? null : stream, init));
             return;
           }
@@ -171,10 +191,17 @@ export function createNativeStreamFetch(plugin: BHStreamPlugin): typeof fetch {
             return fail(new TypeError(`BHStream: ${ev.message ?? "network error"}`));
         }
       };
+      const safeProcess = (ev: BHStreamEvent) => {
+        try {
+          process(ev);
+        } catch (err) {
+          fail(err instanceof Error ? err : new TypeError(String(err))); // never leave the fetch hanging
+        }
+      };
       const onEvent = (ev: BHStreamEvent) => {
         if (!ev || typeof ev !== "object") return;
         if (id === null) early.push(ev);
-        else if (ev.id === id) process(ev);
+        else if (String(ev.id) === id) safeProcess(ev);
       };
 
       signal?.addEventListener("abort", onAbort);
@@ -191,7 +218,7 @@ export function createNativeStreamFetch(plugin: BHStreamPlugin): typeof fetch {
           return;
         }
         const replay = early.splice(0);
-        for (const ev of replay) if (ev.id === id) process(ev);
+        for (const ev of replay) if (String(ev.id) === id) safeProcess(ev);
       })().catch((err) => fail(err instanceof Error ? err : new TypeError(String(err))));
     });
   };

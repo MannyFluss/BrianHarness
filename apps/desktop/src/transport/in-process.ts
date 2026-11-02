@@ -40,7 +40,8 @@ export interface InProcessOptions {
   storageKV?: KeyValueStore;
   settingsKV?: KeyValueStore;
   credentials?: CredentialStoreLike;
-  credentialNote?: string;
+  /** shown in the key dialog; a function is re-read each time (e.g. Keychain became unavailable) */
+  credentialNote?: string | (() => string);
   userId?: string;
   platform?: string;
   /**
@@ -254,7 +255,10 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   const t: EegBridge = {
     kind: "in-process",
     platform,
-    credentialNote: opts.credentialNote ?? "Stored in this browser's localStorage, unencrypted. Web test build only: use a throwaway key. The iOS app keeps keys in the Keychain.",
+    get credentialNote() {
+      const n = opts.credentialNote;
+      return (typeof n === "function" ? n() : n) ?? "Stored in this browser's localStorage, unencrypted. Web test build only: use a throwaway key. The iOS app keeps keys in the Keychain.";
+    },
     async newSession(onToken) {
       return (await getHost()).newSession({ onToken });
     },
