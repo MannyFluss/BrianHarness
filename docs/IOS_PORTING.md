@@ -220,7 +220,7 @@ per edit: kind, resulting length, time, and `source` + `chars` when known. Never
 - Core features: existing `typing.*` unchanged (desktop/sim parity). New, additive, only when sources are
   present: `typing.src.soft`, `.hardware`, `.autocorrect`, `.predictive`, `.dictation`, `.composition`,
   `.timedShare` (share of inserted chars with real per-key timing; shown in the HUD as "key-timed").
-  The engagement estimator does not read them yet. Consider down-weighting chars/sec when timedShare is low.
+  Since Phase D the estimator down-weights them: see "Keystroke audit" below.
 
 ## Shell options (tradeoffs)
 
@@ -346,3 +346,74 @@ get({ key }) -> { value: string | null }   set({ key, value })   remove({ key })
   (OSStatus -34018 ...)". Logged once. Other Keychain errors: reads fall back the same way for that call; a failed
   save throws "iOS Keychain save failed (OSStatus N): ...". Please reject with `code` = the OSStatus as a string
   (or `data.status`) so JS can tell them apart.
+
+## Phase D: absorption ratings, keystroke audit, blinded study, export
+
+Protocol: the Researcher's `eeg-harness-sim/phaseD/PREREG_dogfood.md` (governs). Device checklist and
+plugin contracts for IOS Dev: [IOS_DEV_NOTE_phaseD.md](IOS_DEV_NOTE_phaseD.md).
+
+### Ratings (ground truth, evaluation only)
+
+- **Turn probe** "How absorbed are you right now?" 1-5, inline under the Director's message
+  (`components/Rating.tsx`). Schedule (`src/rating.ts`): seeded per session id (mulberry32), p = 1/3 per
+  eligible turn with a minimum gap of 3 turns (long-run rate 1/5), never on reply 1. Typing, sending or
+  New chat dismisses it; a dismissed probe is still logged (`value:null, dismissed:true, reason`).
+- **Session card** "Overall, how absorbed were you?" 1-5 + optional "What hooked you?" + in study
+  sessions the blinding check (adaptive / baseline / no idea). Shown on New chat (logged first, then the
+  new session starts) and when the app returns after 20+ minutes hidden; closing the app while it is open
+  logs it with `reason:"closed"` (a tapped value is kept: one tap logs it).
+- Record: `{type:"rating", t, scope:"turn"|"session", turn, value:1..5|null, shownAt, answeredAt|null,
+  dismissed, reason?, hooked?, blindGuess?}`. `turn` = 1-based reply number (= `user_turn.turn + 1`).
+  `HarnessSession.logRating` only appends to the log: engagement, the Director and the interest map never
+  read ratings (tested).
+- Screenshots: `screenshot-rating-{probe,session}-{desktop,iphone}.png` (`apps/desktop/scripts/rating-shots.mjs`).
+
+### Keystroke audit
+
+`summarizeTyping` and the composer telemetry log edit classes, lengths, times and sources only (events are
+whitelisted by `sanitizeTypingEvent`: `{t, kind, len, source, chars}`; no text, no key identities).
+New per-turn features (window starts at the Director message's completeAt):
+
+| feature | meaning |
+|---|---|
+| `typing.latencyToFirstKeyMs` | completeAt -> first edit |
+| `typing.latencyToSubmitMs` | completeAt -> send |
+| `typing.gapCount/gapMeanMs/gapMedianMs/gapP90Ms` | inter-key gaps between keyed inserts; raw list in `user_turn.keyGaps` |
+| `typing.dictated`, `typing.pasted` | 0/1 flags |
+| `typing.autocorrections`, `typing.predictive` | counts |
+| `typing.timingReliability` (r) | share of inserted chars that were keyed (1 = all keyed) |
+
+Down-weighting: fluency and hesitation weights are multiplied by r and the score renormalised; latency and
+text features keep full weight. r = 1 (or absent: sim, desktop hardware keys) runs the exact old code path,
+so sim/replay results are bit-identical. Composition rewrites (`deleteCompositionText`, IME) are not counted
+as deletions. Dictation: `insertFromDictation` if WebKit sends it, else an unkeyed multi-word insertText
+(heuristic, to be confirmed on device). HUD "This turn" shows latency to first key / submit, key gap
+median, timing reliability and the flags.
+
+### Blinded study (5 adaptive + 5 baseline)
+
+- `StudyController` (core `study.ts`): on "Start study" a seeded 5/5 order is generated once and stored
+  ONLY in the secure store (iOS: BHKeychain key `study/phaseD/schedule`; Electron: the safeStorage-encrypted
+  credentials file; web test build: localStorage, not secure). Progress (enabled, next index) is in settings.
+  A session with 0 replies gives its index back.
+- Baseline = interest ledger + adaptation off (fixed seeded topic rotation, same opener and open-question
+  cadence; the map is a shadow clone that is never saved). Adaptive stays the default everywhere else
+  (sim, sidecar, non-study sessions).
+- Logged: `session_start.study = {id, index, total, scheduleHash}`. Never logged or shown: the mode
+  (not in JSONL, exports, CSV, UI or HUD). Study `director_turn`s are `sealed:true` without plan/stateNote;
+  the HUD hides the interest map, hypothesis, styles and plan and shows "Study session i/10".
+- Dev only: schedule sha256 via `window.__bhStudy.hash()` (dev build or `localStorage bh.debug=1`) or
+  `BH_STUDY_HASH=1` (Electron). Unseal after session 10: `__bhStudy.unseal("UNSEAL phaseD")`, Electron IPC
+  `study:unseal` (dev / `BH_STUDY_DEBUG=1` only). If the secure store fails (e.g. -34018) the study does
+  not start and sessions run unblinded without study fields.
+
+### Export
+
+- Sidebar "Export logs": iOS `BHExport.share` (all session JSONL + interest map); Electron native save
+  dialog (one zip); web: zip download. Session end on iOS: `BHExport.saveToDocuments` with that session.
+- File names: `bh-session-<idx>-<startISO-compact>.jsonl` (study) / `bh-session-<startISO-compact>.jsonl`,
+  sanitized + de-duplicated in JS (`plainFiles`).
+- Analysis CSV: `npm run export-ratings -- <files|dirs> [-o out.csv] [--schedule unsealed.json] [--no-hooked]`
+  (`packages/sim/src/export-ratings.ts`): one row per user turn, typing features + the turn rating + the
+  session rating / hooked / blindGuess. No mode column; `--schedule` (the unsealed JSON) adds `mode` by
+  study index and refuses a schedule whose hash differs from the sessions'.

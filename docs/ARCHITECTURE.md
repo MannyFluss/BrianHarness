@@ -121,7 +121,13 @@ interface SignalSource {
 | `director_turn` | turn, plan {mode, topic, altTopic?, style, reason}, stateNote, text, backend, genMs |
 | `user_turn` | turn, text, features (FeatureMap), engagement, baseline, mentionedTopics, rawEvents? |
 | `interest_update` | turn, topTopics [[topic, mean]], hypothesis |
+| `rating` | scope (turn/session), turn (1-based reply no.), value 1-5 or null, shownAt, answeredAt, dismissed, reason?, hooked?, blindGuess? (evaluation only) |
 | `session_end` | turns |
+
+Phase D additions: `session_start.study` {id, index, total, scheduleHash} (never the mode);
+`director_turn.sealed` (plan/stateNote omitted in study sessions); `user_turn.keyGaps` (ms, timings only)
+and the `typing.latency*`, `typing.gap*`, flag and `typing.timingReliability` features. Details:
+IOS_PORTING.md "Phase D".
 
 **`saves/<userId>.interest.json`**
 ```json
