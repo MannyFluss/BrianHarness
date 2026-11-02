@@ -27,6 +27,15 @@ contextBridge.exposeInMainWorld("eeg", {
   hud: () => ipcRenderer.invoke("harness:hud"),
   sessions: () => ipcRenderer.invoke("harness:sessions"),
   info: () => ipcRenderer.invoke("harness:info"),
+  rate: (r) => ipcRenderer.invoke("harness:rate", r),
+  exportLogs: () => ipcRenderer.invoke("harness:exportLogs"),
+  study: {
+    status: () => ipcRenderer.invoke("study:status"),
+    enable: () => ipcRenderer.invoke("study:enable"),
+    disable: () => ipcRenderer.invoke("study:disable"),
+    hash: () => ipcRenderer.invoke("study:hash"),
+    unseal: (confirm) => ipcRenderer.invoke("study:unseal", confirm),
+  },
   providers: {
     status: () => ipcRenderer.invoke("providers:status"),
     select: (provider, model) => ipcRenderer.invoke("providers:select", { provider, model }),

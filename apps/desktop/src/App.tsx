@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { nextPaint, runStreamedTurn } from "./chat-flow";
-import { bridge, type Hud as HudState, type Info, type SessionItem } from "./bridge";
+import { bridge, type Hud as HudState, type Info, type RatingInput, type SessionItem } from "./bridge";
+import { SessionRatingCard, TurnProbe, type SessionRatingResult } from "./components/Rating";
+import { AWAY_MS, probeScheduler } from "./rating";
 import { Composer } from "./components/Composer";
 import { Hud } from "./components/Hud";
 import { Message, Thinking, type ChatMsg } from "./components/Message";
@@ -55,6 +57,27 @@ export function App() {
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
+  // ---- absorption ratings (evaluation only; logged as {type:"rating"} records) ----
+  const [probe, setProbe] = useState<{ turn: number; shownAt: number; afterId: string } | null>(null);
+  const probeRef = useRef(probe);
+  probeRef.current = probe;
+  const [card, setCard] = useState<{ turn: number; shownAt: number } | null>(null);
+  const cardRef = useRef(card);
+  cardRef.current = card;
+  const cardState = useRef<SessionRatingResult | null>(null);
+  const scheduler = useRef(probeScheduler("boot"));
+  const userTurns = useRef(0);
+  const logRating = useCallback((r: RatingInput) => {
+    void bridge().rate?.(r).catch((err) => console.warn("[brianharness] rating not logged", err));
+  }, []);
+  const dismissProbe = useCallback((reason: string) => {
+    const p = probeRef.current;
+    if (!p) return;
+    probeRef.current = null;
+    setProbe(null);
+    logRating({ scope: "turn", turn: p.turn, value: null, shownAt: p.shownAt, answeredAt: null, dismissed: true, reason });
+  }, [logRating]);
+
   const refreshSessions = useCallback(async () => setSessions(await bridge().sessions()), []);
 
   /** One streamed Director turn: indicator first, then tokens, then the final text. */
@@ -82,6 +105,8 @@ export function App() {
     try {
       const { result: r, replyId } = await streamTurn(() => setMessages([]), (onToken) => bridge().newSession(onToken));
       setMessages((m) => completeReply(m, replyId, r.director.text));
+      scheduler.current = probeScheduler(r.sessionId); // seeded per session: reproducible probe turns
+      userTurns.current = 0;
       setTitle(r.title ?? "New chat");
       setHud(r.hud);
       setStateNote(r.director.stateNote);
@@ -132,6 +157,7 @@ export function App() {
   const send = useCallback(async (textArg?: string) => {
     const text = (textArg ?? draftRef.current).trim();
     if (!text) return;
+    dismissProbe("sent");
     const events = tel.take(text.length);
     const sentAt = Date.now();
     const userMsg: ChatMsg = { id: mid(), role: "user", text };
@@ -146,6 +172,9 @@ export function App() {
         (onToken) => bridge().reply({ text, events, sentAt, ...prompt }, onToken),
       );
       setMessages((m) => completeReply(m.map((x) => (x.id === userMsg.id ? { ...x, engagement: r.engagement } : x)), replyId, r.director.text));
+      const turn = r.hud?.turn ?? ++userTurns.current;
+      userTurns.current = turn;
+      if (bridge().rate && scheduler.current.shouldProbe(turn)) setProbe({ turn, shownAt: Date.now(), afterId: replyId });
       setHud(r.hud);
       setStateNote(r.director.stateNote);
       if (r.title) setTitle(r.title);
@@ -156,7 +185,56 @@ export function App() {
       setBusy(false);
       void refreshSessions();
     }
-  }, [tel, refreshSessions, streamTurn]);
+  }, [tel, refreshSessions, streamTurn, dismissProbe]);
+
+  // typing a reply dismisses the turn probe (it must never block the conversation)
+  useEffect(() => {
+    if (draft && probeRef.current) dismissProbe("typed");
+  }, [draft, dismissProbe]);
+
+  /** End of session: the rating card first (if there was a conversation), then the new session. */
+  const requestNew = useCallback(() => {
+    dismissProbe("new-chat");
+    if (cardRef.current) return;
+    if (bridge().rate && userTurns.current > 0) setCard({ turn: userTurns.current, shownAt: Date.now() });
+    else void startNew();
+  }, [dismissProbe, startNew]);
+  const closeCard = useCallback((res: SessionRatingResult, how: "done" | "skip" | "closed") => {
+    const c = cardRef.current;
+    if (!c) return;
+    cardRef.current = null;
+    cardState.current = null;
+    setCard(null);
+    logRating({ scope: "session", turn: c.turn, value: res.value, shownAt: c.shownAt, answeredAt: res.answeredAt, dismissed: res.value === null, ...(how !== "done" ? { reason: how === "skip" ? "skipped" : "closed" } : {}), hooked: res.hooked, blindGuess: res.blindGuess });
+    if (how !== "closed") void startNew();
+  }, [logRating, startNew]);
+
+  // leaving: closing the app logs whatever is on screen; coming back after AWAY_MS = a new session
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVis = () => {
+      if (document.visibilityState === "hidden") { hiddenAt = Date.now(); return; }
+      if (hiddenAt && Date.now() - hiddenAt >= AWAY_MS) requestNew();
+      hiddenAt = 0;
+    };
+    const onHide = () => {
+      if (probeRef.current) dismissProbe("closed");
+      if (cardRef.current) closeCard(cardState.current ?? { value: null, answeredAt: null, hooked: "", blindGuess: null }, "closed");
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", onHide);
+    };
+  }, [requestNew, dismissProbe, closeCard]);
+
+  // dev/debug only: schedule hash (never the order) and the explicit unseal command
+  useEffect(() => {
+    const dev = !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV || (() => { try { return localStorage.getItem("bh.debug") === "1"; } catch { return false; } })();
+    if (!dev || !bridge().study?.hash) return;
+    window.__bhStudy = { hash: () => bridge().study!.hash!(), unseal: (confirm: string) => bridge().study!.unseal!(confirm) };
+  }, []);
 
   // Test/screenshot hook: types through the same telemetry path a human would.
   useEffect(() => {
@@ -174,13 +252,15 @@ export function App() {
         while (document.querySelector("[data-busy='true']")) await new Promise((r) => setTimeout(r, 50));
       },
       draft: (text: string) => setDraft(text),
+      probe: () => setProbe({ turn: userTurns.current || 1, shownAt: Date.now(), afterId: "" }),
+      endSession: () => requestNew(),
       openPicker: () => pickerRef.current?.(),
     };
-  }, [send, tel]);
+  }, [send, tel, requestNew]);
 
   return (
     <div className="eeg-app flex" data-busy={busy ? "true" : "false"} data-layout={layout}>
-      <Sidebar variant={phone ? "drawer" : "column"} open={sidebarOpen} sessions={sessions} info={info} onNew={() => { if (phone) setSidebarOpen(false); void startNew(); }} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} />
+      <Sidebar variant={phone ? "drawer" : "column"} open={sidebarOpen} sessions={sessions} info={info} onNew={() => { if (phone) setSidebarOpen(false); requestNew(); }} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} />
       <main className="flex min-w-0 flex-1 flex-col">
         <TopBar sidebarOpen={sidebarOpen && !phone} onOpenSidebar={() => { setSidebarOpen(true); if (phone) setHudOpen(false); }} hudOpen={hudOpen} onToggleHud={() => { setHudOpen((v) => !v); if (phone) setSidebarOpen(false); }}>
           <span className="font-title text-2xl tracking-tight md:text-3xl" title={title}>{title}</span>
@@ -190,6 +270,7 @@ export function App() {
             <div ref={scroller} className="flex-1 overflow-y-auto overscroll-contain">
               <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-6 px-4 pb-40 pt-6 md:px-6 md:pt-8">
                 {messages.map((m) => <Message key={m.id} msg={m} />)}
+                {probe && !pending && <TurnProbe onSkip={() => dismissProbe("skipped")} onRate={(v) => { const p = probeRef.current; if (!p) return; probeRef.current = null; setProbe(null); logRating({ scope: "turn", turn: p.turn, value: v, shownAt: p.shownAt, answeredAt: Date.now(), dismissed: false }); }} />}
                 {pending && <Thinking tick={tick} />}
               </div>
             </div>
@@ -203,6 +284,7 @@ export function App() {
           {hudOpen && !phone && <Hud variant="column" hud={hud} stateNote={stateNote} />}
         </div>
       </main>
+      <SessionRatingCard open={!!card} study={!!hud?.study} phone={phone} stateRef={cardState} onClose={closeCard} />
       {phone && <Hud variant="sheet" open={hudOpen} onClose={() => setHudOpen(false)} hud={hud} stateNote={stateNote} />}
     </div>
   );

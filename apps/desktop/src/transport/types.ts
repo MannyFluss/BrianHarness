@@ -19,7 +19,35 @@ export type Hud = {
   hypothesis: string | null;
   topTopics: Array<[string, number, number]>;
   topStyles: Array<[string, number, number]>;
+  /** blinded study session: interest map / plan / hypothesis are withheld */
+  study?: { index: number; total: number };
 };
+/** One absorption prompt as the UI saw it (evaluation only; see core RatingRecord). */
+export type RatingInput = {
+  scope: "turn" | "session";
+  turn: number;
+  value: number | null;
+  shownAt: number;
+  answeredAt: number | null;
+  dismissed: boolean;
+  reason?: string;
+  hooked?: string;
+  blindGuess?: "adaptive" | "baseline" | "no-idea" | null;
+};
+export type ExportFile = { name: string; content: string; mimeType?: string };
+/**
+ * IOS Dev's BHExport Capacitor plugin (contract from IOS Dev, Nov 2):
+ *   share({files})            share sheet (AirDrop, Files, ...) -> {completed, activityType?}
+ *   saveToDocuments({files})  writes into the app's Documents folder (visible in Files)
+ */
+export interface BHExportPlugin {
+  share(o: { files: ExportFile[] }): Promise<{ completed: boolean; activityType?: string }>;
+  saveToDocuments(o: { files: Array<{ name: string; content: string }> }): Promise<{ dir: string; paths: string[] }>;
+}
+/** ok:false + dismissed:true is a user cancel (no error toast); `error` is a friendly message. */
+export type ExportResult = { ok: boolean; files: number; via: "share-sheet" | "save-dialog" | "download" | "none"; detail?: string; dismissed?: boolean; error?: string; code?: string };
+/** Phase D study status as the UI may show it: never the mode or the schedule. */
+export type StudyStatusView = { enabled: boolean; next: number; total: number; scheduled: boolean; error?: string };
 export type SessionItem = { id: string; title: string; turns: number; startedAt: string | null; active: boolean };
 export type Info = { backend: string; paid: boolean; provider: string; model: string | null; dataDir: string; userId: string; platform: string; appName: string };
 export type ProviderId = "mock" | "ollama" | "ollama-cloud" | "openai-compatible" | "openai" | "claude-code" | "anthropic";
@@ -79,5 +107,19 @@ export interface EegBridge {
   credentialNote?: string;
   /** persist pending writes (in-process transport; call on pagehide/visibilitychange) */
   flush?(): Promise<void>;
+  /** log an absorption rating to the current session (evaluation only) */
+  rate?(r: RatingInput): Promise<{ ok: boolean }>;
+  /** "Export logs": session JSONL files + interest map via share sheet / save dialog / download */
+  exportLogs?(): Promise<ExportResult>;
+  /** Phase D blinded study (status/enable only; hash/unseal are dev-only debug hooks) */
+  study?: {
+    status(): Promise<StudyStatusView>;
+    enable(): Promise<{ ok: boolean; error?: string }>;
+    disable(): Promise<{ ok: boolean }>;
+    /** dev/debug only: sha256 of the sealed schedule (never the order) */
+    hash?(): Promise<string | null>;
+    /** dev/debug only: reveals the schedule; needs the confirmation phrase "UNSEAL phaseD" */
+    unseal?(confirm: string): Promise<unknown>;
+  };
 }
 

@@ -9,7 +9,8 @@
 import { KVCredentialStore, type CredentialStoreLike } from "@brianharness/core/browser";
 import { safeLocalKV, type InProcessOptions } from "./in-process";
 import { capacitorPlugin, createNativeStreamFetch, type BHStreamPlugin } from "./native-stream";
-import { createKeychainCredentials, type BHKeychainPlugin, type MigrationReport } from "./keychain";
+import { createKeychainCredentials, keychainKV, type BHKeychainPlugin, type MigrationReport } from "./keychain";
+import type { BHExportPlugin } from "./types";
 
 export { createNativeStreamFetch, type BHStreamPlugin, type BHStreamEvent } from "./native-stream";
 export { createKeychainCredentials, migrateCredentials, keychainKV, keychainStatus, isMissingEntitlement, KEYCHAIN_UNAVAILABLE_NOTE, type BHKeychainPlugin } from "./keychain";
@@ -59,7 +60,7 @@ export const KEYCHAIN_NOTE = "Stored in the iOS Keychain on this device (BHKeych
 export function nativeTransportOptions(
   win: unknown = globalThis,
   hooks: { onMigration?: (r: MigrationReport) => void; /** old store to migrate (default: localStorage "brianharness/") */ legacyCredentials?: CredentialStoreLike } = {},
-): Pick<InProcessOptions, "nativeFetch" | "fetchImpl" | "streaming" | "credentials" | "credentialNote"> {
+): Pick<InProcessOptions, "nativeFetch" | "fetchImpl" | "streaming" | "credentials" | "credentialNote" | "secretKV" | "bhExport"> {
   if (!isNativeCapacitor(win)) return {};
   const w = win as CapWindow;
   const buffered: typeof fetch = (input, init) => w.fetch(input, init);
@@ -78,6 +79,9 @@ export function nativeTransportOptions(
     });
     const store = out.credentials as ReturnType<typeof createKeychainCredentials>;
     out.credentialNote = () => store.note(); // switches to the -34018 explanation if the Keychain is unavailable
+    out.secretKV = keychainKV(keychain); // Phase D schedule: Keychain key study/phaseD/schedule
   }
+  const exporter = capacitorPlugin<BHExportPlugin>(win, "BHExport");
+  if (exporter) out.bhExport = exporter;
   return out;
 }

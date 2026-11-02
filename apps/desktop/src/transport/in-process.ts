@@ -20,7 +20,9 @@ import {
   KVHarnessStorage,
   LocalStorageKV,
   MemoryKV,
+  StudyController,
   createBrowserBackend,
+  zipFiles,
   detectOllama,
   detectOllamaCloud,
   normalizeOllamaBaseUrl,
@@ -32,8 +34,26 @@ import {
   type ProviderKind,
   type TopicTagger,
   type TopicTaggerSpec,
+  type ExportFile,
 } from "@brianharness/core/browser";
-import type { EegBridge, Info, KeyProvider, ProviderId, ProviderStatus } from "./types";
+import { saveViaBHExport, shareViaBHExport } from "./bh-export";
+import type { BHExportPlugin, EegBridge, ExportResult, Info, KeyProvider, ProviderId, ProviderStatus } from "./types";
+
+/** Web fallback for "Export logs": one zip download (no share sheet in a plain browser). */
+export function downloadZip(files: ExportFile[], name: string, doc: Document | undefined = typeof document !== "undefined" ? document : undefined): boolean {
+  if (!doc || typeof Blob === "undefined" || typeof URL?.createObjectURL !== "function") return false;
+  const blob = new Blob([zipFiles(files) as BlobPart], { type: "application/zip" });
+  const url = URL.createObjectURL(blob);
+  const a = doc.createElement("a");
+  a.href = url;
+  a.download = name;
+  doc.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return true;
+}
+const stamp = (d = new Date()) => d.toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-");
 
 export interface InProcessOptions {
   /** platform adapters (IOS Dev: pass Capacitor Preferences / Keychain KVs here) */
@@ -67,6 +87,15 @@ export interface InProcessOptions {
   mockTokenDelayMs?: number;
   /** Ollama Cloud base URL (tests point this at a fake server). Default https://ollama.com */
   ollamaCloudUrl?: string;
+  /**
+   * secure store for the Phase D study schedule (iOS: BHKeychain via keychainKV, key
+   * study/phaseD/schedule). Default: localStorage (web TEST build only, not secure).
+   */
+  secretKV?: KeyValueStore;
+  /** iOS BHExport plugin: share sheet for "Export logs", saveToDocuments at every session end */
+  bhExport?: BHExportPlugin;
+  /** web fallback for Export logs (tests); default downloadZip */
+  download?: (files: ExportFile[], name: string) => boolean;
 }
 
 type WebSettings = { provider: ProviderKind; model?: string; ollamaUrl?: string; openaiCompatibleUrl?: string };
@@ -158,6 +187,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   };
 
   let host: HarnessHost | null = null;
+  const study = new StudyController(opts.secretKV ?? safeLocalKV("brianharness/"), settingsKV);
   const getHost = async () => {
     if (host) return host;
     const { storage } = await ready;
@@ -166,7 +196,21 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       const s = await loadSettings();
       tagger = { ...tagger, baseUrl: tagger.baseUrl ?? normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL), fetchImpl: tagger.fetchImpl ?? fetchImpl };
     }
-    host = new HarnessHost({ userId, storage, backend: ensureBackend, logRawEvents: true, tagger });
+    host = new HarnessHost({
+      userId,
+      storage,
+      backend: ensureBackend,
+      logRawEvents: true,
+      tagger,
+      study,
+      // iOS: every ended session's JSONL (ratings included, mode never) lands in Files automatically
+      onSessionEnd: opts.bhExport
+        ? async (id) => {
+            const f = host?.sessionFile(id);
+            if (f) await saveViaBHExport(opts.bhExport!, [f]); // bh-session-<idx>-<start>.jsonl, ratings included
+          }
+        : undefined,
+    });
     return host;
   };
 
@@ -278,6 +322,35 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
     async flush() {
       const { storage } = await ready;
       await storage.flush?.();
+    },
+    async rate(r) {
+      return (await getHost()).rate(r);
+    },
+    async exportLogs(): Promise<ExportResult> {
+      const h = await getHost();
+      await (await ready).storage.flush?.();
+      const files = h.exportFiles();
+      if (!files.length) return { ok: false, files: 0, via: "none", detail: "nothing to export yet" };
+      if (opts.bhExport) return shareViaBHExport(opts.bhExport, files);
+      const ok = (opts.download ?? downloadZip)(files, `brianharness-logs-${stamp()}.zip`);
+      return { ok, files: files.length, via: ok ? "download" : "none" };
+    },
+    study: {
+      status: () => study.status(),
+      async enable() {
+        try {
+          await study.enable();
+          return { ok: true };
+        } catch (err) {
+          return { ok: false, error: (err as Error).message };
+        }
+      },
+      async disable() {
+        await study.disable();
+        return { ok: true };
+      },
+      hash: () => study.hash(),
+      unseal: (confirm: string) => study.unseal(confirm),
     },
     providers: {
       async status() {

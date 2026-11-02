@@ -83,3 +83,54 @@ function concat(parts: Uint8Array[]): Uint8Array {
   }
   return out;
 }
+
+// ---- plain file names (BHExport contract) ----
+// BHExport.share / saveToDocuments reject (EINVAL) a name that is empty, "." or "..", starts with a
+// dot, contains / or \, or repeats within one call. These helpers make any name conform.
+
+/** One plain, safe file name (keeps the extension; path parts become "_"). */
+export function plainFileName(name: string, fallback = "file"): string {
+  let n = String(name ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/[/\\:]/g, "_")
+    .trim()
+    .replace(/^\.+/, "");
+  if (!n || n === "." || n === "..") n = fallback;
+  if (n.length > 180) {
+    const dot = n.lastIndexOf(".");
+    const ext = dot > 0 && n.length - dot <= 12 ? n.slice(dot) : "";
+    n = n.slice(0, 180 - ext.length) + ext;
+  }
+  return n;
+}
+
+/** Flatten (basename), sanitize and de-duplicate names: x.jsonl, x-2.jsonl, ... */
+export function plainFiles<T extends { name: string }>(files: T[]): T[] {
+  const seen = new Set<string>();
+  return files.map((f) => {
+    const base = plainFileName(String(f.name ?? "").split(/[/\\]/).filter(Boolean).pop() ?? "");
+    let n = base;
+    const dot = base.lastIndexOf(".");
+    const [stem, ext] = dot > 0 ? [base.slice(0, dot), base.slice(dot)] : [base, ""];
+    for (let i = 2; seen.has(n.toLowerCase()); i++) n = `${stem}-${i}${ext}`;
+    seen.add(n.toLowerCase());
+    return { ...f, name: n };
+  });
+}
+
+/** "2026-11-02T22:06:12.345Z" -> "20261102T220612Z" */
+export const compactIso = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) ? d.toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "") : "unknown";
+};
+
+/**
+ * Stable, unique per-session export name: bh-session-<studyIdx>-<startISO-compact>.jsonl in a
+ * study session, bh-session-<startISO-compact>.jsonl otherwise. Stable because
+ * saveToDocuments overwrites same-name files: re-saving a session replaces its own file only.
+ */
+export function sessionExportName(start: { t?: string; study?: { index?: number } } | undefined, sessionId: string): string {
+  const when = start?.t ? compactIso(start.t) : plainFileName(sessionId, "session");
+  const idx = start?.study?.index;
+  return plainFileName(`bh-session-${typeof idx === "number" ? `${String(idx).padStart(2, "0")}-` : ""}${when}.jsonl`);
+}

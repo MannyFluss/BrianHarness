@@ -11,7 +11,7 @@ import { systemClock, type Clock } from "./platform/env.js";
 import { isFillerOnly, sessionTitle } from "./title.js";
 import type { RatingRecord, TypingEvent } from "./types.js";
 import type { StudyAssignment, StudyStatus } from "./study.js";
-import type { ExportFile } from "./zip.js";
+import { sessionExportName, type ExportFile } from "./zip.js";
 import { randomId } from "./platform/env.js";
 import type { TopicTagger, TopicTaggerSpec } from "./tagger.js";
 
@@ -129,7 +129,8 @@ export class HarnessHost {
     if (!st) return null;
     const events = st.readSession(id);
     if (!events.length) return null;
-    return { name: `sessions/${id}.jsonl`, content: events.map((e) => JSON.stringify(e)).join("\n") + "\n", mimeType: "application/x-ndjson" };
+    const start = events.find((e) => (e as { type?: string }).type === "session_start") as { t?: string; study?: { index?: number } } | undefined;
+    return { name: `sessions/${sessionExportName(start, id)}`, content: events.map((e) => JSON.stringify(e)).join("\n") + "\n", mimeType: "application/x-ndjson" };
   }
 
   /** Every session JSONL + the interest map (the save game), for "Export logs". */

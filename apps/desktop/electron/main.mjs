@@ -4,11 +4,11 @@
 // Model providers (mock / Ollama / ChatGPT / Claude Code / Anthropic) come from ProviderHub;
 // credentials live in <userData>/credentials.json, encrypted with Electron safeStorage
 // (macOS: key in the login Keychain), never in the repo.
-import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { BRAND, HarnessHost, ProviderHub, SessionStore, backendSpecFromEnv, createBackend } from "@brianharness/core";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { BRAND, HarnessHost, ProviderHub, SessionStore, StudyController, backendSpecFromEnv, createBackend, credentialSecretStore, zipFiles } from "@brianharness/core";
 import { runDemo } from "./demo.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -30,7 +30,25 @@ let hub;
 let backend = null;
 // Session lifecycle, titles and the session list live in core's HarnessHost (shared with the
 // in-process web/iOS transport), so both shells run the same logic.
-const host = new HarnessHost({ userId, storage: store, backend: () => ensureBackend(), logRawEvents: true, seed: () => Date.now() % 100000 });
+// Phase D study: the sealed schedule lives in the safeStorage-encrypted credentials file (via the
+// hub's credential store, resolved lazily: the hub exists once the app is ready); only the
+// non-secret progress (enabled + next index) is in <userData>/study-progress.json.
+const progressFile = () => join(app.getPath("userData"), "study-progress.json");
+const fileKV = {
+  get: async (k) => { try { return JSON.parse(readFileSync(progressFile(), "utf8"))[k] ?? null; } catch { return null; } },
+  set: async (k, v) => {
+    let o = {};
+    try { o = JSON.parse(readFileSync(progressFile(), "utf8")); } catch {}
+    o[k] = v;
+    writeFileSync(progressFile(), JSON.stringify(o), { mode: 0o600 });
+  },
+  remove: async () => {},
+  keys: async () => [],
+};
+const study = new StudyController(credentialSecretStore({ read: (id) => hub.credentials.read(id), modify: (id, fn) => hub.credentials.modify(id, fn) }), fileKV);
+// dev/debug only: hash and unseal (never in a packaged build unless BH_STUDY_DEBUG=1)
+const studyDebug = !app.isPackaged || process.env.BH_STUDY_DEBUG === "1";
+const host = new HarnessHost({ userId, storage: store, backend: () => ensureBackend(), logRawEvents: true, seed: () => Date.now() % 100000, study });
 /** @type {BrowserWindow | null} */
 let mainWin = null;
 
@@ -73,6 +91,34 @@ ipcMain.handle("harness:sessions", () => host.sessions());
 ipcMain.handle("harness:info", async () => {
   await ensureBackend();
   return info();
+});
+
+ipcMain.handle("harness:rate", (_e, r) => host.rate(r ?? {}));
+// "Export logs": every session JSONL + the interest map, one zip through the native save dialog
+ipcMain.handle("harness:exportLogs", async (e) => {
+  const files = host.exportFiles();
+  if (!files.length) return { ok: false, files: 0, via: "none", detail: "nothing to export yet" };
+  const win = BrowserWindow.fromWebContents(e.sender) ?? undefined;
+  const d = new Date().toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-");
+  const r = await dialog.showSaveDialog(win, { title: "Export logs", defaultPath: join(app.getPath("downloads"), `brianharness-logs-${d}.zip`), filters: [{ name: "Zip", extensions: ["zip"] }] });
+  if (r.canceled || !r.filePath) return { ok: false, files: files.length, via: "save-dialog", detail: "canceled" };
+  writeFileSync(r.filePath, zipFiles(files));
+  return { ok: true, files: files.length, via: "save-dialog", detail: r.filePath };
+});
+ipcMain.handle("study:status", () => study.status());
+ipcMain.handle("study:enable", async () => {
+  try {
+    await study.enable();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err?.message ?? String(err) };
+  }
+});
+ipcMain.handle("study:disable", async () => (await study.disable(), { ok: true }));
+ipcMain.handle("study:hash", () => (studyDebug ? study.hash() : null));
+ipcMain.handle("study:unseal", (_e, confirm) => {
+  if (!studyDebug) throw new Error("unseal is a dev/debug command (BH_STUDY_DEBUG=1)");
+  return study.unseal(String(confirm ?? ""));
 });
 
 // ---- provider picker ----
@@ -177,6 +223,7 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   hub = new ProviderHub({ dataDir: app.getPath("userData"), cipher: keychainCipher() });
+  if (process.env.BH_STUDY_HASH === "1") console.log(`[${BRAND.slug}] study schedule sha256: ${(await study.hash()) ?? "(none yet)"}`);
   const win = (mainWin = createWindow());
   if (process.env.EEG_SCREENSHOT) {
     // headless capture for docs/CI: play a scripted demo through the REAL core, then snapshot.

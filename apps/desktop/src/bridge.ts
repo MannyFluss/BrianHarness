@@ -6,7 +6,9 @@ export * from "./transport/types";
 declare global {
   interface Window {
     eeg?: EegBridge;
-    __eegDemo?: { type(text: string): Promise<void>; draft(text: string): void; openPicker(): void };
+    __eegDemo?: { type(text: string): Promise<void>; draft(text: string): void; openPicker(): void; probe?(): void; endSession?(): void };
+    /** dev/debug builds only (import.meta.env.DEV or localStorage bh.debug=1) */
+    __bhStudy?: { hash(): Promise<string | null>; unseal(confirm: string): Promise<unknown> };
   }
 }
 

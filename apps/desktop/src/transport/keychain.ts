@@ -24,6 +24,11 @@ export function keychainStatus(err: unknown): number | undefined {
   const m = /(-\d{4,5})\b/.exec(String(e?.message ?? err ?? ""));
   return m ? Number(m[1]) : undefined;
 }
+/**
+ * BHKeychain rejects a missing/invalid argument with code "EINVAL" and no data: that is a bug in
+ * OUR call, not a Keychain condition, so it is rethrown and never triggers the degraded fallback.
+ */
+export const isKeychainProgrammingError = (err: unknown) => (err as { code?: unknown })?.code === "EINVAL";
 /** -34018 errSecMissingEntitlement: unsigned simulator / missing keychain-access-groups entitlement */
 export const isMissingEntitlement = (err: unknown) => keychainStatus(err) === -34018 || /errSecMissingEntitlement|missing entitlement/i.test(String((err as Error)?.message ?? err));
 
@@ -32,6 +37,7 @@ export const KEYCHAIN_UNAVAILABLE_NOTE =
 
 export function keychainErrorMessage(op: string, err: unknown): string {
   const st = keychainStatus(err);
+  if (isKeychainProgrammingError(err)) return `iOS Keychain ${op}: invalid argument (EINVAL, a bug in the app's call): ${String((err as Error)?.message ?? err)}`;
   if (isMissingEntitlement(err)) return `iOS Keychain ${op} failed: OSStatus -34018 errSecMissingEntitlement (this build has no keychain entitlement, e.g. an unsigned simulator build)`;
   return `iOS Keychain ${op} failed${st !== undefined ? ` (OSStatus ${st})` : ""}: ${String((err as Error)?.message ?? err)}`;
 }
@@ -111,6 +117,7 @@ export function createKeychainCredentials(
   let unavailable: string | null = null;
   let warned = false;
   const degrade = (op: string, err: unknown) => {
+    if (isKeychainProgrammingError(err)) throw Object.assign(new Error(keychainErrorMessage(op, err)), { code: "EINVAL" });
     const msg = keychainErrorMessage(op, err);
     if (isMissingEntitlement(err)) unavailable = KEYCHAIN_UNAVAILABLE_NOTE;
     if (!warned || !isMissingEntitlement(err)) console.warn(`[brianharness] ${msg}`);
