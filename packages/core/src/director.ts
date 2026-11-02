@@ -58,6 +58,9 @@ export function planTurn(
   }
   const recent = history.slice(-2).map((p) => p.topic);
   const hyp = map.hypothesis();
+  // Keyphrases that roll up into a known parent are evidence, not things to ask about:
+  // probing "kp:mostly" wastes a turn. Orphan keyphrases (unknown passions) stay probeable.
+  const probeable = (t: string) => !(t.startsWith("kp:") && map.parent(t));
 
   // A scouting checkpoint just found something hotter than the hypothesis: confirm it next turn
   // (one lucky reply has n=1 and can't beat the hypothesis on its own, so without this the
@@ -77,7 +80,7 @@ export function planTurn(
     // The user volunteered a different, barely-probed topic: that is the strongest
     // "look over here" signal there is, so follow it once even mid-exploit.
     const planned = [last?.topic, last?.altTopic];
-    const volunteered = frame.mentionedTopics.find((t) => t !== hyp && !planned.includes(t) && map.topic(t).n < 1.5);
+    const volunteered = frame.mentionedTopics.find((t) => probeable(t) && t !== hyp && !planned.includes(t) && map.topic(t).n < 1.5);
     if (volunteered) {
       return { turn, mode: "explore", topic: volunteered, style: bestStyle(map, ["open", "either-or"], 0.1), reason: `user brought up ${volunteered} unprompted while we were on ${last?.topic ?? hyp}: follow the lead` };
     }
@@ -89,7 +92,7 @@ export function planTurn(
       // Scout with an either-or over the two most promising untried topics: one turn, two probes.
       const ranked = map
         .allTopics()
-        .filter((t) => t !== hyp && !recent.includes(t))
+        .filter((t) => probeable(t) && t !== hyp && !recent.includes(t))
         .map((t) => [t, map.ucb("topic", t, exploreC * 1.5) + rng() * 0.02] as const)
         .sort((a, b) => b[1] - a[1]);
       const topic = ranked[0]![0];
@@ -113,7 +116,7 @@ export function planTurn(
   }
 
   // Follow the user's lead: a spontaneously mentioned, little-probed topic is the best scout target.
-  const lead = frame.mentionedTopics.find((t) => map.topic(t).n < 2.5 && !recent.includes(t));
+  const lead = frame.mentionedTopics.find((t) => probeable(t) && map.topic(t).n < 2.5 && !recent.includes(t));
   if (lead) {
     return { turn, mode: "explore", topic: lead, style: bestStyle(map, ["open", "either-or", "deep-dive"], exploreC), reason: "user brought it up" };
   }
@@ -125,7 +128,7 @@ export function planTurn(
 
   const ranked = map
     .allTopics()
-    .filter((t) => !recent.includes(t))
+    .filter((t) => probeable(t) && !recent.includes(t))
     .map((t) => [t, map.ucb("topic", t, exploreC) + rng() * 0.02] as const)
     .sort((a, b) => b[1] - a[1]);
   const topic = ranked[0]![0];

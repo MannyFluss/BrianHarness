@@ -177,15 +177,20 @@ export class HarnessSession {
     this.transcript.push({ role: "user", content: text });
 
     // credit assignment: the probed topic(s), spontaneous mentions, and the question style
+    const obs: Array<[string, number, number]> = [];
+    const observe = (t: string, v: number, w: number) => {
+      this.map.observeTopic(t, v, w);
+      obs.push([t, v, w]);
+    };
     if (plan) {
       if (plan.topic !== OPEN_TOPIC) {
         if (plan.altTopic) {
           const choseAlt = mentioned.includes(plan.altTopic) && !mentioned.includes(plan.topic);
           const choseMain = mentioned.includes(plan.topic) && !mentioned.includes(plan.altTopic);
-          this.map.observeTopic(plan.topic, choseAlt ? score * 0.5 : score, choseAlt ? 0.5 : choseMain ? 1 : 0.5);
-          this.map.observeTopic(plan.altTopic, choseMain ? score * 0.5 : score, choseMain ? 0.5 : choseAlt ? 1 : 0.5);
+          observe(plan.topic, choseAlt ? score * 0.5 : score, choseAlt ? 0.5 : choseMain ? 1 : 0.5);
+          observe(plan.altTopic, choseMain ? score * 0.5 : score, choseMain ? 0.5 : choseAlt ? 1 : 0.5);
         } else {
-          this.map.observeTopic(plan.topic, score, 1);
+          observe(plan.topic, score, 1);
         }
       }
       // forced scouting turns probe topics the user likely doesn't care about; don't let that
@@ -194,8 +199,21 @@ export class HarnessSession {
     }
     for (const t of mentioned) {
       if (t === plan?.topic || t === plan?.altTopic) continue;
-      this.map.observeTopic(t, Math.min(1, score + 0.1), 0.7); // user steered there unprompted
+      observe(t, Math.min(1, score + 0.1), 0.7); // user steered there unprompted
     }
+    // Roll child evidence (specific hobbies, keyphrases) up to ancestors that weren't credited
+    // directly this turn, once per ancestor (strongest child wins), so the parent accumulates it.
+    const direct = new Set(obs.map(([t]) => t));
+    const rolled = new Map<string, [number, number]>();
+    for (const [t, v, w] of obs) {
+      let p = this.map.parent(t);
+      for (let i = 0; p && i < 4; i++, p = this.map.parent(p)) {
+        if (direct.has(p)) break;
+        const cur = rolled.get(p);
+        if (!cur || w > cur[1] || (w === cur[1] && v > cur[0])) rolled.set(p, [v, w]);
+      }
+    }
+    for (const [p, [v, w]] of rolled) this.map.observeTopic(p, v, w);
     this.map.data.turns += 1;
     this.map.data.updatedAt = nowIso();
     for (const s of this.sources) s.clear(sentAt);

@@ -82,7 +82,10 @@ export const SPECIFIC_TOPICS: Record<string, { label: string; parent?: string; p
   "x:magic": { label: "stage magic and card tricks", parent: "art", phrases: ["card trick", "card tricks", "sleight of hand", "magician", "close-up magic"] },
 };
 
-const STOP = new Set("a about after again all also am an and any are as at be because been before being but by can could did do does doing done dont down each even ever every few for from get gets getting go going got had has have having he her here hers him his how i id if im in into is it its ive just kind know like lot lots love make me more most much my never no not now of off oh ok okay on one only or other our out over pretty probably quite really right same say see she should since so some something still such sure than that thats the their them then there these they thing things think this those though through time to too try up us very want was way we well were what when where which while who why will with would yeah yes yet you your youre actually always maybe usually stuff guess mean bit day days week weekend lately year years people started start".split(" "));
+const STOP = new Set("a about after again all also am an and any are as at be because been before being but by can could did do does doing done dont down each even ever every few for from get gets getting go going got had has have having he her here hers him his how i id if im in into is it its ive just kind know like lot lots love make me more most much my never no not now of off oh ok okay on one only or other our out over pretty probably quite really right same say see she should since so some something still such sure than that thats the their them then there these they thing things think this those though through time to too try up us very want was way we well were what when where which while who why will with would yeah yes yet you your youre actually always maybe usually stuff guess mean bit day days week weekend lately year years people started start honestly mostly sometimes often definitely totally basically literally super cool nice good great fun enjoy kinda sorta little recently anyway whatever else around back last first next many feel felt tell told talk talking cause sounds sound thanks haha lol hmm already ago lately favorite favourite especially usually depends rather prefer either neither probably i'd i'll i've that's it's don't didn't can't won't".split(" "));
+/** -ly adverbs ("honestly", "mostly") are style, not topics; keep the few -ly nouns. */
+const LY_NOUNS = new Set(["family", "italy", "assembly", "butterfly", "dragonfly", "firefly", "anomaly", "supply", "ally", "rally", "jelly", "belly", "bully", "lily", "july", "holly", "polly", "monopoly"]);
+const isFillerWord = (w: string) => STOP.has(w) || (w.length >= 5 && w.endsWith("ly") && !LY_NOUNS.has(w));
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const phraseRe = new Map<string, RegExp>();
@@ -134,18 +137,47 @@ export class LexiconTagger implements TopicTagger {
 export class KeyphraseTagger implements TopicTagger {
   readonly kind = "keyphrase";
   private seen = new Map<string, number>();
+  /** phrase -> broad topic -> co-occurrence count; the phrase's parent is the argmax */
+  private cooc = new Map<string, Map<string, number>>();
   constructor(private minRepeats = 2) {}
   async tag(text: string) {
     const tags = lexiconTags(text);
     if (tags.some((t) => t.id.startsWith("x:"))) return tags;
-    const words = tokenize(text).map((w) => w.replace(/'s$/, "")).filter((w) => w.length >= 4 && !STOP.has(w) && !/^\d+$/.test(w));
-    const toks = tokenize(text);
+    const broad = tags.filter((t) => !t.id.includes(":")).map((t) => t.id);
+    const toks = tokenize(text).map((w) => w.replace(/'s$/, ""));
+    const words = toks.filter((w) => w.length >= 4 && !isFillerWord(w) && !/^\d+$/.test(w));
     const grams = new Set<string>(words);
-    for (let i = 0; i + 1 < toks.length; i++) if (!STOP.has(toks[i]!) && !STOP.has(toks[i + 1]!) && toks[i]!.length > 2 && toks[i + 1]!.length > 2) grams.add(`${toks[i]} ${toks[i + 1]}`);
-    for (const g of grams) this.seen.set(g, (this.seen.get(g) ?? 0) + 1);
-    const recurring = [...grams].filter((g) => (this.seen.get(g) ?? 0) >= this.minRepeats).sort((a, b) => b.split(" ").length - a.split(" ").length || (this.seen.get(b)! - this.seen.get(a)!));
+    for (let i = 0; i + 1 < toks.length; i++) {
+      const a = toks[i]!, b = toks[i + 1]!;
+      if (!isFillerWord(a) && !isFillerWord(b) && a.length > 2 && b.length > 2 && !/^\d+$/.test(a) && !/^\d+$/.test(b)) grams.add(`${a} ${b}`);
+    }
+    for (const g of grams) {
+      this.seen.set(g, (this.seen.get(g) ?? 0) + 1);
+      if (broad.length) {
+        const m = this.cooc.get(g) ?? new Map<string, number>();
+        for (const t of broad) m.set(t, (m.get(t) ?? 0) + 1 / broad.length);
+        this.cooc.set(g, m);
+      }
+    }
+    // A phrase that shows up alongside many different topics ("depends", "i guess so") is how
+    // this user talks, not what they talk about: drop it.
+    const generic = (g: string) => {
+      const m = this.cooc.get(g);
+      if (!m || m.size < 3) return false;
+      let tot = 0, top = 0;
+      for (const c of m.values()) { tot += c; top = Math.max(top, c); }
+      return top / tot < 0.5;
+    };
+    const recurring = [...grams].filter((g) => (this.seen.get(g) ?? 0) >= this.minRepeats && !generic(g)).sort((a, b) => b.split(" ").length - a.split(" ").length || (this.seen.get(b)! - this.seen.get(a)!));
     const best = recurring[0];
-    if (best) tags.push({ id: `kp:${best.replace(/\s+/g, "-")}`, label: best, parent: tags[0]?.id, weight: this.seen.get(best)! });
+    if (best) {
+      // Roll up to the broad topic this phrase keeps appearing with; a phrase that never
+      // co-occurs with a known topic stays an orphan (an open-vocab passion, e.g. "lockpicking").
+      let parent: string | undefined;
+      let top = 0;
+      for (const [t, c] of this.cooc.get(best) ?? []) if (c > top) { top = c; parent = t; }
+      tags.push({ id: `kp:${best.replace(/\s+/g, "-")}`, label: best, parent, weight: this.seen.get(best)! });
+    }
     return tags;
   }
 }

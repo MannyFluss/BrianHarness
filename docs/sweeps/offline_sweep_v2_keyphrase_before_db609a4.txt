@@ -1,0 +1,28 @@
+# offline_sweep_v2.mjs --tagger keyphrase, BEFORE the keyphrase roll-up fix (build at db609a4, == Researcher's sweep_v2_keyphrase_new.out)
+tagger=keyphrase engagement=new seeds=60 (driver-side normalisation OFF: the harness z-scores itself in 'new' mode)
+
+== eeg weight 0.25, profile consumer ==
+typing-only (no EEG source)                    informative: found  34% top3  96% fin3  94% | flat-chatty: found   0% top3  29% fin3  29% | flat-terse: found   0% top3  41% fin3  64%
+sham: noise (d=0, same artifacts)              informative: found  26% top3  96% fin3  94% | flat-chatty: found   0% top3  29% fin3  38% | flat-terse: found   0% top3  45% fin3  66%
+EEG d=0.5                                      informative: found  23% top3  97% fin3  94% | flat-chatty: found   0% top3  28% fin3  37% | flat-terse: found   0% top3  51% fin3  68%
+EEG d=1                                        informative: found  24% top3  96% fin3  94% | flat-chatty: found   0% top3  32% fin3  38% | flat-terse: found   0% top3  54% fin3  72%
+EEG d=2                                        informative: found  29% top3  97% fin3  94% | flat-chatty: found   1% top3  35% fin3  39% | flat-terse: found   0% top3  62% fin3  68%
+EEG d=3                                        informative: found  28% top3  96% fin3  94% | flat-chatty: found   1% top3  38% fin3  42% | flat-terse: found   1% top3  72% fin3  74%
+sham: yoked (replay of another session, d=2)   informative: found  26% top3  97% fin3  94% | flat-chatty: found   1% top3  29% fin3  36% | flat-terse: found   0% top3  36% fin3  64%
+
+== eeg weight 0.5, profile consumer ==
+typing-only (no EEG source)                    informative: found  34% top3  96% fin3  94% | flat-chatty: found   0% top3  29% fin3  29% | flat-terse: found   0% top3  41% fin3  64%
+sham: noise (d=0, same artifacts)              informative: found  16% top3  93% fin3  93% | flat-chatty: found   0% top3  24% fin3  33% | flat-terse: found   0% top3  41% fin3  66%
+EEG d=0.5                                      informative: found  17% top3  93% fin3  92% | flat-chatty: found   1% top3  26% fin3  38% | flat-terse: found   1% top3  52% fin3  68%
+EEG d=1                                        informative: found  22% top3  94% fin3  93% | flat-chatty: found   2% top3  32% fin3  36% | flat-terse: found   0% top3  55% fin3  67%
+EEG d=2                                        informative: found  26% top3  94% fin3  92% | flat-chatty: found   5% top3  44% fin3  46% | flat-terse: found   2% top3  69% fin3  72%
+EEG d=3                                        informative: found  27% top3  95% fin3  93% | flat-chatty: found   4% top3  47% fin3  46% | flat-terse: found   2% top3  74% fin3  78%
+sham: yoked (replay of another session, d=2)   informative: found  12% top3  93% fin3  90% | flat-chatty: found   1% top3  29% fin3  35% | flat-terse: found   0% top3  42% fin3  62%
+
+== headset profile at d=2, weight 0.25 ==
+EEG d=2 profile=clean                          informative: found  23% top3  96% fin3  93% | flat-chatty: found   1% top3  44% fin3  44% | flat-terse: found   1% top3  71% fin3  75%
+EEG d=2 profile=lab                            informative: found  33% top3  95% fin3  94% | flat-chatty: found   1% top3  43% fin3  46% | flat-terse: found   0% top3  69% fin3  68%
+EEG d=2 profile=consumer                       informative: found  29% top3  97% fin3  94% | flat-chatty: found   1% top3  35% fin3  39% | flat-terse: found   0% top3  62% fin3  68%
+EEG d=2 profile=rough                          informative: found  28% top3  97% fin3  95% | flat-chatty: found   1% top3  35% fin3  37% | flat-terse: found   0% top3  67% fin3  70%
+
+wrote /tmp/kp_before.json

@@ -38,3 +38,40 @@ test("session discovers and labels specific topics; final guesses carry the spec
   assert.equal(g[0]!.topic, "x:ham-radio");
   assert.equal(g[0]!.label, "amateur (ham) radio");
 });
+
+test("keyphrase roll-up: child phrases consolidate on the parent; unknown passions stay findable; filler is dropped", async () => {
+  const { HarnessSession, MockBackend, KeyphraseTagger, InterestMap } = await import("../src/index.js");
+  // filler / generic phrases never become topics
+  const kt = new KeyphraseTagger();
+  for (const t of ["honestly mostly the stars", "honestly mostly cooking", "honestly mostly code"]) await kt.tag(t);
+  const tags = await kt.tag("honestly mostly nothing");
+  assert.ok(!tags.some((t) => /honestly|mostly/.test(t.id)), JSON.stringify(tags));
+
+  // children don't fragment the hypothesis: evidence on kp children rolls into the parent
+  const m = InterestMap.fresh("u");
+  m.defineTopic("kp:telescope-mirror", "telescope mirror", "space");
+  m.defineTopic("kp:star-party", "star party", "space");
+  m.observeTopic("kp:telescope-mirror", 0.9, 1);
+  m.observeTopic("kp:star-party", 0.9, 1);
+  m.observeTopic("space", 0.85, 2);
+  m.observeTopic("cooking", 0.4, 2);
+  assert.equal(m.hypothesis(), "space");
+  assert.equal(m.topTopics(3)[0]![0], "space");
+  assert.ok(!m.topTopics(3).some(([t]) => t.startsWith("kp:")));
+
+  // a passion with no lexicon topic at all is still found, under its own open-vocab label
+  let clock = 0;
+  const s = new HarnessSession({ userId: "u", backend: new MockBackend(1), store: null, tagger: { kind: "keyphrase" }, clock: () => clock, seed: 3 });
+  await s.start();
+  const lines = ["lockpicking, i practice lockpicking every night", "the lockpicking pins are so satisfying!! lockpicking forever", "meh", "lockpicking again, new lockpicking picks arrived, love lockpicking", "ok", "lockpicking competitions next month, lockpicking is my thing"];
+  let out: any;
+  for (const l of lines) {
+    clock += 4000;
+    const ev = Array.from({ length: l.length }, (_, i) => ({ t: clock - 3000 + i * 40, kind: "insert" as const, len: i + 1 }));
+    out = await s.reply(l, ev, clock);
+  }
+  const fg = s.finalGuesses(3);
+  assert.ok(fg.some((g: any) => g.topic === "kp:lockpicking"), JSON.stringify(fg));
+  assert.equal(s.map.label("kp:lockpicking"), "lockpicking");
+  void out;
+});

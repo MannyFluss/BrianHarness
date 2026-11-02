@@ -22,7 +22,7 @@ export class InterestMap {
   defineTopic(topic: string, label: string, parent?: string) {
     if (TOPICS.includes(topic)) return;
     (this.data.labels ??= {})[topic] = label;
-    if (parent && parent !== topic) (this.data.parents ??= {})[topic] = parent;
+    if (parent && parent !== topic && this.root(parent) !== topic) (this.data.parents ??= {})[topic] = parent; // may move as evidence accrues
     DYNAMIC_TOPIC_LABELS.set(topic, label);
   }
   label(topic: string): string {
@@ -30,6 +30,19 @@ export class InterestMap {
   }
   parent(topic: string): string | undefined {
     return this.data.parents?.[topic];
+  }
+  /** Top-most ancestor (the topic itself when it has no parent). */
+  root(topic: string): string {
+    let t = topic;
+    for (let i = 0; i < 4; i++) {
+      const p = this.parent(t);
+      if (!p || p === topic) break;
+      t = p;
+    }
+    return t;
+  }
+  children(topic: string): string[] {
+    return Object.entries(this.data.parents ?? {}).filter(([, p]) => p === topic).map(([c]) => c);
   }
   static fresh(userId: string): InterestMap {
     return new InterestMap({ version: 1, userId, sessions: 0, turns: 0, topics: {}, styles: {}, updatedAt: new Date().toISOString() });
@@ -69,13 +82,25 @@ export class InterestMap {
     return this.data.styles[style] ?? { mean: PRIOR_MEAN, n: 0, last: 0, updatedAt: "" };
   }
 
-  /** Topics ranked by mean (only observed ones). */
-  topTopics(k = 5): Array<[string, number, number]> {
-    return Object.entries(this.data.topics)
-      .filter(([, c]) => c.n > 0)
+  /**
+   * Topics ranked by mean (only observed ones). One entry per topic family: children are rolled
+   * into their root, which is shown under its dominant specific child's id when there is one
+   * (so "watch restoration" shows instead of "art", but keyphrase fragments never take a slot).
+   * Pass {flat:true} for the raw per-cell ranking.
+   */
+  topTopics(k = 5, opts: { flat?: boolean } = {}): Array<[string, number, number]> {
+    const cells = Object.entries(this.data.topics).filter(([, c]) => c.n > 0);
+    if (opts.flat) return cells.sort((a, b) => b[1].mean - a[1].mean).slice(0, k).map(([t, c]) => [t, c.mean, c.n]);
+    const fam = new Map<string, ScoreCell>();
+    for (const [t, c] of cells) {
+      const r = this.root(t);
+      const rc = this.data.topics[r];
+      fam.set(r, rc && rc.n > 0 ? rc : !fam.has(r) || c.n > fam.get(r)!.n ? c : fam.get(r)!);
+    }
+    return [...fam.entries()]
       .sort((a, b) => b[1].mean - a[1].mean)
       .slice(0, k)
-      .map(([t, c]) => [t, c.mean, c.n]);
+      .map(([r, c]) => [this.refine(r, c, 1.5), c.mean, c.n]);
   }
   topStyles(k = 3): Array<[string, number, number]> {
     return Object.entries(this.data.styles)
@@ -88,8 +113,8 @@ export class InterestMap {
   /** Engagement level this user typically gives, from all observed topics (n-weighted). */
   userBaseline(): number | null {
     let w = 0, m = 0;
-    for (const c of Object.values(this.data.topics)) {
-      if (c.n <= 0) continue;
+    for (const [t, c] of Object.entries(this.data.topics)) {
+      if (c.n <= 0 || this.parent(t)) continue; // children are already rolled into their parent
       w += c.n;
       m += c.n * c.mean;
     }
@@ -105,15 +130,33 @@ export class InterestMap {
    */
   hypothesis(opts: { minMean?: number; minN?: number; margin?: number; relLift?: number; floor?: number } = {}): string | null {
     const { minMean = 0.55, minN = 1.5, margin = 0.08, relLift = 0.1, floor = 0.3 } = opts;
-    const ranked = Object.entries(this.data.topics).filter(([, c]) => c.n > 0).sort((a, b) => b[1].mean - a[1].mean);
+    // Children (specific hobbies, keyphrases) don't compete with their parent: their evidence is
+    // rolled up into the parent cell (session.ts), so the hypothesis consolidates instead of
+    // fragmenting across phrases. Orphans (e.g. ham radio, an unknown keyphrase) compete as roots.
+    const ranked = Object.entries(this.data.topics).filter(([t, c]) => c.n > 0 && !this.parent(t)).sort((a, b) => b[1].mean - a[1].mean);
     const top = ranked[0];
     if (!top) return null;
     const second = ranked[1]?.[1].mean ?? PRIOR_MEAN;
     const base = this.userBaseline() ?? top[1].mean;
     const strongEnough = top[1].mean >= minMean || (top[1].mean >= floor && top[1].mean - base >= relLift);
     const relMargin = top[1].mean >= minMean ? margin : Math.min(margin, 0.06);
-    if (strongEnough && top[1].n >= minN && top[1].mean - second >= relMargin) return top[0];
-    return null;
+    if (!(strongEnough && top[1].n >= minN && top[1].mean - second >= relMargin)) return null;
+    return this.refine(top[0], top[1], minN);
+  }
+
+  /**
+   * Name the specific hobby (x:/o:) when it carries most of its parent's evidence and is as hot;
+   * keyphrases (kp:) are evidence only and never replace a named parent.
+   */
+  private refine(topic: string, cell: ScoreCell, minN: number): string {
+    let best: [string, ScoreCell] | null = null;
+    for (const c of this.children(topic)) {
+      if (c.startsWith("kp:")) continue;
+      const cc = this.data.topics[c];
+      if (!cc || cc.n < minN || cc.n < 0.5 * cell.n || cc.mean < cell.mean - 0.03) continue;
+      if (!best || cc.n > best[1].n) best = [c, cc];
+    }
+    return best ? this.refine(best[0], best[1], minN) : topic;
   }
 
   /** UCB1-style value: exploit mean + exploration bonus for little-seen cells. */
