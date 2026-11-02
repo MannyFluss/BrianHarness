@@ -13,7 +13,7 @@ import { makeRng, type Rng } from "./rng.js";
 import { TypingSignalSource, type SignalSource } from "./signals.js";
 import { buildStateNote } from "./state-note.js";
 import type { SessionStore } from "./store.js";
-import { detectTopics } from "./topics.js";
+import { createTagger, type TopicTag, type TopicTagger, type TopicTaggerSpec } from "./tagger.js";
 import { finalGuesses, type FinalGuess, type FinalGuessOptions, type TurnSnapshot } from "./final-guesses.js";
 
 export interface HarnessSessionOptions {
@@ -29,6 +29,8 @@ export interface HarnessSessionOptions {
   policy?: DirectorPolicyOptions;
   /** EEG blending: weight, per-user z-scoring, quality / agreement weighting */
   engagement?: EegBlendOptions;
+  /** topic tagger (default: offline lexicon incl. specific hobbies) */
+  tagger?: TopicTagger | TopicTaggerSpec;
   /** store raw typing events in the JSONL (bigger logs, full replay) */
   logRawEvents?: boolean;
   sessionId?: string;
@@ -78,6 +80,7 @@ export class HarnessSession {
   readonly engagementCtx: Required<Omit<EngagementContext, "options">> = { eegLnHistory: [], typingHistory: [], eegPartHistory: [], typingAtEeg: [] };
   /** per-turn hypothesis + live top-3, for the anti-drift final-guess API */
   readonly snapshots: TurnSnapshot[] = [];
+  readonly tagger: TopicTagger;
   private rng: Rng;
   private clock: () => number;
 
@@ -88,6 +91,8 @@ export class HarnessSession {
     this.id = opts.sessionId ?? opts.store?.newSessionId() ?? `mem-${Math.random().toString(36).slice(2, 8)}`;
     this.map = opts.map ?? opts.store?.loadMap(opts.userId) ?? InterestMap.fresh(opts.userId);
     this.sources = [this.typing, ...(opts.sources ?? [])];
+    const t = opts.tagger;
+    this.tagger = t && "tag" in t ? t : createTagger(t as TopicTaggerSpec | undefined);
   }
 
   get backend(): ModelBackend {
@@ -130,13 +135,14 @@ export class HarnessSession {
 
   /** Process the user's reply and its telemetry, then produce the Director's next turn. */
   async reply(text: string, events: TypingEvent[] = [], sentAt = this.clock()): Promise<{ user: UserTurnResult; director: DirectorTurnResult }> {
-    const user = this.observeUser(text, events, sentAt);
+    const tags = await this.tagger.tag(text);
+    const user = this.observeUser(text, events, sentAt, tags);
     this.turn += 1;
     const director = await this.directorTurn();
     return { user, director };
   }
 
-  private observeUser(text: string, events: TypingEvent[], sentAt: number): UserTurnResult {
+  private observeUser(text: string, events: TypingEvent[], sentAt: number, tags: TopicTag[]): UserTurnResult {
     this.typing.pushMany(events);
     const window = { from: this.promptShownAt, to: sentAt };
     const features: FeatureMap = { ...textFeatures(text) };
@@ -159,7 +165,8 @@ export class HarnessSession {
       ec.typingAtEeg.push(parts.typingScore!);
     }
     const baseline = this.frame ? this.frame.baseline + BASELINE_ALPHA * (score - this.frame.baseline) : score;
-    const mentioned = detectTopics(text);
+    for (const t of tags) if (t.id.includes(":")) this.map.defineTopic(t.id, t.label, t.parent);
+    const mentioned = tags.map((t) => t.id);
     const plan = this.plans[this.plans.length - 1];
     this.frame = { turn: this.turn, engagement: score, baseline, lift: score - (this.frame?.baseline ?? score), features, mentionedTopics: mentioned, lastPlan: plan };
     this.transcript.push({ role: "user", content: text });

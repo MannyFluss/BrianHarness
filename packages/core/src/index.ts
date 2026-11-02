@@ -17,3 +17,4 @@ export * from "./providers/pi-ai.js";
 export * from "./providers/claude-code.js";
 export * from "./providers/factory.js";
 export * from "./providers/credential-store.js";
+export * from "./tagger.js";

@@ -202,3 +202,36 @@ export class ReplayFeatureSource implements SignalSource {
     return Math.max(0, this.rows.length - this.i);
   }
 }
+
+/**
+ * Typing events synthesized from the reply TEXT ONLY (for LLM personas / Python sims that have
+ * no keystrokes). Deterministic per seed; carries no information beyond the text itself (length,
+ * words), so it cannot leak a persona's hidden interest. Typing starts after a think delay that
+ * grows with reply length, at ~charsPerSec with jitter, with an occasional 1-char correction.
+ */
+export function synthesizeTypingFromText(text: string, shownAt: number, opts: { seed?: number; charsPerSec?: number; thinkMs?: number } = {}): { events: TypingEvent[]; sentAt: number } {
+  let x = (opts.seed ?? 1) * 2654435761 + text.length * 40503;
+  const rnd = () => ((x = (x * 1103515245 + 12345) >>> 0) / 2 ** 32);
+  const cps = opts.charsPerSec ?? 5;
+  const words = text.split(/\s+/).filter(Boolean).length;
+  let t = shownAt + (opts.thinkMs ?? 2500) + 120 * Math.min(words, 40) + 1500 * rnd();
+  const events: TypingEvent[] = [];
+  let len = 0;
+  for (let i = 0; i < text.length; i++) {
+    t += (1000 / cps) * (0.5 + rnd());
+    if (text[i] === " " && rnd() < 0.04) t += 1200 + 1500 * rnd(); // occasional thinking pause
+    len++;
+    events.push({ t: Math.round(t), kind: "insert", len });
+    if (rnd() < 0.02 && len > 1) {
+      t += 180;
+      len--;
+      events.push({ t: Math.round(t), kind: "delete", len });
+      t += 150;
+      len++;
+      events.push({ t: Math.round(t), kind: "insert", len });
+    }
+  }
+  const sentAt = Math.round(t + 300 + 400 * rnd());
+  events.push({ t: sentAt, kind: "submit", len });
+  return { events, sentAt };
+}
