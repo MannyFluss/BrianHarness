@@ -6,3 +6,4 @@ data/
 *.log
 __pycache__/
 *.pyc
+tools/llm-extractor-eval/out-dry/
