@@ -1,0 +1,13 @@
+{
+  "name": "@eeg/sim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Simulated-user test runner for the EEG Harness Director.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "bin": { "eeg-sim": "./dist/cli.js" },
+  "scripts": { "build": "tsc -p ." },
+  "dependencies": { "@eeg/core": "0.1.0" }
+}

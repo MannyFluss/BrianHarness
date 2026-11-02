@@ -1,0 +1,101 @@
+/**
+ * Per-user interest map. Two layers:
+ *  - FrameState (fast, per turn, in memory) lives in session.ts.
+ *  - InterestMap (slow, persisted save file) lives here: running weighted means
+ *    of engagement per topic and per question style.
+ */
+import type { InterestMapData, QuestionStyle, ScoreCell } from "./types.js";
+import { QUESTION_STYLES } from "./types.js";
+import { TOPICS } from "./topics.js";
+
+/** Unseen cells behave as if observed once at this value (optimistic-ish prior). */
+export const PRIOR_MEAN = 0.45;
+export const PRIOR_N = 1;
+
+export class InterestMap {
+  data: InterestMapData;
+  constructor(data: InterestMapData) {
+    this.data = data;
+  }
+  static fresh(userId: string): InterestMap {
+    return new InterestMap({ version: 1, userId, sessions: 0, turns: 0, topics: {}, styles: {}, updatedAt: new Date().toISOString() });
+  }
+  static fromJSON(json: unknown): InterestMap {
+    const d = json as InterestMapData;
+    if (!d || d.version !== 1 || typeof d.userId !== "string") throw new Error("not an interest map v1 save file");
+    return new InterestMap({ ...d, topics: d.topics ?? {}, styles: d.styles ?? {} });
+  }
+  toJSON(): InterestMapData {
+    return this.data;
+  }
+
+  private bump(table: Record<string, ScoreCell>, key: string, value: number, weight: number) {
+    const cell = table[key] ?? { mean: PRIOR_MEAN, n: 0, last: value, updatedAt: "" };
+    const n = cell.n + weight;
+    // incremental weighted mean, prior counts as PRIOR_N observations on first touch
+    const effN = cell.n === 0 ? PRIOR_N + weight : n;
+    cell.mean = cell.mean + (weight * (value - cell.mean)) / effN;
+    cell.n = n;
+    cell.last = value;
+    cell.updatedAt = new Date().toISOString();
+    table[key] = cell;
+  }
+
+  observeTopic(topic: string, engagement: number, weight = 1) {
+    this.bump(this.data.topics, topic, engagement, weight);
+  }
+  observeStyle(style: QuestionStyle, engagement: number, weight = 1) {
+    this.bump(this.data.styles, style, engagement, weight);
+  }
+
+  topic(topic: string): ScoreCell {
+    return this.data.topics[topic] ?? { mean: PRIOR_MEAN, n: 0, last: 0, updatedAt: "" };
+  }
+  style(style: QuestionStyle): ScoreCell {
+    return this.data.styles[style] ?? { mean: PRIOR_MEAN, n: 0, last: 0, updatedAt: "" };
+  }
+
+  /** Topics ranked by mean (only observed ones). */
+  topTopics(k = 5): Array<[string, number, number]> {
+    return Object.entries(this.data.topics)
+      .filter(([, c]) => c.n > 0)
+      .sort((a, b) => b[1].mean - a[1].mean)
+      .slice(0, k)
+      .map(([t, c]) => [t, c.mean, c.n]);
+  }
+  topStyles(k = 3): Array<[string, number, number]> {
+    return Object.entries(this.data.styles)
+      .filter(([, c]) => c.n > 0)
+      .sort((a, b) => b[1].mean - a[1].mean)
+      .slice(0, k)
+      .map(([t, c]) => [t, c.mean, c.n]);
+  }
+
+  /**
+   * The Director's current best guess at the user's passion, or null if not confident:
+   * top topic needs mean >= minMean, n >= minN, and a margin over the runner-up.
+   */
+  hypothesis(opts: { minMean?: number; minN?: number; margin?: number } = {}): string | null {
+    const { minMean = 0.55, minN = 1.5, margin = 0.08 } = opts;
+    const ranked = Object.entries(this.data.topics).filter(([, c]) => c.n > 0).sort((a, b) => b[1].mean - a[1].mean);
+    const top = ranked[0];
+    if (!top) return null;
+    const second = ranked[1]?.[1].mean ?? PRIOR_MEAN;
+    if (top[1].mean >= minMean && top[1].n >= minN && top[1].mean - second >= margin) return top[0];
+    return null;
+  }
+
+  /** UCB1-style value: exploit mean + exploration bonus for little-seen cells. */
+  ucb(kind: "topic" | "style", key: string, c = 0.35): number {
+    const cell = kind === "topic" ? this.topic(key) : this.style(key as QuestionStyle);
+    const total = Math.max(1, this.data.turns);
+    return cell.mean + c * Math.sqrt(Math.log(total + 1) / (cell.n + PRIOR_N));
+  }
+
+  allTopics(): string[] {
+    return Array.from(new Set([...TOPICS, ...Object.keys(this.data.topics)]));
+  }
+  allStyles(): QuestionStyle[] {
+    return QUESTION_STYLES;
+  }
+}

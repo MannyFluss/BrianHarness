@@ -1,0 +1,148 @@
+/**
+ * Signal sources: the "input devices" of the harness. Each source turns raw samples
+ * into a FeatureMap for a time window (one user turn). The engagement estimator only
+ * ever sees FeatureMaps, so typing, BrainFlow EEG, and fake EEG are swappable plugins.
+ */
+import type { FeatureMap, TypingEvent } from "./types.js";
+import type { Rng } from "./rng.js";
+import { makeRng } from "./rng.js";
+
+export interface TimeWindow {
+  /** when the Director's message was shown (ms epoch) */
+  from: number;
+  /** when the user hit send (ms epoch) */
+  to: number;
+}
+
+export interface SignalSource {
+  /** stable id, also the feature-key prefix, e.g. "typing", "eeg" */
+  readonly id: string;
+  readonly kind: "typing" | "eeg" | "fake-eeg";
+  start?(): void | Promise<void>;
+  stop?(): void | Promise<void>;
+  /** Push one raw sample. Typing events arrive from the renderer over IPC. */
+  push(sample: unknown): void;
+  /** Summarise samples inside the window into numeric features (keys prefixed with id). */
+  summarize(window: TimeWindow): FeatureMap;
+  /** Drop samples older than t (called after each turn). */
+  clear(before: number): void;
+}
+
+/** Gap between key events that counts as a "thinking pause". */
+export const PAUSE_MS = 2000;
+
+/** Pure function so the sim runner and tests can use it without a source instance. */
+export function summarizeTyping(events: TypingEvent[], window: TimeWindow): FeatureMap {
+  const ev = events.filter((e) => e.t >= window.from && e.t <= window.to).sort((a, b) => a.t - b.t);
+  const keys = ev.filter((e) => e.kind === "insert" || e.kind === "delete" || e.kind === "paste");
+  const first = keys[0];
+  const firstKeyAt = first ? first.t : window.to;
+  let inserts = 0, deletions = 0, pastes = 0, edits = 0, pauses = 0, longestPause = 0, pauseTotal = 0;
+  let inDeleteRun = false;
+  for (let i = 0; i < keys.length; i++) {
+    const e = keys[i]!;
+    if (e.kind === "insert") inserts++;
+    if (e.kind === "paste") pastes++;
+    if (e.kind === "delete") {
+      deletions++;
+      inDeleteRun = true;
+    } else if (inDeleteRun) {
+      // a deletion run followed by new text = one revision ("edit")
+      edits++;
+      inDeleteRun = false;
+    }
+    if (i > 0) {
+      const gap = e.t - keys[i - 1]!.t;
+      if (gap >= PAUSE_MS) {
+        pauses++;
+        pauseTotal += gap;
+        longestPause = Math.max(longestPause, gap);
+      }
+    }
+  }
+  const finalLen = ev.length ? ev[ev.length - 1]!.len : 0;
+  const composeMs = Math.max(0, window.to - firstKeyAt);
+  const activeMs = Math.max(1, composeMs - pauseTotal);
+  const strokes = inserts + deletions;
+  return {
+    "typing.replyLatencyMs": Math.max(0, firstKeyAt - window.from),
+    "typing.composeMs": composeMs,
+    "typing.totalMs": Math.max(0, window.to - window.from),
+    "typing.keystrokes": strokes,
+    "typing.inserts": inserts,
+    "typing.deletions": deletions,
+    "typing.deletionRatio": strokes ? deletions / strokes : 0,
+    "typing.edits": edits,
+    "typing.pastes": pastes,
+    "typing.pauses": pauses,
+    "typing.longestPauseMs": longestPause,
+    "typing.charsPerSec": (inserts / activeMs) * 1000,
+    "typing.finalLength": finalLen,
+  };
+}
+
+export class TypingSignalSource implements SignalSource {
+  readonly id = "typing";
+  readonly kind = "typing" as const;
+  private events: TypingEvent[] = [];
+  push(sample: unknown): void {
+    const e = sample as TypingEvent;
+    if (typeof e?.t === "number" && typeof e?.kind === "string") this.events.push(e);
+  }
+  pushMany(events: TypingEvent[]): void {
+    for (const e of events) this.push(e);
+  }
+  summarize(window: TimeWindow): FeatureMap {
+    return summarizeTyping(this.events, window);
+  }
+  clear(before: number): void {
+    this.events = this.events.filter((e) => e.t >= before);
+  }
+  snapshot(window: TimeWindow): TypingEvent[] {
+    return this.events.filter((e) => e.t >= window.from && e.t <= window.to);
+  }
+}
+
+/**
+ * Fake EEG for blind tests: generates band-power-like samples from a HIDDEN engagement
+ * curve the estimator never sees directly. Later a BrainFlowSource (synthetic board,
+ * then real headset) implements the same interface and emits the same feature keys.
+ */
+export class FakeEegSource implements SignalSource {
+  readonly id = "eeg";
+  readonly kind = "fake-eeg" as const;
+  private samples: Array<{ t: number; alpha: number; beta: number; theta: number }> = [];
+  private rng: Rng;
+  constructor(
+    private truth: (t: number) => number,
+    opts: { seed?: number; noise?: number } = {},
+  ) {
+    this.rng = makeRng(opts.seed ?? 7);
+    this.noise = opts.noise ?? 0.15;
+  }
+  private noise: number;
+  push(sample: unknown): void {
+    const s = sample as { t: number; alpha: number; beta: number; theta: number };
+    if (typeof s?.t === "number") this.samples.push(s);
+  }
+  /** Simulate `hz` samples per second over a window (call from sim / test loops). */
+  generate(window: TimeWindow, hz = 4): void {
+    const step = 1000 / hz;
+    for (let t = window.from; t <= window.to; t += step) {
+      const e = Math.min(1, Math.max(0, this.truth(t)));
+      const n = () => (this.rng() - 0.5) * 2 * this.noise;
+      this.samples.push({ t, beta: 0.3 + 0.5 * e + n(), alpha: 0.7 - 0.4 * e + n(), theta: 0.6 - 0.3 * e + n() });
+    }
+  }
+  summarize(window: TimeWindow): FeatureMap {
+    const s = this.samples.filter((x) => x.t >= window.from && x.t <= window.to);
+    if (!s.length) return {};
+    const avg = (f: (x: (typeof s)[number]) => number) => s.reduce((a, x) => a + f(x), 0) / s.length;
+    const alpha = avg((x) => x.alpha), beta = avg((x) => x.beta), theta = avg((x) => x.theta);
+    // classic engagement index beta / (alpha + theta), roughly 0.2..1.2 here
+    return { "eeg.alpha": alpha, "eeg.beta": beta, "eeg.theta": theta, "eeg.engagementIndex": beta / Math.max(0.05, alpha + theta), "eeg.samples": s.length };
+  }
+  clear(before: number): void {
+    this.samples = this.samples.filter((x) => x.t >= before);
+  }
+}
