@@ -17,7 +17,7 @@ export interface TimeWindow {
 export interface SignalSource {
   /** stable id, also the feature-key prefix, e.g. "typing", "eeg" */
   readonly id: string;
-  readonly kind: "typing" | "eeg" | "fake-eeg";
+  readonly kind: "typing" | "eeg" | "fake-eeg" | "prepared" | "replay";
   start?(): void | Promise<void>;
   stop?(): void | Promise<void>;
   /** Push one raw sample. Typing events arrive from the renderer over IPC. */
@@ -144,5 +144,61 @@ export class FakeEegSource implements SignalSource {
   }
   clear(before: number): void {
     this.samples = this.samples.filter((x) => x.t >= before);
+  }
+}
+
+/**
+ * Official source for features computed elsewhere (an offline EEG pipeline, a synthetic generator,
+ * a Python sim). Call prepare(features) right before session.reply(); the next summarize() returns
+ * exactly those features (keys used as-is, e.g. "eeg.engagementIndex", "eeg.quality") and then
+ * forgets them, so a turn without prepare() contributes nothing. Pass several prepare() calls in a
+ * turn and they merge (later keys win).
+ */
+export class PreparedFeatureSource implements SignalSource {
+  readonly kind = "prepared" as const;
+  private next: FeatureMap | null = null;
+  constructor(readonly id = "eeg") {}
+  prepare(features: FeatureMap) {
+    this.next = { ...(this.next ?? {}), ...features };
+  }
+  push(sample: unknown) {
+    if (sample && typeof sample === "object") this.prepare(sample as FeatureMap);
+  }
+  summarize(): FeatureMap {
+    const f = this.next ?? {};
+    this.next = null;
+    return f;
+  }
+  clear() {}
+}
+
+/**
+ * Replays recorded per-turn feature rows in order (e.g. the "features" of user_turn lines from a
+ * session JSONL, filtered to one prefix). Turn i's summarize() returns rows[i]; past the end -> {}.
+ * Use it for yoked/sham controls: replay another session's EEG against this one.
+ */
+export class ReplayFeatureSource implements SignalSource {
+  readonly kind = "replay" as const;
+  private i = 0;
+  constructor(private rows: FeatureMap[], readonly id = "eeg", private prefix: string | null = "eeg.") {}
+  /** Rows from a session JSONL text (user_turn lines), keeping keys under `prefix`. */
+  static fromJsonl(jsonl: string, prefix = "eeg.", id = "eeg"): ReplayFeatureSource {
+    const rows: FeatureMap[] = [];
+    for (const line of jsonl.split("\n")) {
+      if (!line.trim()) continue;
+      const e = JSON.parse(line);
+      if (e.type === "user_turn") rows.push(e.features ?? {});
+    }
+    return new ReplayFeatureSource(rows, id, prefix);
+  }
+  push() {}
+  summarize(): FeatureMap {
+    const row = this.rows[this.i++] ?? {};
+    if (!this.prefix) return { ...row };
+    return Object.fromEntries(Object.entries(row).filter(([k]) => k.startsWith(this.prefix!)));
+  }
+  clear() {}
+  get remaining() {
+    return Math.max(0, this.rows.length - this.i);
   }
 }
