@@ -2,12 +2,16 @@
 /**
  * eeg-sim: run simulated personas against the Director.
  *   npm run sim -- [--turns 12] [--seeds 5] [--persona chef] [--fake-eeg] [--out data/sim] [--logs]
- * Uses the offline mock backend unless EEG_BACKEND=openai and a key are set (then it costs money,
- * so it also requires --allow-paid).
+ *                  [--provider mock|ollama|openai-compatible|openai|anthropic|claude-code] [--model M]
+ *                  [--ollama-url http://127.0.0.1:11434] [--base-url URL] [--temperature T]
+ *                  [--backend-seed N] [--allow-paid]
+ * Default: offline mock. Local Ollama / local OpenAI-compatible servers are free and run without
+ * --allow-paid; Ollama "*:cloud" models, remote APIs and subscriptions need --allow-paid.
+ * Env fallbacks: BH_PROVIDER/EEG_BACKEND, EEG_MODEL, EEG_OLLAMA_URL/OLLAMA_HOST, EEG_TEMPERATURE, EEG_SEED.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createBackendFromEnv } from "@brianharness/core";
+import { backendSpecFromEnv, createBackend, detectOllama, parseBackendRef, type BackendSpec, type ProviderKind } from "@brianharness/core";
 import { PERSONAS } from "./personas.js";
 import { runPersona, summarize, type RunResult } from "./runner.js";
 
@@ -30,16 +34,36 @@ if (!personas.length) {
   console.error(`unknown persona ${which}; have: ${PERSONAS.map((p) => p.id).join(", ")}`);
   process.exit(1);
 }
-const envBackend = createBackendFromEnv();
-if (envBackend.paid && arg("allow-paid") !== "true") {
-  console.error(`backend ${envBackend.id} is paid; re-run with --allow-paid to spend money, or unset EEG_BACKEND`);
+const spec: BackendSpec = backendSpecFromEnv();
+if (arg("provider")) Object.assign(spec, parseBackendRef(arg("provider")!));
+if (arg("model")) spec.model = arg("model");
+if (arg("ollama-url")) spec.baseUrl = arg("ollama-url");
+if (arg("base-url")) spec.baseUrl = arg("base-url");
+if (arg("temperature")) spec.temperature = Number(arg("temperature"));
+const fixedBackendSeed = arg("backend-seed") ? Number(arg("backend-seed")) : spec.seed;
+if (spec.provider === "ollama" && !spec.model) {
+  const det = await detectOllama(spec.baseUrl);
+  const local = det.models.find((m) => !m.cloud);
+  if (!det.running || !local) {
+    console.error(`ollama: ${det.running ? "no local models" : `not reachable at ${det.baseUrl} (${det.error})`}; pass --model to skip detection`);
+    process.exit(1);
+  }
+  spec.model = local.name;
+  console.log(`ollama: detected ${det.models.length} model(s) at ${det.baseUrl}; using ${spec.model}`);
+}
+const probe = await createBackend({ ...spec, seed: fixedBackendSeed ?? 1 });
+if (probe.paid && arg("allow-paid") !== "true") {
+  console.error(`backend ${probe.id} is paid (or uses your subscription quota); re-run with --allow-paid, or use --provider mock / a local ollama model`);
   process.exit(2);
 }
+const useLlm = (spec.provider as ProviderKind) !== "mock";
+console.log(`backend: ${probe.id}${useLlm ? ` temperature=${spec.temperature ?? "default"} seed=${fixedBackendSeed ?? "per-run"}` : ""}`);
 
 const results: RunResult[] = [];
 for (const p of personas) {
   for (let s = 1; s <= seeds; s++) {
-    const r = await runPersona(p, { turns, seed: s, fakeEeg, backend: envBackend.paid ? envBackend : undefined, dataDir: writeLogs ? join(out, "logs") : undefined });
+    const backend = useLlm ? await createBackend({ ...spec, seed: fixedBackendSeed ?? s }) : undefined;
+    const r = await runPersona(p, { turns, seed: s, fakeEeg, backend, dataDir: writeLogs ? join(out, "logs") : undefined });
     results.push(r);
     const trail = r.hypothesisByTurn.map((h) => (h === p.passion ? "#" : h ? "x" : ".")).join("");
     console.log(`${p.id.padEnd(10)} seed ${s}  ${trail}  found=${r.found ? "yes" : "no "} turnsToFind=${r.turnsToFind ?? "-"}  final=${r.finalHypothesis ?? "none"}  topStyle=${r.topStyle}`);
@@ -52,5 +76,5 @@ for (const s of summarize(results)) {
 }
 mkdirSync(out, { recursive: true });
 const file = join(out, `report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
-writeFileSync(file, JSON.stringify({ turns, seeds, fakeEeg, backend: envBackend.paid ? envBackend.id : "mock", summary: summarize(results), results }, null, 2));
+writeFileSync(file, JSON.stringify({ turns, seeds, fakeEeg, backend: probe.id, temperature: spec.temperature,  summary: summarize(results), results }, null, 2));
 console.log(`\nreport: ${file}`);

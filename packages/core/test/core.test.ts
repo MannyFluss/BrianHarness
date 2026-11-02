@@ -74,7 +74,7 @@ test("backend selection never goes paid by accident", () => {
   assert.equal(createBackendFromEnv({ OPENAI_API_KEY: "sk-x" }).id, "mock", "key alone must not enable paid calls");
   assert.equal(createBackendFromEnv({ EEG_BACKEND: "openai" }).id, "mock", "no key -> mock");
   const b = createBackendFromEnv({ EEG_BACKEND: "openai", EEG_API_KEY: "sk-x", EEG_MODEL: "m1" });
-  assert.equal(b.id, "openai:m1");
+  assert.equal(b.id, "openai-compatible:m1");
   assert.equal(b.paid, true);
 });
 

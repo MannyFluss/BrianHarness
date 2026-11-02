@@ -7,6 +7,8 @@ import type { ChatMessage, DirectorPlan } from "./types.js";
 import { OPEN_TOPIC } from "./director.js";
 import { TOPIC_LEXICON, topicLabel } from "./topics.js";
 import { makeRng, pick, type Rng } from "./rng.js";
+import { OllamaBackend } from "./providers/ollama.js";
+import { isLocalUrl } from "./providers/transcript.js";
 
 export interface GenerateRequest {
   messages: ChatMessage[];
@@ -74,18 +76,28 @@ export class MockBackend implements ModelBackend {
   }
 }
 
-/** Any OpenAI-compatible /chat/completions endpoint (OpenAI, OpenRouter, local LM Studio, Ollama...). */
+/**
+ * Any OpenAI-compatible /chat/completions endpoint (OpenAI, OpenRouter, LM Studio, llama.cpp,
+ * Ollama's /v1...). A loopback/LAN baseUrl counts as free (paid=false) and needs no API key.
+ */
 export class OpenAICompatibleBackend implements ModelBackend {
   readonly id: string;
-  readonly paid = true;
-  constructor(private cfg: { apiKey: string; baseUrl: string; model: string; maxTokens?: number }) {
-    this.id = `openai:${cfg.model}`;
+  readonly paid: boolean;
+  constructor(private cfg: { apiKey?: string; baseUrl: string; model: string; maxTokens?: number; temperature?: number; seed?: number; paid?: boolean }) {
+    this.id = `openai-compatible:${cfg.model}`;
+    this.paid = cfg.paid ?? !isLocalUrl(cfg.baseUrl);
   }
   async generate(req: GenerateRequest): Promise<GenerateResult> {
     const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${this.cfg.apiKey}` },
-      body: JSON.stringify({ model: this.cfg.model, messages: req.messages, max_tokens: this.cfg.maxTokens ?? 200, temperature: 0.8 }),
+      headers: { "content-type": "application/json", ...(this.cfg.apiKey ? { authorization: `Bearer ${this.cfg.apiKey}` } : {}) },
+      body: JSON.stringify({
+        model: this.cfg.model,
+        messages: req.messages,
+        max_tokens: this.cfg.maxTokens ?? 200,
+        temperature: this.cfg.temperature ?? 0.8,
+        ...(this.cfg.seed !== undefined ? { seed: this.cfg.seed } : {}),
+      }),
       signal: req.signal,
     });
     if (!res.ok) throw new Error(`model backend ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -95,19 +107,34 @@ export class OpenAICompatibleBackend implements ModelBackend {
   }
 }
 
+const num = (v: string | undefined) => (v === undefined || v === "" ? undefined : Number(v));
+
 /**
- * Pick a backend from env. Default: mock. Real calls need EEG_BACKEND=openai AND
- * EEG_API_KEY (or OPENAI_API_KEY). EEG_BASE_URL / EEG_MODEL are optional.
+ * Sync env factory (kept for the desktop app's legacy path and the sim). Default: mock.
+ *  EEG_BACKEND=ollama  [EEG_MODEL, EEG_OLLAMA_URL|OLLAMA_HOST]          free when local
+ *  EEG_BACKEND=openai  + EEG_API_KEY|OPENAI_API_KEY [EEG_BASE_URL, EEG_MODEL]  (OpenAI-compatible HTTP)
+ *  EEG_TEMPERATURE, EEG_SEED apply to both. For subscription providers use createBackend().
  */
 export function createBackendFromEnv(env: Record<string, string | undefined> = process.env): ModelBackend {
   const kind = (env.EEG_BACKEND ?? "mock").toLowerCase();
-  if (kind === "openai") {
+  const temperature = num(env.EEG_TEMPERATURE), seed = num(env.EEG_SEED);
+  if (kind === "ollama") {
+    return new OllamaBackend({ model: env.EEG_MODEL ?? "llama3.2", baseUrl: env.EEG_OLLAMA_URL ?? ollamaHostUrl(env.OLLAMA_HOST), temperature, seed });
+  }
+  if (kind === "openai" || kind === "openai-compatible") {
+    const baseUrl = env.EEG_BASE_URL ?? "https://api.openai.com/v1";
     const apiKey = env.EEG_API_KEY ?? env.OPENAI_API_KEY;
-    if (!apiKey) {
-      console.warn("[eeg-harness] EEG_BACKEND=openai but no EEG_API_KEY/OPENAI_API_KEY set; using mock backend");
+    if (!apiKey && !isLocalUrl(baseUrl)) {
+      console.warn("[brianharness] EEG_BACKEND=openai but no EEG_API_KEY/OPENAI_API_KEY set; using mock backend");
       return new MockBackend();
     }
-    return new OpenAICompatibleBackend({ apiKey, baseUrl: env.EEG_BASE_URL ?? "https://api.openai.com/v1", model: env.EEG_MODEL ?? "gpt-4o-mini" });
+    return new OpenAICompatibleBackend({ apiKey, baseUrl, model: env.EEG_MODEL ?? "gpt-4o-mini", temperature, seed });
   }
-  return new MockBackend(env.EEG_MOCK_SEED ? Number(env.EEG_MOCK_SEED) : 42);
+  return new MockBackend(env.EEG_MOCK_SEED ? Number(env.EEG_MOCK_SEED) : seed ?? 42);
+}
+
+/** OLLAMA_HOST may be "host:port" or a URL */
+export function ollamaHostUrl(h: string | undefined): string | undefined {
+  if (!h) return undefined;
+  return /^https?:\/\//.test(h) ? h : `http://${h}`;
 }
