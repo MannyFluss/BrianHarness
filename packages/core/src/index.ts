@@ -18,3 +18,5 @@ export * from "./providers/claude-code.js";
 export * from "./providers/factory.js";
 export * from "./providers/credential-store.js";
 export * from "./tagger.js";
+export * from "./providers/hub.js";
+export * from "./title.js";

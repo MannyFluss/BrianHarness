@@ -1,4 +1,4 @@
-# EEG Harness: architecture (v0.1)
+# BrianHarness: architecture (v0.2)
 
 The "AI Director" is a chat bot that tries to discover what genuinely draws a person in,
 first from **how they type**, later from **EEG**. This doc is the map; the code is small enough to read.
@@ -130,7 +130,7 @@ interface SignalSource {
   "styles": { "personal-story": { "mean": 0.63, "n": 6, "last": 0.7, "updatedAt": "..." } },
   "updatedAt": "..." }
 ```
-App data lives in Electron `userData/data` (on a Mac: `~/Library/Application Support/EEG Harness/data`),
+App data lives in Electron `userData/data` (on a Mac: `~/Library/Application Support/BrianHarness/data`; the folder name is `brand.json#dataDirName`),
 overridable with `EEG_DATA_DIR`.
 
 ## 7. Model backends
@@ -139,12 +139,21 @@ overridable with `EEG_DATA_DIR`.
 interface ModelBackend { id: string; paid: boolean; generate({messages, plan, stateNote}): Promise<{text}> }
 ```
 - **MockBackend** (default): offline, seeded, template-based; never repeats a recent line.
-- **OpenAICompatibleBackend**: any `/chat/completions` endpoint (OpenAI, OpenRouter, LM Studio,
-  Ollama). Activates only when **both** `EEG_BACKEND=openai` **and** `EEG_API_KEY` (or
-  `OPENAI_API_KEY`) are set; a stray key alone never enables paid calls. `EEG_BASE_URL`, `EEG_MODEL`
-  optional. The sim CLI additionally refuses a paid backend without `--allow-paid`.
-- **pi-ai backend** (planned): LearnHarness uses `@earendil-works/pi-ai` for multi-provider and
-  subscription logins. It fits as one more `ModelBackend` class; deferred until a provider is chosen.
+- **OllamaBackend**: native `/api/chat` (temperature, seed). `detectOllama()` lists models via `/api/tags`.
+  Local models are free; `*:cloud` models are marked paid.
+- **OpenAICompatibleBackend**: any `/chat/completions` endpoint. A localhost base URL is free;
+  a remote one is paid.
+- **PiAiBackend** (`openai` / `anthropic`): ChatGPT subscription OAuth, Claude OAuth or API keys via
+  pi-ai (MIT, lazily imported).
+- **ClaudeCodeBackend**: shells out to the user's `claude -p` (their Claude Pro/Max login) with
+  no tools, no MCP, no hooks, no session persistence, an empty temp cwd and `ANTHROPIC_API_KEY` stripped.
+- **ProviderHub** (`providers/hub.ts`): status/detection for the picker, `login`/`setApiKey`/`logout`,
+  `settings.json` persistence, and `createBackend()`. Credentials go to `FileCredentialStore`
+  (`<userData>/credentials.json`, 0600, optionally encrypted by a `CredentialCipher`; the desktop app
+  passes Electron safeStorage, which uses the macOS Keychain).
+- **Paid rule**: the desktop app uses whatever Manny picks. The sim CLI and sidecar refuse any paid backend
+  without `--allow-paid` (the sidecar also needs `options.allowPaid`).
+- **HarnessSession.setBackend()** swaps the model mid-chat; the Director state is untouched.
 
 ## 8. Simulated-user test runner
 

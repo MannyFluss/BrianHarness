@@ -7,7 +7,8 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "resolveJsonModule": true
   },
   "include": ["src"]
 }

@@ -1,17 +1,17 @@
 {
   "name": "@brianharness/desktop",
-  "productName": "EEG Harness",
+  "productName": "BrianHarness",
   "version": "0.1.0",
   "private": true,
   "author": "MannyFluss",
   "type": "module",
-  "description": "EEG Harness desktop chat app (Electron + React + Tailwind), styled after LearnHarness.",
+  "description": "BrianHarness desktop chat app (Electron + React + Tailwind), styled after LearnHarness. Name comes from packages/core/src/brand.json.",
   "main": "electron/main.mjs",
   "scripts": {
     "build": "vite build",
     "start": "electron .",
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && EEG_DEV_URL=http://localhost:5173 electron .\"",
-    "dist:mac": "npm run build && electron-builder --mac --arm64"
+    "dist:mac": "npm run build && electron-builder --config electron-builder.cjs --mac --arm64"
   },
   "dependencies": {
     "@brianharness/core": "0.1.0"

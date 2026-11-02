@@ -12,4 +12,9 @@ export async function runDemo(win) {
     await new Promise((r) => setTimeout(r, 600));
   }
   await wc.executeJavaScript(`window.__eegDemo.draft("I think it's the moment it clicks")`);
+  if (process.env.EEG_SCREENSHOT_PICKER !== "0") {
+    await wc.executeJavaScript("window.__eegDemo.openPicker()");
+    // wait for provider detection to render
+    await wc.executeJavaScript("new Promise(r => { const t = setInterval(() => { if (!document.body.innerText.includes('Detecting providers')) { clearInterval(t); r(); } }, 100); })");
+  }
 }

@@ -99,6 +99,11 @@ export class HarnessSession {
     return this.opts.backend;
   }
 
+  /** Swap the model mid-conversation (the picker). The Director state is untouched. */
+  setBackend(b: ModelBackend): void {
+    this.opts.backend = b;
+  }
+
   private log(e: LogEvent) {
     this.opts.store?.append(this.id, e);
   }

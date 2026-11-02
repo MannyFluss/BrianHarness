@@ -1,7 +1,9 @@
-import { PanelLeftCloseIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { PanelLeftCloseIcon, PlusIcon } from "lucide-react";
 import type { Info, SessionItem } from "../bridge";
 import { cn } from "../lib";
 import { Mark } from "./Mark";
+import { ModelPicker } from "./ModelPicker";
+import { BRAND_NAME } from "../brand";
 
 function when(iso: string | null) {
   if (!iso) return "";
@@ -9,14 +11,14 @@ function when(iso: string | null) {
   return d.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-export function Sidebar({ open, sessions, info, onNew, onClose }: { open: boolean; sessions: SessionItem[]; info: Info | null; onNew: () => void; onClose: () => void }) {
+export function Sidebar({ open, sessions, info, onNew, onClose, onInfo, pickerRef }: { open: boolean; sessions: SessionItem[]; info: Info | null; onNew: () => void; onClose: () => void; onInfo: (i: Info) => void; pickerRef?: React.MutableRefObject<(() => void) | null> }) {
   return (
     <aside className={cn("shrink-0 overflow-hidden transition-[width] duration-200", open ? "w-72" : "w-0")}>
       <div className="flex h-full w-72 flex-col border-r bg-background">
         <div className="eeg-drag eeg-lights-gutter flex h-15 items-center justify-between border-b border-border px-4">
           <div className="flex items-center gap-2">
             <span className="flex size-9 items-center justify-center rounded-md text-foreground"><Mark className="size-6" /></span>
-            <span className="font-title text-xl tracking-tight">EEG Harness</span>
+            <span className="font-title text-xl tracking-tight">{BRAND_NAME}</span>
           </div>
           <button onClick={onClose} aria-label="Close sidebar" className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
             <PanelLeftCloseIcon className="size-4" />
@@ -41,10 +43,7 @@ export function Sidebar({ open, sessions, info, onNew, onClose }: { open: boolea
           ))}
         </div>
         <div className="border-t border-border/60 px-3 pb-3 pt-2">
-          <div className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground">
-            <SettingsIcon className="size-3" />
-            <span className="truncate">model: {info?.backend ?? "…"}{info?.paid ? " (paid)" : ""}</span>
-          </div>
+          <ModelPicker info={info} onChanged={onInfo} openRef={pickerRef} />
         </div>
       </div>
     </aside>
