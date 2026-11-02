@@ -21,6 +21,7 @@ import {
   LocalStorageKV,
   MemoryKV,
   StudyController,
+  type StudySessionRecord,
   scheduleExportFile,
   createBrowserBackend,
   zipFiles,
@@ -239,10 +240,14 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   };
 
   let host: HarnessHost | null = null;
-  const study = new StudyController(opts.secretKV ?? safeLocalKV("brianharness/"), settingsKV);
+  // progress lives next to the schedule in the secure store (Keychain on iOS); settingsKV = legacy location (migrated).
+  // recovery sources if the progress is gone: local session logs + the upload ledger (iOS: Documents/pending-uploads)
+  const study = new StudyController(opts.secretKV ?? safeLocalKV("brianharness/"), settingsKV, {
+    recover: async (): Promise<StudySessionRecord[]> => [...(await getHost()).studyRecords(), ...(await (await uploadQueue).studyRecords().catch(() => []))],
+  });
   // launch: discard a schedule sealed under an older study protocol (practice build 1438); sessions + upload queue untouched
   void study.ensureProtocol().then((r) => { if (r.reset) console.warn("[brianharness] study schedule from an older protocol discarded; Start study seals a new one"); }).catch(() => {});
-  const getHost = async () => {
+  const getHost = async (): Promise<HarnessHost> => {
     if (host) return host;
     const { storage } = await ready;
     let tagger: HostTagger = opts.tagger;
@@ -494,6 +499,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         return { ok, files: 1, via: ok ? "download" : "none" };
       },
       reissue: (n: number, confirm: string, reason?: string) => study.requestReissue(n, confirm, reason),
+      setNext: (n: number, confirm: string) => study.setNext(n, confirm),
       async cancelReissue() {
         await study.cancelReissue();
         return { ok: true };

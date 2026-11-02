@@ -46,10 +46,19 @@ const fileKV = {
     o[k] = v;
     writeFileSync(progressFile(), JSON.stringify(o), { mode: 0o600 });
   },
-  remove: async () => {},
+  remove: async (k) => {
+    let o = {};
+    try { o = JSON.parse(readFileSync(progressFile(), "utf8")); } catch { return; }
+    delete o[k];
+    writeFileSync(progressFile(), JSON.stringify(o), { mode: 0o600 });
+  },
   keys: async () => [],
 };
-const study = new StudyController(credentialSecretStore({ read: (id) => hub.credentials.read(id), modify: (id, fn) => hub.credentials.modify(id, fn) }), fileKV);
+// progress lives in the safeStorage credentials file next to the schedule; study-progress.json = legacy (migrated, key removed)
+const study = new StudyController(credentialSecretStore({ read: (id) => hub.credentials.read(id), modify: (id, fn) => hub.credentials.modify(id, fn) }), fileKV, {
+  // recovery sources if the progress is gone: local session logs + the pending-uploads ledger
+  recover: async () => [...host.studyRecords(), ...(await uploads.studyRecords().catch(() => []))],
+});
 // launch: discard a schedule sealed under an older study protocol (practice builds); session logs untouched
 study.ensureProtocol().then((r) => { if (r.reset) console.error("[brianharness] study schedule from an older protocol discarded; Start study seals a new one"); }).catch(() => {});
 // dev/debug only: hash and unseal (never in a packaged build unless BH_STUDY_DEBUG=1)
@@ -190,6 +199,7 @@ ipcMain.handle("study:enable", async () => {
 });
 ipcMain.handle("study:disable", async () => (await study.disable(), { ok: true }));
 ipcMain.handle("study:reissue", (_e, { n, confirm, reason }) => study.requestReissue(Number(n), String(confirm ?? ""), reason == null ? undefined : String(reason)));
+ipcMain.handle("study:setNext", (_e, { n, confirm }) => study.setNext(Number(n), String(confirm ?? "")));
 ipcMain.handle("study:cancelReissue", async () => (await study.cancelReissue(), { ok: true }));
 ipcMain.handle("uploads:status", () => uploads.summary());
 ipcMain.handle("uploads:flush", () => uploads.flush({ force: true }));

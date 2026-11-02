@@ -142,6 +142,21 @@ falls back (banner "Interest AI unavailable this session (…)"). Nothing to add
   file name = `encodeURIComponent(key)` (keys: `uploads/index`, `uploads/pause`, `uploads/body/<id>`), mark
   the folder excluded from iCloud backup if you prefer. Also pass `appVersion` (CFBundleShortVersionString)
   and `build` (CFBundleVersion) so the Worker rows say which TestFlight build sent them.
+- **Queue storage is now wired (freeze, after E).** If `BHExport.kvGet` exists, `nativeTransportOptions`
+  uses BHExport's kv API as the upload KV (Documents/pending-uploads, one file per `encodeURIComponent(key)`):
+  `kvGet({key}) → {value: string|null}`, `kvSet({key, value})`, `kvRemove({key})`, `kvKeys({prefix?}) → {keys}`.
+  Older shells (no kv*) keep IndexedDB. `window.__BH_APP_INFO__ = {appVersion, build}` injected at document
+  start supplies the Worker's `appVersion` / `build` (`build` may be a number; it is sent as a string).
+  `BHExport.appInfo()` is not called by JS.
+- **Study progress in the Keychain (freeze, after E).** The progress (enabled, next index, last session,
+  pending redo; never the mode) moved from WebView storage to BHKeychain key **`study/phaseD/progress`**,
+  next to `study/phaseD/schedule`, written with a read-back check. First launch of this build migrates the old
+  copy and removes it. If WebView storage was evicted before that (schedule in the Keychain, progress gone),
+  the next index is rebuilt from the session logs left and the pending-uploads ledger in Documents and the next
+  `session_start` logs `progressRecovered: true`; if nothing is left, a red "Study progress lost; contact the
+  Researcher" notice blocks study sessions until Settings → "Set next study session…" (`SET NEXT N`). Please
+  verify on device: start the study, run a session, delete website data (or reinstall keeping the Keychain),
+  relaunch: the study must continue at the right index (Settings shows "Study N/10"), never at 1.
 - **Manual redo.** Settings → "Redo a study session…": pick N (only already assigned), optional reason
   (≤ 120 chars), type `REISSUE N`. The next study session reuses index N; `session_start` logs
   `reissueOf:"manual"`, `manualReissue:true`, `reissueReason?`. Pending redo shows "Next study session redoes N · cancel".

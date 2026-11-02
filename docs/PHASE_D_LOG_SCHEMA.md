@@ -89,7 +89,36 @@ It never changes the schedule or its hash, and the index sequence continues wher
 session). Analysis: dedupe on the last valid session per index, as for automatic reissues. CSV columns
 `reissue_of` (= `manual`) and `reissue_reason`. **Worker note:** `reissueReason` is free text; it must be on the
 Worker's blinding exemption list (like `reason`), otherwise a reason that is exactly "baseline"/"adaptive" would
-be rejected as `blinding:arm_value`.
+be rejected as `blinding:arm_value`. (Done in the Worker at b1c8955.)
+
+## Study progress storage and recovery (`progressRecovered`)
+
+The study progress (`{enabled, next, last?: {sessionId, index}, manualReissue?, manualReissueReason?}`; never
+the mode) is stored in the **same secure store as the schedule**, key `study/phaseD/progress` (iOS: BHKeychain;
+Electron: the safeStorage credentials file; plain web: localStorage, as the schedule), each write verified by
+read-back. Builds up to E kept it in the settings KV (iOS: WebView storage): on first read it is copied into
+the secure store (read-back verified) and the old copy is removed.
+
+If the schedule exists but the progress does not (WKWebView storage eviction, partial restore), the app never
+restarts at index 1. It rebuilds the progress from the study sessions still on the device, for the current
+`scheduleHash` only: the local session logs and the upload ledger (`uploads/index` items carry
+`study: {index, scheduleHash, valid}`; on iOS with BHExport kv* it is `Documents/pending-uploads`, which
+survives eviction). Rule: h = the highest study index found; next = h + 1 if any session with index h is valid
+(>= 8 user turns and the last session rating answered), else h. A valid index is never handed out again. The
+next study session logs, top-level in `session_start`:
+
+```ts
+{ type: "session_start", …, study: { id, index, total, scheduleHash, protocol }, progressRecovered: true }
+```
+
+If nothing can be found, the study is blocked: a notice "Study progress lost; contact the Researcher" is shown
+above the chat and in Settings, no session gets study fields, and Start study / Redo are refused, until the
+participant uses Settings → "Set next study session…" (pick N 1..10, type `SET NEXT N`, as the Researcher
+says). That next study session also logs `progressRecovered: true`. Analysis: a `progressRecovered` session
+marks a point where the device's own progress was rebuilt; check its index against the Worker's rows.
+`progressRecovered` is a boolean, so the Worker's blinding scan accepts it (checked against Worker b1c8955
+`checkJsonl`). A failing secure store (Keychain -34018) behaves as before: the study cannot start and sessions
+run with no study fields.
 
 ## Interest extractor budget
 
@@ -120,7 +149,8 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
   sources: string[],                                       // ["typing:typing"]
   study?: { id: "phaseD", index: number /*1..10*/, total: 10, scheduleHash: string /*64 hex*/, protocol?: number /*2*/ },
   reissueOf?: string,                                      // study only: the invalid previous session, or "manual"
-  manualReissue?: true, reissueReason?: string }           // manual redo only (see Manual reissue)
+  manualReissue?: true, reissueReason?: string,            // manual redo only (see Manual reissue)
+  progressRecovered?: true }                               // first study session after a progress rebuild / Set next
 
 // director_turn
 { type: "director_turn", t: string, turn: number /*0-based, = user replies so far*/, text: string, backend: string,

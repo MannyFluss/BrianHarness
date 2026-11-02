@@ -49,7 +49,11 @@ export interface BHExportPlugin {
 /** ok:false + dismissed:true is a user cancel (no error toast); `error` is a friendly message. */
 export type ExportResult = { ok: boolean; files: number; via: "share-sheet" | "save-dialog" | "download" | "none"; detail?: string; dismissed?: boolean; error?: string; code?: string };
 /** Phase D study status as the UI may show it: never the mode or the schedule. */
-export type StudyStatusView = { enabled: boolean; next: number; total: number; scheduled: boolean; error?: string; pendingReissue?: number };
+export type StudyStatusView = { enabled: boolean; next: number; total: number; scheduled: boolean; error?: string; pendingReissue?: number;
+  /** schedule present, progress gone and not rebuildable: blocking "Study progress lost; contact the Researcher" */
+  progressLost?: boolean;
+  /** progress was rebuilt from the session records on this device */
+  progressRecovered?: boolean };
 /** auto-upload queue (POST /v1/sessions): "N logs waiting to upload", plus finals that need "Export logs" */
 export type UploadStatusView = {
   pending: number; needsExport: number; done: number;
@@ -140,6 +144,8 @@ export interface EegBridge {
     /** manual redo: the next study session reuses index n (1..10, already assigned); confirm must be "REISSUE n" */
     reissue?(n: number, confirm: string, reason?: string): Promise<{ ok: boolean; error?: string }>;
     cancelReissue?(): Promise<{ ok: boolean }>;
+    /** unblock after "progress lost": the next study session gets index n; confirm must be "SET NEXT n" */
+    setNext?(n: number, confirm: string): Promise<{ ok: boolean; error?: string }>;
   };
   /** study-log auto-upload to the Spider Cloud Worker (needs the device token) */
   uploads?: {

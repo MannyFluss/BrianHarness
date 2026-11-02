@@ -9,6 +9,15 @@
  *   - sessions log the study index (1..10) and the schedule's sha256, never the mode
  *   - the hash can be printed (dev/debug hooks); the order only through an explicit unseal call
  *     with a confirmation phrase, meant for after session 10
+ *
+ * Study progress (enabled / next index / last session / pending manual redo; never the mode) lives in the SAME
+ * secure store as the schedule (key `study/phaseD/progress`, written with a read-back check), so a WKWebView
+ * storage eviction cannot reset the study to index 1 while the schedule survives in the Keychain. Older builds
+ * kept it in the settings KV: it is migrated on first read and the old copy removed. A schedule without progress
+ * is recovered from the session records still on the device (local session logs + the durable upload ledger):
+ * next = highest study index found + 1, or that index again if its sessions were all invalid; the next
+ * session_start logs progressRecovered true. Nothing found -> "progress lost": no study session runs until the
+ * participant uses Set next study session (setNext) after contacting the Researcher.
  */
 import { makeRng } from "./rng.js";
 import type { KeyValueStore } from "./platform/kv.js";
@@ -20,6 +29,9 @@ export const STUDY_SESSIONS = 10;
 export const STUDY_SCHEDULE_KEY = "study/phaseD/schedule";
 export const STUDY_PROGRESS_KEY = "study/phaseD/progress";
 export const UNSEAL_PHRASE = "UNSEAL phaseD";
+/** confirmation phrase for the progress-lost unblock ("Set next study session n") */
+export const setNextPhrase = (n: number) => `SET NEXT ${n}`;
+export const STUDY_PROGRESS_LOST_NOTE = "Study progress lost; contact the Researcher";
 /** confirmation phrase for a manual reissue of index n ("Redo study session n") */
 export const reissuePhrase = (n: number) => `REISSUE ${n}`;
 /** optional free-text reason for a manual redo (logged as session_start.reissueReason) */
@@ -65,6 +77,16 @@ export interface StudyAssignment {
   manualReissue?: true;
   /** manual redo only: the participant's short reason (<= REISSUE_REASON_MAX chars) */
   reissueReason?: string;
+  /** the first session after the progress was rebuilt (from session records, or setNext after a loss) */
+  progressRecovered?: true;
+}
+/** one study session found on the device (recovery source); never the mode */
+export interface StudySessionRecord {
+  sessionId?: string;
+  index: number;
+  scheduleHash: string;
+  /** >= STUDY_MIN_USER_TURNS user turns and the LAST session rating answered */
+  valid: boolean;
 }
 export interface StudyStatus {
   enabled: boolean;
@@ -77,6 +99,10 @@ export interface StudyStatus {
   error?: string;
   /** a manual redo is pending: the next study session gets this index */
   pendingReissue?: number;
+  /** schedule present but the progress could not be rebuilt: no study session runs until setNext */
+  progressLost?: true;
+  /** progress was rebuilt from session records; the next session_start logs progressRecovered */
+  progressRecovered?: true;
 }
 
 /** Exactly n/2 adaptive + n/2 baseline, Fisher-Yates with the seeded RNG. */
@@ -153,26 +179,90 @@ interface Progress {
   /** manual redo requested (Settings > Study): the next study session gets this index, then it is cleared */
   manualReissue?: number;
   manualReissueReason?: string;
+  /** rebuilt after a loss: the next assignment logs progressRecovered, then it is cleared */
+  recovered?: true;
+  /** schedule without progress and nothing to rebuild it from: study sessions blocked until setNext */
+  lost?: true;
+}
+
+/** Validity of a study session from its events (same rule as the host: user turns + the LAST session rating). */
+export function studySessionRecord(events: Array<{ type?: string; [k: string]: unknown }>): StudySessionRecord | null {
+  const start = events.find((e) => e.type === "session_start") as { sessionId?: unknown; study?: { index?: unknown; scheduleHash?: unknown } } | undefined;
+  const st = start?.study;
+  if (!st || typeof st.index !== "number" || typeof st.scheduleHash !== "string") return null;
+  const userTurns = events.filter((e) => e.type === "user_turn").length;
+  const r = events.filter((e) => e.type === "rating" && e.scope === "session");
+  const lastVal = r.length ? r[r.length - 1]!.value : null;
+  return {
+    ...(typeof start!.sessionId === "string" ? { sessionId: start!.sessionId } : {}),
+    index: st.index, scheduleHash: st.scheduleHash,
+    valid: userTurns >= STUDY_MIN_USER_TURNS && lastVal !== null && lastVal !== undefined,
+  };
+}
+export function studySessionRecordFromJsonl(jsonl: string): StudySessionRecord | null {
+  const ev: Array<{ type?: string }> = [];
+  for (const line of jsonl.split("\n")) { if (!line.trim()) continue; try { ev.push(JSON.parse(line)); } catch { /* skip */ } }
+  return studySessionRecord(ev);
+}
+/**
+ * Rebuild the next index from the study sessions found for this schedule: highest index h; next = h + 1 if any
+ * session with index h was valid, else h (it is owed again). A valid index is never handed out again.
+ * null = nothing found for this schedule.
+ */
+export function recoverNextIndex(records: StudySessionRecord[], scheduleHash: string): number | null {
+  const mine = records.filter((r) => r && r.scheduleHash === scheduleHash && Number.isInteger(r.index) && r.index >= 1 && r.index <= STUDY_SESSIONS);
+  if (!mine.length) return null;
+  const h = Math.max(...mine.map((r) => r.index));
+  return mine.some((r) => r.index === h && r.valid) ? h + 1 : h;
 }
 
 export class StudyController {
   constructor(
     private secret: SecretStore,
-    /** non-secret progress (settings KV): enabled flag + next index, never the mode */
-    private progressKV: KeyValueStore,
-    private opts: { randomSeed?: () => number; now?: () => Date } = {},
+    /** LEGACY progress location (settings KV, builds <= E): read once, migrated into the secure store, removed */
+    private legacyProgressKV: KeyValueStore,
+    private opts: {
+      randomSeed?: () => number;
+      now?: () => Date;
+      /** study sessions still on the device (local logs, upload ledger); used only when progress is missing */
+      recover?: () => Promise<StudySessionRecord[]>;
+    } = {},
   ) {}
 
-  private async progress(): Promise<Progress> {
-    try {
-      const raw = await this.progressKV.get(STUDY_PROGRESS_KEY);
-      return { enabled: false, next: 1, ...(raw ? (JSON.parse(raw) as Partial<Progress>) : {}) };
-    } catch {
-      return { enabled: false, next: 1 };
-    }
+  private static parse(raw: string): Progress {
+    let p: Partial<Progress> = {};
+    try { p = JSON.parse(raw) as Partial<Progress>; } catch { /* treated as missing fields */ }
+    return { enabled: false, next: 1, ...p };
   }
-  private saveProgress(p: Progress) {
-    return this.progressKV.set(STUDY_PROGRESS_KEY, JSON.stringify(p));
+  /**
+   * Progress from the secure store. Throws if the secure store fails (Keychain unavailable): callers keep the
+   * old Keychain-fail behaviour (status error, assign null). Missing -> migrate the legacy copy, else recover.
+   */
+  private async progress(): Promise<Progress> {
+    const raw = await this.secret.get(STUDY_PROGRESS_KEY);
+    if (raw) return StudyController.parse(raw);
+    let legacy: string | null = null;
+    try { legacy = await this.legacyProgressKV.get(STUDY_PROGRESS_KEY); } catch { /* unreadable = absent */ }
+    if (legacy) {
+      const p = StudyController.parse(legacy);
+      await this.saveProgress(p); // read-back verified before the old copy goes
+      try { await this.legacyProgressKV.remove(STUDY_PROGRESS_KEY); } catch { /* harmless: the secure copy wins */ }
+      return p;
+    }
+    const sch = await this.rawSchedule();
+    if (!sch) return { enabled: false, next: 1 };
+    // schedule survived, progress did not (eviction / reinstall): never silently restart at index 1
+    let records: StudySessionRecord[] = [];
+    try { records = (await this.opts.recover?.()) ?? []; } catch { records = []; }
+    const next = recoverNextIndex(records, sha256HexSync(sch));
+    const p: Progress = next === null ? { enabled: false, next: 1, lost: true } : { enabled: true, next, recovered: true };
+    await this.saveProgress(p);
+    return p;
+  }
+  private async saveProgress(p: Progress) {
+    const raw = JSON.stringify(p);
+    await this.secret.set(STUDY_PROGRESS_KEY, raw);
+    if ((await this.secret.get(STUDY_PROGRESS_KEY)) !== raw) throw new Error("secure store did not keep the study progress (read-back mismatch)");
   }
   private async rawSchedule(): Promise<string | null> {
     return (await this.secret.get(STUDY_SCHEDULE_KEY)) || null; // "" = cleared (SecretStore has no delete)
@@ -193,6 +283,7 @@ export class StudyController {
     else await this.secret.set(STUDY_SCHEDULE_KEY, "");
     if (await this.rawSchedule()) throw new Error("secure store did not clear the outdated study schedule");
     await this.saveProgress({ enabled: false, next: 1 });
+    try { await this.legacyProgressKV.remove(STUDY_PROGRESS_KEY); } catch { /* the secure copy wins anyway */ }
     return { reset: true, from: protocol };
   }
   private async schedule(): Promise<{ raw: string; s: StudySchedule } | null> {
@@ -205,11 +296,15 @@ export class StudyController {
 
   async status(): Promise<StudyStatus> {
     try { await this.ensureProtocol(); } catch { /* reported below via scheduled/error */ }
-    const p = await this.progress();
     try {
-      return { enabled: p.enabled, next: p.next, total: STUDY_SESSIONS, scheduled: !!(await this.rawSchedule()), ...(p.manualReissue ? { pendingReissue: p.manualReissue } : {}) };
+      const scheduled = !!(await this.rawSchedule());
+      const p = await this.progress();
+      return {
+        enabled: p.enabled, next: p.next, total: STUDY_SESSIONS, scheduled, ...(p.manualReissue ? { pendingReissue: p.manualReissue } : {}),
+        ...(p.lost ? { progressLost: true as const, error: STUDY_PROGRESS_LOST_NOTE } : {}), ...(p.recovered ? { progressRecovered: true as const } : {}),
+      };
     } catch (err) {
-      return { enabled: p.enabled, next: p.next, total: STUDY_SESSIONS, scheduled: false, error: (err as Error).message };
+      return { enabled: false, next: 1, total: STUDY_SESSIONS, scheduled: false, error: (err as Error).message };
     }
   }
 
@@ -224,17 +319,24 @@ export class StudyController {
       const seed = (this.opts.randomSeed ?? randomSeed)() >>> 0;
       const s: StudySchedule = { study: STUDY_ID, version: 1, seed, order: generateSchedule(seed), createdAt: (this.opts.now?.() ?? new Date()).toISOString(), protocol: STUDY_PROTOCOL_VERSION };
       const raw = JSON.stringify(s);
+      // fresh schedule: its progress first, so the schedule never exists without progress (no false "lost")
+      const { lost: _l, recovered: _r, ...old } = await this.progress();
+      void _l; void _r;
+      await this.saveProgress({ ...old, enabled: true });
       await this.secret.set(STUDY_SCHEDULE_KEY, raw);
       if ((await this.rawSchedule()) !== raw) throw new Error("secure store did not keep the study schedule (read-back mismatch)");
       sch = { raw, s };
+      return { scheduleHash: await sha256Hex(sch.raw), protocol: STUDY_PROTOCOL_VERSION, createdAt: s.createdAt };
     }
     const p = await this.progress();
+    if (p.lost) throw new Error(STUDY_PROGRESS_LOST_NOTE);
     await this.saveProgress({ ...p, enabled: true });
     return { scheduleHash: await sha256Hex(sch.raw), protocol: sch.s.protocol ?? STUDY_PROTOCOL_VERSION, createdAt: sch.s.createdAt };
   }
 
   async disable(): Promise<void> {
     const p = await this.progress();
+    if (p.lost) return; // stays blocked (and disabled) until setNext
     await this.saveProgress({ ...p, enabled: false });
   }
 
@@ -247,8 +349,9 @@ export class StudyController {
    */
   async assign(sessionId: string, last: (sessionId: string) => number | StudySessionInfo): Promise<StudyAssignment | null> {
     try { await this.ensureProtocol(); } catch { return null; }
-    const p = await this.progress();
-    if (!p.enabled) return null;
+    let p: Progress;
+    try { p = await this.progress(); } catch { return null; } // secure store failed: no study fields
+    if (!p.enabled || p.lost) return null;
     let index = p.next;
     let next = p.next;
     let reissueOf: string | undefined;
@@ -275,10 +378,11 @@ export class StudyController {
       return null;
     }
     if (!sch) return null;
-    await this.saveProgress({ enabled: true, next, last: { sessionId, index } });
+    try { await this.saveProgress({ enabled: true, next, last: { sessionId, index } }); } catch { return null; } // never hand out an index we could not record
     return {
       study: STUDY_ID, index, total: STUDY_SESSIONS, scheduleHash: await sha256Hex(sch.raw), adaptation: sch.s.order[index - 1]!, protocol: sch.s.protocol ?? STUDY_PROTOCOL_VERSION,
       ...(reissueOf ? { reissueOf } : {}), ...(manual !== null ? { manualReissue: true as const, ...(p.manualReissueReason ? { reissueReason: p.manualReissueReason } : {}) } : {}),
+      ...(p.recovered ? { progressRecovered: true as const } : {}),
     };
   }
 
@@ -296,10 +400,25 @@ export class StudyController {
     if (why.length > REISSUE_REASON_MAX) return { ok: false, error: `reason: at most ${REISSUE_REASON_MAX} characters` };
     if (!(await this.rawSchedule())) return { ok: false, error: "no study schedule (start the study first)" };
     const p = await this.progress();
+    if (p.lost) return { ok: false, error: `${STUDY_PROGRESS_LOST_NOTE} (then use Set next study session)` };
     if (n > p.next - 1) return { ok: false, error: `study session ${n} has not been run yet` };
     const { manualReissueReason: _old, ...rest } = p;
     void _old;
     await this.saveProgress({ ...rest, manualReissue: n, ...(why ? { manualReissueReason: why } : {}) });
+    return { ok: true, index: n };
+  }
+
+  /**
+   * Unblock after "Study progress lost" (or correct the next index on the Researcher's instruction): the next
+   * study session gets index n (1..10). Needs the phrase setNextPhrase(n) and a sealed schedule. The schedule is
+   * untouched; the next session_start logs progressRecovered true.
+   */
+  async setNext(n: number, confirm: string): Promise<{ ok: true; index: number } | { ok: false; error: string }> {
+    await this.ensureProtocol();
+    if (!Number.isInteger(n) || n < 1 || n > STUDY_SESSIONS) return { ok: false, error: `study session must be 1..${STUDY_SESSIONS}` };
+    if (confirm.trim() !== setNextPhrase(n)) return { ok: false, error: `type "${setNextPhrase(n)}" to confirm` };
+    if (!(await this.rawSchedule())) return { ok: false, error: "no study schedule (start the study first)" };
+    await this.saveProgress({ enabled: true, next: n, recovered: true });
     return { ok: true, index: n };
   }
 

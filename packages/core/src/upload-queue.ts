@@ -15,7 +15,7 @@
 import type { KeyValueStore } from "./platform/kv.js";
 import type { ExportFile } from "./zip.js";
 import { findUploadSecret, sessionUploadBody, studyStartUploadBody, type UploadMeta } from "./upload-body.js";
-import { sha256HexSync } from "./study.js";
+import { sha256HexSync, studySessionRecordFromJsonl, type StudySessionRecord } from "./study.js";
 
 export type UploadState = "pending" | "needs-export" | "done";
 export interface UploadItem {
@@ -32,6 +32,8 @@ export interface UploadItem {
   lastStatus?: number;
   lastError?: string;
   doneAt?: string;
+  /** study sessions: index / schedule hash / validity at enqueue (durable ledger for progress recovery; never the mode) */
+  study?: Omit<StudySessionRecord, "sessionId">;
 }
 export interface UploadSummary {
   /** queued, will be sent (includes paused ones) */
@@ -96,8 +98,13 @@ export class UploadQueue {
   enqueueSession(file: ExportFile): Promise<UploadItem | null> {
     return this.serial(async () => {
       const body = sessionUploadBody(file.content, this.o.meta);
-      return this.add({ id: body.sessionId, kind: "session", name: file.name.replace(/^.*\//, "") }, JSON.stringify(body));
+      const rec = studySessionRecordFromJsonl(file.content);
+      return this.add({ id: body.sessionId, kind: "session", name: file.name.replace(/^.*\//, ""), ...(rec ? { study: { index: rec.index, scheduleHash: rec.scheduleHash, valid: rec.valid } } : {}) }, JSON.stringify(body));
     });
+  }
+  /** study sessions this queue has seen (any state, incl. uploaded ones still in the index) */
+  async studyRecords(): Promise<StudySessionRecord[]> {
+    return (await this.index()).filter((i) => i.kind === "session" && i.study).map((i) => ({ sessionId: i.id, ...i.study! }));
   }
   /** queue the study_start record (id = phaseD-<hash16>: re-enqueueing the same schedule is a no-op) */
   enqueueStudyStart(s: { scheduleHash: string; nSessions: number; createdAt: string; protocol?: number }): Promise<UploadItem | null> {
@@ -106,7 +113,7 @@ export class UploadQueue {
       return this.add({ id: body.id, kind: "study_start" }, JSON.stringify(body));
     });
   }
-  private async add(base: { id: string; kind: UploadItem["kind"]; name?: string }, body: string): Promise<UploadItem | null> {
+  private async add(base: { id: string; kind: UploadItem["kind"]; name?: string; study?: UploadItem["study"] }, body: string): Promise<UploadItem | null> {
     const items = await this.index();
     const had = items.find((i) => i.id === base.id);
     if (had && had.state !== "needs-export") return null; // already queued or uploaded

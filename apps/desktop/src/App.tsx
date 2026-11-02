@@ -10,6 +10,7 @@ import { Message, Thinking, type ChatMsg } from "./components/Message";
 import { Sidebar } from "./components/Sidebar";
 import { pickerLabel } from "./components/ModelPicker";
 import { TopBar } from "./components/TopBar";
+import { StudyLostBanner } from "./components/StudyData";
 import { useTypingTelemetry } from "./telemetry";
 import { useLayoutMode, useVisualViewportHeight } from "./layout";
 
@@ -265,6 +266,7 @@ export function App() {
         <TopBar sidebarOpen={sidebarOpen && !phone} onOpenSidebar={() => { setSidebarOpen(true); if (phone) setHudOpen(false); }} hudOpen={hudOpen} onToggleHud={() => { setHudOpen((v) => !v); if (phone) setSidebarOpen(false); }}>
           <span className="font-title text-2xl tracking-tight md:text-3xl" title={title}>{title}</span>
         </TopBar>
+        <StudyLostBanner />
         <div className="flex min-h-0 flex-1">
           <div className="relative flex min-w-0 flex-1 flex-col">
             <div ref={scroller} className="flex-1 overflow-y-auto overscroll-contain">

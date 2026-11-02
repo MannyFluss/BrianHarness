@@ -10,7 +10,7 @@ import type { HarnessStorage } from "./platform/storage.js";
 import { systemClock, type Clock } from "./platform/env.js";
 import { isFillerOnly, sessionTitle } from "./title.js";
 import type { RatingRecord, TypingEvent } from "./types.js";
-import type { StudyAssignment, StudySessionInfo, StudyStatus } from "./study.js";
+import { STUDY_MIN_USER_TURNS, studySessionRecord, type StudyAssignment, type StudySessionInfo, type StudySessionRecord, type StudyStatus } from "./study.js";
 import { sessionExportName, type ExportFile } from "./zip.js";
 import { randomId } from "./platform/env.js";
 import type { TopicTagger, TopicTaggerSpec } from "./tagger.js";
@@ -86,7 +86,7 @@ export class HarnessHost {
     }
     this.session = new HarnessSession({
       sessionId,
-      ...(study ? { adaptation: study.adaptation, study: { id: study.study, index: study.index, total: study.total, scheduleHash: study.scheduleHash, protocol: study.protocol, ...(study.reissueOf ? { reissueOf: study.reissueOf } : {}), ...(study.manualReissue ? { manualReissue: true as const } : {}), ...(study.reissueReason ? { reissueReason: study.reissueReason } : {}) } } : {}),
+      ...(study ? { adaptation: study.adaptation, study: { id: study.study, index: study.index, total: study.total, scheduleHash: study.scheduleHash, protocol: study.protocol, ...(study.reissueOf ? { reissueOf: study.reissueOf } : {}), ...(study.manualReissue ? { manualReissue: true as const } : {}), ...(study.reissueReason ? { reissueReason: study.reissueReason } : {}), ...(study.progressRecovered ? { progressRecovered: true as const } : {}) } } : {}),
       userId: this.cfg.userId,
       backend: await this.cfg.backend(),
       store: this.cfg.storage,
@@ -122,6 +122,21 @@ export class HarnessHost {
   }
 
   /** validity of a (previous) study session: user turns + an answered session rating (from memory or its log) */
+  /** study sessions in the local logs (index, schedule hash, validity; never the mode): progress-recovery source */
+  studyRecords(): StudySessionRecord[] {
+    const st = this.cfg.storage;
+    if (!st) return [];
+    const out: StudySessionRecord[] = [];
+    for (const id of st.listSessions()) {
+      try {
+        const r = studySessionRecord(st.readSession(id) as unknown as Array<{ type?: string }>);
+        if (!r) continue;
+        if (this.session?.id === id) { const i = this.sessionInfo(id); out.push({ ...r, valid: i.userTurns >= STUDY_MIN_USER_TURNS && i.sessionRated }); } else out.push(r);
+      } catch { /* unreadable session: skipped */ }
+    }
+    return out;
+  }
+
   private sessionInfo(id: string): StudySessionInfo {
     if (this.session?.id === id) return { userTurns: this.session.turn, sessionRated: this.session.sessionRated };
     try {

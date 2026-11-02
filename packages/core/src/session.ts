@@ -43,7 +43,7 @@ export interface HarnessSessionOptions {
    */
   adaptation?: Adaptation;
   /** blinded study session: logged in session_start; plans / state notes are sealed in the log */
-  study?: { id: string; index: number; total: number; scheduleHash: string; protocol?: number; reissueOf?: string; manualReissue?: true; reissueReason?: string };
+  study?: { id: string; index: number; total: number; scheduleHash: string; protocol?: number; reissueOf?: string; manualReissue?: true; reissueReason?: string; progressRecovered?: true };
   /** the app wanted llm-extract but could not build one (no key / mock or local model): logged as the fallback reason */
   taggerFallback?: "no_key" | "mock_or_local";
   /** called once per session per reason when the extractor is unavailable (Electron / sidecar: stderr) */
@@ -155,7 +155,7 @@ export class HarnessSession {
     for (const s of this.sources) await s.start?.();
     this.checkExtractorWarning(); // started without an extractor (no key / mock or local model)
     const st = this.opts.study;
-    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash, ...(st.protocol !== undefined ? { protocol: st.protocol } : {}) }, ...(st.reissueOf ? { reissueOf: st.reissueOf } : {}), ...(st.manualReissue ? { manualReissue: true } : {}), ...(st.reissueReason ? { reissueReason: st.reissueReason } : {}) } : {}) });
+    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash, ...(st.protocol !== undefined ? { protocol: st.protocol } : {}) }, ...(st.reissueOf ? { reissueOf: st.reissueOf } : {}), ...(st.manualReissue ? { manualReissue: true } : {}), ...(st.reissueReason ? { reissueReason: st.reissueReason } : {}), ...(st.progressRecovered ? { progressRecovered: true } : {}) } : {}) });
     return this.directorTurn(opts);
   }
 

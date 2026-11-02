@@ -11,6 +11,7 @@ import { safeLocalKV, type InProcessOptions } from "./in-process";
 import { capacitorPlugin, createNativeStreamFetch, type BHStreamPlugin } from "./native-stream";
 import { createKeychainCredentials, keychainKV, type BHKeychainPlugin, type MigrationReport } from "./keychain";
 import type { BHExportPlugin } from "./types";
+import type { KeyValueStore } from "@brianharness/core/browser";
 
 export { createNativeStreamFetch, type BHStreamPlugin, type BHStreamEvent } from "./native-stream";
 export { createKeychainCredentials, migrateCredentials, keychainKV, keychainStatus, isMissingEntitlement, KEYCHAIN_UNAVAILABLE_NOTE, type BHKeychainPlugin } from "./keychain";
@@ -60,7 +61,7 @@ export const KEYCHAIN_NOTE = "Stored in the iOS Keychain on this device (BHKeych
 export function nativeTransportOptions(
   win: unknown = globalThis,
   hooks: { onMigration?: (r: MigrationReport) => void; /** old store to migrate (default: localStorage "brianharness/") */ legacyCredentials?: CredentialStoreLike } = {},
-): Pick<InProcessOptions, "nativeFetch" | "fetchImpl" | "streaming" | "credentials" | "credentialNote" | "secretKV" | "bhExport"> {
+): Pick<InProcessOptions, "nativeFetch" | "fetchImpl" | "streaming" | "credentials" | "credentialNote" | "secretKV" | "bhExport" | "uploadKV" | "appVersion" | "build"> {
   if (!isNativeCapacitor(win)) return {};
   const w = win as CapWindow;
   const buffered: typeof fetch = (input, init) => w.fetch(input, init);
@@ -82,6 +83,31 @@ export function nativeTransportOptions(
     out.secretKV = keychainKV(keychain); // Phase D schedule: Keychain key study/phaseD/schedule
   }
   const exporter = capacitorPlugin<BHExportPlugin>(win, "BHExport");
-  if (exporter) out.bhExport = exporter;
+  if (exporter) {
+    out.bhExport = exporter;
+    // upload queue in Documents/pending-uploads (survives WKWebView storage eviction); older shells: IndexedDB
+    if (typeof (exporter as BHExportKV).kvGet === "function") out.uploadKV = bhExportKV(exporter as BHExportKV);
+  }
+  // CFBundleShortVersionString / CFBundleVersion, injected by the iOS shell at document start
+  // (build may arrive as a number from the plist; normalised to a string)
+  const info = (win as { __BH_APP_INFO__?: { appVersion?: string | number; build?: string | number } }).__BH_APP_INFO__;
+  if (info?.appVersion !== undefined && info.appVersion !== null && String(info.appVersion)) out.appVersion = String(info.appVersion);
+  if (info?.build !== undefined && info.build !== null && String(info.build)) out.build = String(info.build);
   return out;
+}
+
+/** BHExport's pending-uploads store (Documents/pending-uploads, one file per encodeURIComponent(key)) */
+export type BHExportKV = BHExportPlugin & {
+  kvGet(o: { key: string }): Promise<{ value: string | null }>;
+  kvSet(o: { key: string; value: string }): Promise<void>;
+  kvRemove(o: { key: string }): Promise<void>;
+  kvKeys(o: { prefix?: string }): Promise<{ keys: string[] }>;
+};
+export function bhExportKV(plugin: BHExportKV): KeyValueStore {
+  return {
+    get: async (key) => (await plugin.kvGet({ key }))?.value ?? null,
+    set: async (key, value) => void (await plugin.kvSet({ key, value })),
+    remove: async (key) => void (await plugin.kvRemove({ key })),
+    keys: async (prefix = "") => ((await plugin.kvKeys({ prefix }))?.keys ?? []).filter((k) => k.startsWith(prefix)),
+  };
 }
