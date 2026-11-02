@@ -4,13 +4,17 @@
 //   settings     localStorage
 //   credentials  localStorage via KVCredentialStore  <- web TEST build only; iOS swaps in a Keychain KV
 // Providers: mock (default, offline), Ollama at a configurable URL (LAN IP), any OpenAI-compatible
-// server, OpenAI / Anthropic with an API key straight from the browser. Subscription sign-in
+// server, OpenAI / Anthropic with an API key straight from the browser, and Ollama Cloud
+// (https://ollama.com + API key) ONLY when a native fetchImpl is passed: ollama.com has no CORS, so
+// a plain PWA reports "needs the native app (no CORS)" instead of failing silently. Subscription sign-in
 // (ChatGPT / Claude OAuth) and Claude Code need native code and are reported as unavailable.
 import {
   APP_NAME,
   BROWSER_DEFAULT_MODELS,
   DEFAULT_OLLAMA_URL,
   HarnessHost,
+  OLLAMA_CLOUD_DEFAULT_MODEL,
+  OLLAMA_CLOUD_NO_CORS,
   IndexedDbKV,
   KVCredentialStore,
   KVHarnessStorage,
@@ -18,6 +22,7 @@ import {
   MemoryKV,
   createBrowserBackend,
   detectOllama,
+  detectOllamaCloud,
   normalizeOllamaBaseUrl,
   readApiKey,
   type CredentialStoreLike,
@@ -46,6 +51,13 @@ export interface InProcessOptions {
   fetchImpl?: typeof fetch;
   /** topic tagger (default: offline lexicon). An Ollama spec gets fetchImpl and the settings' Ollama URL. */
   tagger?: TopicTagger | TopicTaggerSpec;
+  /**
+   * true when fetchImpl bypasses browser CORS (CapacitorHttp). Default: true iff fetchImpl was passed.
+   * Gates Ollama Cloud, whose API sends no CORS headers.
+   */
+  nativeFetch?: boolean;
+  /** Ollama Cloud base URL (tests point this at a fake server). Default https://ollama.com */
+  ollamaCloudUrl?: string;
 }
 
 type WebSettings = { provider: ProviderKind; model?: string; ollamaUrl?: string; openaiCompatibleUrl?: string };
@@ -74,6 +86,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   let storageName = "IndexedDB brianharness";
   // unbound wrapper so a passed-in window.fetch is never invoked with another `this`
   const fetchImpl: typeof fetch = opts.fetchImpl ?? ((input, init) => fetch(input, init));
+  const nativeFetch = opts.nativeFetch ?? !!opts.fetchImpl;
 
   const ready: Promise<{ storage: HarnessStorage }> = (async () => {
     let kv = opts.storageKV;
@@ -115,6 +128,10 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       }
       return createBrowserBackend({ provider: "ollama", baseUrl, model, fetchImpl });
     }
+    if (p === "ollama-cloud") {
+      if (!nativeFetch) throw new Error(OLLAMA_CLOUD_NO_CORS);
+      return createBrowserBackend({ provider: p, model: s.model ?? OLLAMA_CLOUD_DEFAULT_MODEL, baseUrl: opts.ollamaCloudUrl, apiKey: await readApiKey(credentials, p), fetchImpl });
+    }
     if (p === "openai-compatible") return createBrowserBackend({ provider: p, baseUrl: s.openaiCompatibleUrl, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl });
     if (p === "openai" || p === "anthropic") return createBrowserBackend({ provider: p, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl });
     return createBrowserBackend({ provider: "mock", seed: 42 });
@@ -151,12 +168,15 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   const status = async (): Promise<ProviderStatus[]> => {
     const s = await loadSettings();
     const ollamaUrl = normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL);
-    const [ollama, oaKey, anKey, ocKey] = await Promise.all([
+    const [ollama, oaKey, anKey, ocKey, cloudKey] = await Promise.all([
       detectOllama(ollamaUrl, 1500, fetchImpl),
       readApiKey(credentials, "openai"),
       readApiKey(credentials, "anthropic"),
       readApiKey(credentials, "openai-compatible"),
+      readApiKey(credentials, "ollama-cloud"),
     ]);
+    const cloud = nativeFetch && cloudKey ? await detectOllamaCloud(cloudKey, fetchImpl, 4000, opts.ollamaCloudUrl) : null;
+    const cloudModels = cloud?.models.length ? cloud.models.map((m) => m.name) : [OLLAMA_CLOUD_DEFAULT_MODEL];
     const isLoopback = /\/\/(localhost|127\.)/.test(ollamaUrl);
     return [
       { id: "mock", label: "Mock (offline)", available: true, signedIn: true, auth: ["none"], models: [{ id: "mock", label: "Template Director", paid: false }], detail: "No model, no network." },
@@ -171,6 +191,22 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         detail: ollama.running
           ? `${ollama.models.length} model(s) at ${ollamaUrl}`
           : `Not reachable at ${ollamaUrl}.${isLoopback ? " On a phone, set your Mac's LAN IP (e.g. http://192.168.1.20:11434)." : ""} The Mac needs OLLAMA_HOST=0.0.0.0 and OLLAMA_ORIGINS set to this page's origin (CORS).`,
+      },
+      {
+        id: "ollama-cloud",
+        label: "Ollama Cloud (API key)",
+        available: nativeFetch,
+        signedIn: nativeFetch && !!cloudKey,
+        auth: ["api_key"],
+        authSource: nativeFetch && cloudKey ? "API key (this device)" : undefined,
+        models: nativeFetch ? cloudModels.map((m) => ({ id: m, label: `${m} · cloud`, paid: false })) : [],
+        detail: !nativeFetch
+          ? OLLAMA_CLOUD_NO_CORS
+          : !cloudKey
+            ? "Paste an Ollama API key (ollama.com -> Settings -> Keys). Runs on Ollama's servers."
+            : cloud?.running
+              ? `${cloud.models.length} model(s) on ollama.com`
+              : `Couldn't list models (${cloud?.error ?? "?"}); ${OLLAMA_CLOUD_DEFAULT_MODEL} is offered anyway.`,
       },
       {
         id: "openai-compatible",

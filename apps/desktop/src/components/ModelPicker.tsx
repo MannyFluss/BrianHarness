@@ -4,8 +4,8 @@ import { createPortal } from "react-dom";
 import { bridge, type AuthEvent, type AuthPrompt, type Info, type KeyProvider, type ProviderId, type ProviderStatus } from "../bridge";
 import { cn } from "../lib";
 
-const SHORT: Record<ProviderId, string> = { mock: "Mock", ollama: "Ollama", "openai-compatible": "OpenAI-compatible", openai: "ChatGPT", "claude-code": "Claude Code", anthropic: "Claude" };
-const isKeyProvider = (id: ProviderId): id is KeyProvider => id === "openai" || id === "anthropic" || id === "openai-compatible";
+const SHORT: Record<ProviderId, string> = { mock: "Mock", ollama: "Ollama", "ollama-cloud": "Ollama Cloud", "openai-compatible": "OpenAI-compatible", openai: "ChatGPT", "claude-code": "Claude Code", anthropic: "Claude" };
+const isKeyProvider = (id: ProviderId): id is KeyProvider => id === "openai" || id === "anthropic" || id === "openai-compatible" || id === "ollama-cloud";
 
 export function pickerLabel(info: Info | null) {
   if (!info) return "…";
@@ -110,7 +110,7 @@ export function ModelPicker({ info, onChanged, openRef }: { info: Info | null; o
                     <LogInIcon className="size-3" /> sign in
                   </button>
                 )}
-                {isKeyProvider(p.id) && !p.authSource && p.auth.includes("api_key") && (
+                {isKeyProvider(p.id) && !p.authSource && p.auth.includes("api_key") && (p.available || p.id !== "ollama-cloud") && (
                   <button onClick={() => setKeyFor(p.id as KeyProvider)} className="eeg-tap-chip flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-accent hover:text-foreground">
                     <KeyRoundIcon className="size-3" /> key
                   </button>
@@ -194,7 +194,7 @@ function EndpointDialog({ state, onClose, onSaved }: { state: { provider: "ollam
   );
 }
 
-const KEY_TITLE: Record<KeyProvider, string> = { openai: "OpenAI API key", anthropic: "Anthropic API key", "openai-compatible": "Server API key (optional)" };
+const KEY_TITLE: Record<KeyProvider, string> = { openai: "OpenAI API key", anthropic: "Anthropic API key", "openai-compatible": "Server API key (optional)", "ollama-cloud": "Ollama API key" };
 function ApiKeyDialog({ provider, onClose, onSaved }: { provider: KeyProvider; onClose: () => void; onSaved: () => void }) {
   const [key, setKey] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -208,8 +208,8 @@ function ApiKeyDialog({ provider, onClose, onSaved }: { provider: KeyProvider; o
   };
   return (
     <Modal title={KEY_TITLE[provider]} onClose={onClose}>
-      <p className="mb-2 text-xs text-muted-foreground">{bridge().credentialNote ?? "Stored only on this device."} Usage is billed to that API account.</p>
-      <input autoFocus type="password" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void save()} placeholder={provider === "anthropic" ? "sk-ant-..." : "sk-..."} className="w-full rounded-md border border-border bg-background px-3 py-2 text-[16px]" />
+      <p className="mb-2 text-xs text-muted-foreground">{bridge().credentialNote ?? "Stored only on this device."} {provider === "ollama-cloud" ? "Requests run on Ollama's servers under that account's plan limits." : "Usage is billed to that API account."}</p>
+      <input autoFocus type="password" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void save()} placeholder={provider === "anthropic" ? "sk-ant-..." : provider === "ollama-cloud" ? "Ollama API key" : "sk-..."} className="w-full rounded-md border border-border bg-background px-3 py-2 text-[16px]" />
       {err && <div className="mt-2 text-[11px] text-red-300">{err}</div>}
       <div className="mt-3 flex justify-end gap-2">
         <button onClick={onClose} className="eeg-tap rounded-md px-3 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent">Cancel</button>

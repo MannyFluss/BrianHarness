@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const SIDECAR = fileURLToPath(new URL("../dist/sidecar.js", import.meta.url));
 
-function open(args: string[] = []) {
-  const p = spawn(process.execPath, [SIDECAR, ...args], { stdio: ["pipe", "pipe", "pipe"] });
+function open(args: string[] = [], env: NodeJS.ProcessEnv = process.env) {
+  const p = spawn(process.execPath, [SIDECAR, ...args], { stdio: ["pipe", "pipe", "pipe"], env });
   const rl = createInterface({ input: p.stdout });
   const queue: Array<(v: any) => void> = [];
   rl.on("line", (l) => queue.shift()?.(JSON.parse(l)));
@@ -48,4 +48,36 @@ test("sidecar refuses paid backends without --allow-paid", async () => {
   assert.equal(r.ok, false);
   assert.match(r.error, /paid/);
   await sc.close();
+});
+
+test("sidecar: ollama-cloud takes OLLAMA_API_KEY from env, is free for the paid gate (fake server)", async () => {
+  const { createServer } = await import("node:http");
+  const auths: string[] = [];
+  const server = createServer(async (req, res) => {
+    for await (const _ of req) { /* drain */ }
+    auths.push(`${req.url} ${req.headers.authorization ?? ""}`);
+    if (req.headers.authorization !== "Bearer fake-key") return res.writeHead(401).end("{}");
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ message: { content: "what do you like about that?" } }));
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  try {
+    const { OLLAMA_API_KEY: _drop, ...noKey } = process.env;
+    const a = open([], noKey);
+    const e = await a.call({ cmd: "start", options: { provider: "ollama-cloud:gemma4:cloud", baseUrl } });
+    assert.equal(e.ok, false);
+    assert.match(e.error, /OLLAMA_API_KEY/);
+    await a.close();
+    const b = open([], { ...noKey, OLLAMA_API_KEY: "fake-key" }); // no --allow-paid
+    const s = await b.call({ cmd: "start", options: { provider: "ollama-cloud", model: "gemma4:cloud", baseUrl } });
+    assert.equal(s.ok, true, s.error);
+    assert.equal(s.backend, "ollama-cloud:gemma4:cloud");
+    assert.equal(s.paid, false);
+    const r = await b.call({ cmd: "reply", text: "I like ham radio" });
+    assert.equal(r.ok, true, r.error);
+    assert.ok(auths.some((x) => x === "/api/chat Bearer fake-key"), auths.join(","));
+    await b.close();
+  } finally {
+    server.close();
+  }
 });

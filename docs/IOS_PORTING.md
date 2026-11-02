@@ -133,6 +133,7 @@ settings; for large logs prefer IndexedDB or a Filesystem-backed KV.
 |---|---|---|
 | mock (default) | in-process | fully offline |
 | Ollama | `fetch` to the URL from settings | default is not assumed: set the Mac's LAN IP (e.g. `http://192.168.1.20:11434`) via the link button in the model picker. On the Mac: `OLLAMA_HOST=0.0.0.0 OLLAMA_ORIGINS="http://<mac-ip>:4174,capacitor://localhost,http://localhost" ollama serve` |
+| Ollama Cloud | `fetchImpl` (CapacitorHttp) to `https://ollama.com/api/chat` + `/api/tags`, `Authorization: Bearer <key>` | the free real-model path (no inference on the Mac). Key via the credentials interface (Keychain on iOS). ollama.com answers the CORS preflight with 405 and no ACAO, so it **only works with a native fetch**: `createInProcessTransport({ fetchImpl })` turns it on (override with `nativeFetch`); a plain PWA shows "needs the native app (no CORS)". Not paid for --allow-paid when chosen explicitly as `ollama-cloud` (key still required); `*:cloud` models through the local `ollama` provider stay paid. |
 | OpenAI-compatible | `fetch` to `<base>/v1/chat/completions` | any LAN server with CORS (LM Studio, vLLM, llama.cpp server) |
 | OpenAI | `fetch` api.openai.com with API key | CORS-capable |
 | Anthropic | `fetch` api.anthropic.com/v1/messages | sends `anthropic-dangerous-direct-browser-access: true` |
@@ -167,8 +168,8 @@ pi-ai is **not** bundled for web/iOS; the browser path uses the small fetch back
   Alternative: CapacitorHttp (native HTTP, no CORS), which can be added later behind `fetchImpl`.
 - **CSP**. The Electron renderer (`apps/desktop/index.html`) stays at `default-src 'self'` with no network,
   because it only talks over IPC. The web/PWA build (`web/index.html`, filled in by `vite.config.ts`) has:
-  `connect-src 'self' http://*:11434 https://*:11434 http://*:1234 https://api.anthropic.com https://api.openai.com https://openrouter.ai`.
-  This covers Ollama on any LAN host at :11434, LM Studio on any LAN host at :1234 (http), and the hosted APIs.
+  `connect-src 'self' http://*:11434 https://*:11434 http://*:1234 https://api.anthropic.com https://api.openai.com https://openrouter.ai https://ollama.com`.
+  (`https://ollama.com` is listed for completeness; the browser still can't call it because of CORS.) This covers Ollama on any LAN host at :11434, LM Studio on any LAN host at :1234 (http), and the hosted APIs.
   - Any **other OpenAI-compatible server** (llama.cpp :8080, vLLM, a non-11434 Ollama) must be
     added at build time:
     `BH_CONNECT_SRC="http://192.168.0.114:8080 https://llm.example.com" npm run build:web`

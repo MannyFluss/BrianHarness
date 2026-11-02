@@ -7,8 +7,8 @@ import { ollamaHostUrl } from "../backends.js";
 import { defaultEnv, type Env } from "../platform/env.js";
 import type { PiCredentialStore, PiModels } from "./pi-ai.js";
 
-export type ProviderKind = "mock" | "ollama" | "openai-compatible" | "openai" | "anthropic" | "claude-code";
-export const PROVIDER_KINDS: ProviderKind[] = ["mock", "ollama", "openai-compatible", "openai", "anthropic", "claude-code"];
+export type ProviderKind = "mock" | "ollama" | "ollama-cloud" | "openai-compatible" | "openai" | "anthropic" | "claude-code";
+export const PROVIDER_KINDS: ProviderKind[] = ["mock", "ollama", "ollama-cloud", "openai-compatible", "openai", "anthropic", "claude-code"];
 
 export interface BackendSpec {
   provider: ProviderKind;
@@ -43,7 +43,7 @@ export function backendSpecFromEnv(env: Env = defaultEnv()): BackendSpec {
     provider,
     model: env.EEG_MODEL ?? env.BH_MODEL,
     baseUrl: provider === "ollama" ? env.EEG_OLLAMA_URL ?? ollamaHostUrl(env.OLLAMA_HOST) : env.EEG_BASE_URL,
-    apiKey: env.EEG_API_KEY ?? (provider === "openai-compatible" ? env.OPENAI_API_KEY : undefined),
+    apiKey: env.EEG_API_KEY ?? (provider === "openai-compatible" ? env.OPENAI_API_KEY : provider === "ollama-cloud" ? env.OLLAMA_API_KEY : undefined),
     temperature: n(env.EEG_TEMPERATURE),
     seed: n(env.EEG_SEED),
   };

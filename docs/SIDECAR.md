@@ -33,7 +33,7 @@ One session at a time; after `end` you can `start` again.
 
 | field | meaning |
 |---|---|
-| `provider` | `mock` (default) \| `ollama` \| `ollama:<model>` \| `openai-compatible` \| `openai` \| `anthropic` \| `claude-code` |
+| `provider` | `mock` (default) \| `ollama` \| `ollama:<model>` \| `ollama-cloud[:<model>]` (https://ollama.com, key from the sidecar's `OLLAMA_API_KEY` env, free tier: no allowPaid; default model gemma4:cloud) \| `openai-compatible` \| `openai` \| `anthropic` \| `claude-code` |
 | `model`, `ollamaUrl`, `baseUrl` | model id; Ollama base URL (default `http://127.0.0.1:11434`); OpenAI-compatible base URL. `ollama` without a model auto-detects the first local model via `/api/tags`. |
 | `temperature`, `seed`, `backendSeed` | sampling temperature; session seed (Director RNG, typing synthesis, and backend seed unless `backendSeed` is set) |
 | `allowPaid` | must be `true` **and** the process started with `--allow-paid` for paid backends (`*:cloud` Ollama models, remote APIs, subscriptions). Local Ollama / mock never need it. |

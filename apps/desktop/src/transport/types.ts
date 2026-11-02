@@ -20,7 +20,7 @@ export type Hud = {
 };
 export type SessionItem = { id: string; title: string; turns: number; startedAt: string | null; active: boolean };
 export type Info = { backend: string; paid: boolean; provider: string; model: string | null; dataDir: string; userId: string; platform: string; appName: string };
-export type ProviderId = "mock" | "ollama" | "openai-compatible" | "openai" | "claude-code" | "anthropic";
+export type ProviderId = "mock" | "ollama" | "ollama-cloud" | "openai-compatible" | "openai" | "claude-code" | "anthropic";
 export type ProviderStatus = {
   id: ProviderId;
   label: string;
@@ -40,7 +40,7 @@ export type AuthEvent =
   | { type: "device_code"; userCode: string; verificationUri: string }
   | { type: "progress"; message: string };
 export type AuthPrompt = { id: string; type: "text" | "secret" | "select" | "manual_code"; message: string; placeholder?: string; options?: { id: string; label: string; description?: string }[] };
-export type KeyProvider = "openai" | "anthropic" | "openai-compatible";
+export type KeyProvider = "openai" | "anthropic" | "openai-compatible" | "ollama-cloud";
 export interface ProvidersBridge {
   status(): Promise<{ providers: ProviderStatus[]; current: Info }>;
   select(provider: ProviderId, model?: string | null): Promise<Info>;

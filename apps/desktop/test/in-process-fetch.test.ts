@@ -59,3 +59,49 @@ test("fetchImpl reaches detection, all backends and the Ollama tagger", async ()
     globalThis.fetch = realFetch;
   }
 });
+
+test("Ollama Cloud: plain PWA (no native fetch) says no-CORS; native fetchImpl sends the Bearer key", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (u: unknown) => { throw new Error(`global fetch used for ${String(u)}`); }) as typeof fetch;
+  try {
+    // plain PWA: no fetchImpl
+    const pwa = createInProcessTransport({ storageKV: new MemoryKV(), settingsKV: new MemoryKV(), credentials: new KVCredentialStore(new MemoryKV()), platform: "test" });
+    await pwa.providers.setApiKey("ollama-cloud", "fake-key");
+    const ps = (await pwa.providers.status()).providers.find((p) => p.id === "ollama-cloud")!;
+    assert.equal(ps.available, false);
+    assert.match(ps.detail!, /needs the native app \(no CORS\)/);
+    await assert.rejects(pwa.providers.select("ollama-cloud", "gemma4:cloud"), /needs the native app \(no CORS\)/);
+
+    // native (CapacitorHttp-style) fetch
+    const seen: string[] = [];
+    const nativeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const auth = new Headers(init?.headers).get("authorization");
+      seen.push(`${init?.method ?? "GET"} ${url} ${auth}`);
+      if (auth !== "Bearer fake-key") return new Response("{}", { status: 401 });
+      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { "content-type": "application/json" } });
+      if (url === "https://ollama.com/api/tags") return json({ models: [{ name: "gpt-oss:120b" }, { name: "gemma4:cloud" }] });
+      if (url === "https://ollama.com/api/chat") return json({ message: { content: "cloud says hi?" } });
+      return new Response("nope", { status: 404 });
+    }) as typeof fetch;
+    const app = createInProcessTransport({ storageKV: new MemoryKV(), settingsKV: new MemoryKV(), credentials: new KVCredentialStore(new MemoryKV()), fetchImpl: nativeFetch, platform: "ios-phone" });
+    let st = (await app.providers.status()).providers.find((p) => p.id === "ollama-cloud")!;
+    assert.equal(st.available, true);
+    assert.equal(st.signedIn, false);
+    await assert.rejects(app.providers.select("ollama-cloud", "gemma4:cloud"), /API key/);
+    await app.providers.setApiKey("ollama-cloud", "fake-key");
+    st = (await app.providers.status()).providers.find((p) => p.id === "ollama-cloud")!;
+    assert.equal(st.signedIn, true);
+    assert.deepEqual(st.models.map((m) => [m.id, m.paid]), [["gemma4:cloud", false], ["gpt-oss:120b", false]]);
+    const info = await app.providers.select("ollama-cloud", "gemma4:cloud");
+    assert.equal(info.backend, "ollama-cloud:gemma4:cloud");
+    assert.equal(info.paid, false);
+    await app.newSession();
+    const r = await app.reply({ text: "i like ham radio", events: [], sentAt: Date.now(), shownAt: Date.now() - 1000 });
+    assert.ok(r.director.text.length > 0);
+    assert.ok(seen.includes("POST https://ollama.com/api/chat Bearer fake-key"), seen.join("\n"));
+    assert.ok(seen.includes("GET https://ollama.com/api/tags Bearer fake-key"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

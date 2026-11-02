@@ -5,6 +5,8 @@
  *
  *   mock         offline templates, always available
  *   ollama       auto-detected local server (GET /api/tags); local models free, *:cloud paid
+ *   ollama-cloud https://ollama.com direct API with an Ollama API key (stored like the other keys);
+ *                free tier, so not paid for --allow-paid, but it does need the key
  *   openai       ChatGPT subscription sign-in (pi-ai OAuth) or an OpenAI API key
  *   claude-code  your Claude Pro/Max login via the official Claude Code CLI (recommended Claude path)
  *   anthropic    Claude Pro/Max sign-in via pi-ai OAuth (see warning) or an Anthropic API key
@@ -15,7 +17,8 @@ import type { ModelBackend } from "../backends.js";
 import { CLAUDE_CODE_MODELS, detectClaudeCode } from "./claude-code.js";
 import { FileCredentialStore, type CredentialCipher } from "./credential-store.js";
 import { createBackend, type ProviderKind } from "./factory.js";
-import { DEFAULT_OLLAMA_URL, detectOllama } from "./ollama.js";
+import { DEFAULT_OLLAMA_URL, OLLAMA_CLOUD_DEFAULT_MODEL, detectOllama, detectOllamaCloud } from "./ollama.js";
+import { readApiKey, type CredentialStoreLike } from "../platform/credentials.js";
 import { DEFAULT_PI_MODELS, createPiModels, type PiModels } from "./pi-ai.js";
 
 export interface ProviderChoice {
@@ -25,6 +28,7 @@ export interface ProviderChoice {
 export interface HubSettings extends ProviderChoice {
   ollamaUrl?: string;
 }
+export type HubKeyProvider = "openai" | "anthropic" | "ollama-cloud";
 export interface ModelOption {
   id: string;
   label: string;
@@ -61,7 +65,7 @@ export class ProviderHub {
   readonly credentials: FileCredentialStore;
   private settingsPath: string;
   private pi: Promise<PiModels> | null = null;
-  constructor(private cfg: { dataDir: string; cipher?: CredentialCipher; claudeBin?: string; fetchImpl?: typeof fetch; piModels?: PiModels }) {
+  constructor(private cfg: { dataDir: string; cipher?: CredentialCipher; claudeBin?: string; fetchImpl?: typeof fetch; piModels?: PiModels; ollamaCloudUrl?: string }) {
     mkdirSync(cfg.dataDir, { recursive: true, mode: 0o700 });
     this.credentials = new FileCredentialStore(join(cfg.dataDir, "credentials.json"), cfg.cipher);
     this.settingsPath = join(cfg.dataDir, "settings.json");
@@ -90,11 +94,12 @@ export class ProviderHub {
 
   async status(): Promise<ProviderStatus[]> {
     const s = this.settings();
-    const [ollama, claude, openai, anthropic] = await Promise.all([
+    const [ollama, claude, openai, anthropic, ollamaCloud] = await Promise.all([
       detectOllama(s.ollamaUrl ?? DEFAULT_OLLAMA_URL, 1200, this.cfg.fetchImpl),
       detectClaudeCode(this.cfg.claudeBin),
       this.piStatus("openai"),
       this.piStatus("anthropic"),
+      this.ollamaCloudStatus(),
     ]);
     return [
       { id: "mock", label: "Mock (offline)", available: true, signedIn: true, auth: ["none"], models: [{ id: "mock", label: "Template Director", paid: false }], detail: "No model, no network. Good for trying the Director." },
@@ -108,6 +113,7 @@ export class ProviderHub {
         models: ollama.models.map((m) => ({ id: m.name, label: `${m.name}${m.parameterSize ? ` · ${m.parameterSize}` : ""}${m.cloud ? " · cloud" : ""}`, paid: m.cloud })),
         detail: ollama.running ? `${ollama.models.length} model(s) at ${ollama.baseUrl}` : `Not running at ${ollama.baseUrl}. Start the Ollama app, then refresh.`,
       },
+      ollamaCloud,
       openai,
       {
         id: "claude-code",
@@ -120,6 +126,26 @@ export class ProviderHub {
       },
       anthropic,
     ];
+  }
+
+  private async ollamaCloudStatus(): Promise<ProviderStatus> {
+    const key = await readApiKey(this.credentials as unknown as CredentialStoreLike, "ollama-cloud");
+    const d = key ? await detectOllamaCloud(key, this.cfg.fetchImpl, 4000, this.cfg.ollamaCloudUrl) : null;
+    const names = d?.models.length ? d.models.map((m) => m.name) : [OLLAMA_CLOUD_DEFAULT_MODEL];
+    return {
+      id: "ollama-cloud",
+      label: "Ollama Cloud (API key)",
+      available: true,
+      signedIn: !!key,
+      auth: ["api_key"],
+      authSource: key ? "API key" : undefined,
+      models: names.map((m) => ({ id: m, label: `${m} · cloud`, paid: false })),
+      detail: !key
+        ? "Paste an Ollama API key (ollama.com -> Settings -> Keys). Runs on Ollama's servers, nothing on this Mac."
+        : d?.running
+          ? `${d.models.length} model(s) on ollama.com`
+          : `Couldn't list models (${d?.error ?? "?"}); ${OLLAMA_CLOUD_DEFAULT_MODEL} is offered anyway.`,
+    };
   }
 
   private async piStatus(id: "openai" | "anthropic"): Promise<ProviderStatus> {
@@ -152,12 +178,13 @@ export class ProviderHub {
     const models = await this.piModels();
     await models.login(id, "oauth", interaction);
   }
-  async setApiKey(id: "openai" | "anthropic", key: string): Promise<void> {
+  async setApiKey(id: HubKeyProvider, key: string): Promise<void> {
     const k = key.trim();
     if (!k) throw new Error("empty API key");
     await this.credentials.modify(id, async () => ({ type: "api_key", key: k }) as never);
   }
-  async logout(id: "openai" | "anthropic"): Promise<void> {
+  async logout(id: HubKeyProvider): Promise<void> {
+    if (id === "ollama-cloud") return void (await this.credentials.delete(id));
     const models = await this.piModels();
     await models.logout(id).catch(() => this.credentials.delete(id));
   }
@@ -176,6 +203,11 @@ export class ProviderHub {
         if (!m) throw new Error(`Ollama has no models at ${baseUrl} (try: ollama pull gemma3:4b)`);
       }
       return createBackend({ provider, model: m, baseUrl, ...extra });
+    }
+    if (provider === "ollama-cloud") {
+      const apiKey = await readApiKey(this.credentials as unknown as CredentialStoreLike, "ollama-cloud");
+      if (!apiKey) throw new Error("add an Ollama API key first (ollama.com -> Settings -> Keys)");
+      return createBackend({ provider, model: model ?? OLLAMA_CLOUD_DEFAULT_MODEL, apiKey, baseUrl: this.cfg.ollamaCloudUrl, ...extra });
     }
     if (provider === "claude-code") return createBackend({ provider, model, claudeBin: this.cfg.claudeBin });
     return createBackend({ provider: "mock", seed: extra.seed });

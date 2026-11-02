@@ -1,11 +1,11 @@
 /**
  * One factory for every provider. Free providers (mock, local Ollama, local OpenAI-compatible
- * servers) never need --allow-paid; everything else reports paid=true and the sim/sidecar refuse
+ * servers, and the explicit "ollama-cloud" provider: free tier, API key required) never need --allow-paid; everything else reports paid=true and the sim/sidecar refuse
  * it unless explicitly allowed.
  */
 import { MockBackend, OpenAICompatibleBackend, type ModelBackend } from "../backends.js";
 import { ClaudeCodeBackend } from "./claude-code.js";
-import { DEFAULT_OLLAMA_URL, OllamaBackend } from "./ollama.js";
+import { DEFAULT_OLLAMA_URL, OLLAMA_CLOUD_DEFAULT_MODEL, OLLAMA_CLOUD_URL, OllamaBackend } from "./ollama.js";
 import { DEFAULT_PI_MODELS, PiAiBackend, createPiModels } from "./pi-ai.js";
 import { PROVIDER_KINDS, type BackendSpec } from "./spec.js";
 export * from "./spec.js";
@@ -16,6 +16,8 @@ export async function createBackend(spec: BackendSpec): Promise<ModelBackend> {
       return new MockBackend(spec.seed ?? 42);
     case "ollama":
       return new OllamaBackend({ model: spec.model ?? "llama3.2", baseUrl: spec.baseUrl ?? DEFAULT_OLLAMA_URL, temperature: spec.temperature, seed: spec.seed });
+    case "ollama-cloud":
+      return new OllamaBackend({ model: spec.model ?? OLLAMA_CLOUD_DEFAULT_MODEL, baseUrl: spec.baseUrl ?? OLLAMA_CLOUD_URL, apiKey: spec.apiKey, cloudProvider: true, temperature: spec.temperature, seed: spec.seed });
     case "openai-compatible":
       return new OpenAICompatibleBackend({ baseUrl: spec.baseUrl ?? "https://api.openai.com/v1", apiKey: spec.apiKey, model: spec.model ?? "gpt-4o-mini", temperature: spec.temperature, seed: spec.seed, maxTokens: spec.maxTokens });
     case "openai":

@@ -23,7 +23,11 @@ export interface StartOptions {
   userId?: string;
   sessionId?: string;
   seed?: number;
-  /** "mock" | "ollama" | "ollama:<model>" | "openai-compatible" | "openai" | "anthropic" | "claude-code" */
+  /**
+   * "mock" | "ollama" | "ollama:<model>" | "ollama-cloud[:<model>]" | "openai-compatible" | "openai" | "anthropic" | "claude-code".
+   * ollama-cloud reads its key from the OLLAMA_API_KEY env var of the sidecar process (never from options,
+   * so it can't land in logs); it's free-tier, so it doesn't need allowPaid.
+   */
   provider?: string;
   model?: string;
   ollamaUrl?: string;
@@ -103,6 +107,10 @@ export class Sidecar {
       const local = det.models.find((x) => !x.cloud);
       if (!local) throw new Error(`ollama: no local model found at ${det.baseUrl} (${det.error ?? "empty"}); pass options.model`);
       spec.model = local.name;
+    }
+    if (spec.provider === "ollama-cloud") {
+      spec.apiKey = process.env.OLLAMA_API_KEY;
+      if (!spec.apiKey) throw new Error("ollama-cloud: set OLLAMA_API_KEY in the sidecar's environment");
     }
     const backend = await createBackend(spec);
     if (backend.paid && !(o.allowPaid && this.globalAllowPaid)) {
