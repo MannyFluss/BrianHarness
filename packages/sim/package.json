@@ -22,5 +22,8 @@
   },
   "dependencies": {
     "@brianharness/core": "0.1.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
   }
 }

@@ -6,7 +6,7 @@ protocol**, so any language (the Researcher's Python `sim.py`) can drive it.
 ## Setup (Mac or Linux)
 
 ```bash
-# Node >= 20, in the repo root
+# Node >= 22.19 (same floor as README / engines), in the repo root
 npm install          # pi-ai is a dependency but loaded lazily: mock/ollama sessions never import it
 npm run build        # builds packages/core/dist + packages/sim/dist (sidecar = packages/sim/dist/sidecar.js)
 node packages/sim/dist/sidecar.js            # free backends only (mock, local Ollama)

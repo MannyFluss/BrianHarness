@@ -7,6 +7,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Quick start
 
+Requires **Node.js 22.19 or newer** (Node 22 LTS or 24 LTS; `engines.node` is `>=22.19.0` in every package.json). That is the strictest dependency floor: `@earendil-works/pi-ai` needs >=22.19.0, the `electron` installer >=22.12, `openai` >=22, Vite 8 ^20.19 || >=22.12. Our own code needs less (global `fetch`, `AbortSignal.timeout`, JSON import attributes, `node:test` via `tsx --test`), but `npm install` pulls those deps for every workspace.
+
 ```bash
 npm install            # also downloads the Electron binary (postinstall)
 npm test               # builds core+sim, runs unit + sim tests
