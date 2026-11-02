@@ -15,7 +15,8 @@
   "bin": {
     "eeg-sim": "./dist/cli.js",
     "brianharness-sim": "./dist/cli.js",
-    "brianharness-sidecar": "./dist/sidecar.js"
+    "brianharness-sidecar": "./dist/sidecar.js",
+    "brianharness-export-ratings": "./dist/export-ratings.js"
   },
   "scripts": {
     "build": "tsc -p ."

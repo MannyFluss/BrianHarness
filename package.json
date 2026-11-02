@@ -14,6 +14,7 @@
     "test": "tsx --test packages/core/test/*.test.ts packages/sim/test/*.test.ts apps/desktop/test/*.test.ts",
     "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/sim --noEmit && tsc -p apps/desktop",
     "sim": "tsx packages/sim/src/cli.ts",
+    "export-ratings": "tsx packages/sim/src/export-ratings.ts",
     "desktop": "npm run build && npm run start -w @brianharness/desktop",
     "desktop:dev": "npm run dev -w @brianharness/desktop",
     "postinstall": "node node_modules/electron/install.js",
