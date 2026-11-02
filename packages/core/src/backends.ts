@@ -53,29 +53,23 @@ export class MockBackend implements ModelBackend {
           : pick(this.rng, ["Got it.", "Okay!", "Sure, fair."]);
     const L = topicLabel(plan.topic);
     const kws = TOPIC_LEXICON[plan.topic]?.keywords ?? [];
-    let q: string;
-    switch (plan.style) {
-      case "open":
-        q = pick(this.rng, [
-          "What's something you could talk about for hours?",
-          "What have you been really into lately?",
-          "What's a thing that always makes you lose track of time?",
-        ]);
-        if (plan.topic !== OPEN_TOPIC) q = `What's on your mind when it comes to ${L}?`;
-        break;
-      case "either-or":
-        q = `Quick one: ${L} or ${topicLabel(plan.altTopic ?? "travel")}? Which pulls you in more, and why?`;
-        break;
-      case "personal-story":
-        q = `Tell me about a moment when ${L} really grabbed you.`;
-        break;
-      case "hypothetical":
-        q = `If you had a free month to spend only on ${L}, what would you do with it?`;
-        break;
-      case "deep-dive":
-        q = `What is it about ${L} that hooks you most: the ${kws[1] ?? "details"}, the ${kws[2] ?? "people"}, or something else entirely?`;
-        break;
-    }
+    const alt = topicLabel(plan.altTopic ?? "travel");
+    const k1 = kws[1] ?? "details", k2 = kws[2] ?? "people";
+    const bank: Record<string, string[]> = {
+      open:
+        plan.topic === OPEN_TOPIC
+          ? ["What's something you could talk about for hours?", "What have you been really into lately?", "What's a thing that always makes you lose track of time?", "What's the best part of your week usually?"]
+          : [`What's on your mind when it comes to ${L}?`, `How do you feel about ${L} these days?`],
+      "either-or": [`Quick one: ${L} or ${alt}? Which pulls you in more, and why?`, `If you had to pick between ${L} and ${alt} for a weekend, which would it be?`],
+      "personal-story": [`Tell me about a moment when ${L} really grabbed you.`, `Tell me about a time ${L} surprised you.`, `Tell me about how you first got into ${L}.`],
+      hypothetical: [`If you had a free month to spend only on ${L}, what would you do with it?`, `If you could meet anyone from the world of ${L}, who would it be?`, `If you could make one thing in ${L} better, what would it be?`],
+      "deep-dive": [`What is it about ${L} that hooks you most: the ${k1}, the ${k2}, or something else entirely?`, `What is it about ${L} that keeps you coming back, compared to when you started?`, `What is it about the ${k1} side of ${L} that people usually miss?`],
+    };
+    // never repeat a line the Director used in its last few turns
+    const recent = req.messages.filter((m) => m.role === "assistant").slice(-4).map((m) => m.content);
+    const options = bank[plan.style] ?? bank.open!;
+    const fresh = options.filter((o) => !recent.some((r) => r.includes(o)));
+    const q = pick(this.rng, fresh.length ? fresh : options);
     return { text: `${ack} ${q}` };
   }
 }

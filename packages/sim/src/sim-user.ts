@@ -10,8 +10,8 @@ const FILLER = ["honestly", "i guess", "kind of", "sometimes", "like", "you know
 
 export function inferStyle(text: string): QuestionStyle {
   if (/tell me about a (moment|time)/i.test(text)) return "personal-story";
-  if (/^.*\bif you (had|could)\b/i.test(text)) return "hypothetical";
-  if (/which pulls you|\bor\b.*\?\s*which/i.test(text)) return "either-or";
+  if (/which pulls you|pick between|\bor\b.*\?\s*which/i.test(text)) return "either-or";
+  if (/\bif you (had|could)\b/i.test(text)) return "hypothetical";
   if (/what is it about/i.test(text)) return "deep-dive";
   return "open";
 }

@@ -1,0 +1,38 @@
+{
+  "name": "@eeg/desktop",
+  "productName": "EEG Harness",
+  "version": "0.1.0",
+  "private": true,
+  "author": "MannyFluss",
+  "type": "module",
+  "description": "EEG Harness desktop chat app (Electron + React + Tailwind), styled after LearnHarness.",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "build": "vite build",
+    "start": "electron .",
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && EEG_DEV_URL=http://localhost:5173 electron .\"",
+    "dist:mac": "npm run build && electron-builder --mac --arm64"
+  },
+  "dependencies": {
+    "@eeg/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.2.0",
+    "@fontsource-variable/source-sans-3": "^5.2.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "clsx": "^2.1.1",
+    "concurrently": "^9.0.0",
+    "electron": "45.2.1",
+    "electron-builder": "^26.0.0",
+    "lucide-react": "^1.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "^3.0.0",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.0.0",
+    "wait-on": "^8.0.0"
+  }
+}

@@ -1,0 +1,87 @@
+@import "tailwindcss";
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/source-sans-3";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Design tokens matched to LearnHarness's dark skin (palette #141414 / #1C1C1C / #434343,
+   JetBrains Mono chrome, Source Sans 3 prose, CMU Serif titles, 4px rhythm, 4/8/12/16 radii). */
+*:focus,
+*:focus-visible { outline: none; }
+
+:root {
+  color-scheme: dark;
+  --background: #141414;
+  --foreground: #e6e6e6;
+  --card: #1c1c1c;
+  --primary: #e6e6e6;
+  --primary-foreground: #141414;
+  --secondary: #1c1c1c;
+  --muted-foreground: #8d8d8d;
+  --accent: #2a2a2a;
+  --border: #434343;
+  --ring: #8d8d8d;
+  --signal: #7fd1ae; /* HUD accent: engagement meter */
+  --prose-size: 16px;
+}
+
+@font-face {
+  font-family: "eeg-cmu";
+  src: url("/fonts/cmunbx.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+
+@theme inline {
+  --font-ui: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  --font-prose: "Source Sans 3 Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-title: "eeg-cmu", serif;
+  --font-mono: var(--font-ui);
+  --font-sans: var(--font-prose);
+  --text-xs: 11px;
+  --text-xs--line-height: 1.4;
+  --text-sm: 12.5px;
+  --text-sm--line-height: 1.4;
+  --text-base: 14px;
+  --text-base--line-height: 1.45;
+  --text-lg: 16px;
+  --text-lg--line-height: 1.45;
+  --text-xl: 20px;
+  --text-2xl: 25px;
+  --text-3xl: 32px;
+  --text-3xl--line-height: 1.25;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-signal: var(--signal);
+  --spacing-15: 3.75rem;
+}
+
+* { border-color: var(--color-border); }
+body { background: var(--color-background); color: var(--color-foreground); font-family: var(--font-ui); }
+
+.eeg-prose { font-family: var(--font-prose); font-size: var(--prose-size); line-height: 1.5; }
+.eeg-input { font-family: var(--font-prose); font-size: var(--prose-size); line-height: 1.25; }
+.font-title { font-weight: 900; }
+
+* { scrollbar-width: thin; scrollbar-color: var(--color-border) transparent; }
+
+/* Electron window dragging: bars drag, controls inside them don't. */
+.eeg-electron .eeg-drag { -webkit-app-region: drag; }
+.eeg-electron .eeg-drag :is(button, input, textarea, a) { -webkit-app-region: no-drag; }
+.eeg-electron[data-platform="darwin"] .eeg-lights-gutter { padding-left: 92px; }
+.eeg-electron:is([data-platform="win32"], [data-platform="linux"]) .eeg-wco-gutter { padding-right: 150px; }
+
+@keyframes eeg-fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.eeg-enter { animation: eeg-fade-up 180ms ease-out both; }

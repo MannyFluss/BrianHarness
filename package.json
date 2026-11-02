@@ -3,15 +3,21 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["packages/core", "packages/sim", "apps/desktop"],
+  "workspaces": [
+    "packages/core",
+    "packages/sim",
+    "apps/desktop"
+  ],
   "scripts": {
     "build": "npm run build -w @eeg/core && npm run build -w @eeg/sim && npm run build -w @eeg/desktop",
     "pretest": "npm run build -w @eeg/core && npm run build -w @eeg/sim",
     "test": "tsx --test packages/core/test/*.test.ts packages/sim/test/*.test.ts",
-    "typecheck": "tsc -p packages/core && tsc -p packages/sim --noEmit",
+    "typecheck": "tsc -p packages/core --noEmit && tsc -p packages/sim --noEmit && tsc -p apps/desktop",
     "sim": "tsx packages/sim/src/cli.ts",
     "desktop": "npm run build && npm run start -w @eeg/desktop",
-    "desktop:dev": "npm run dev -w @eeg/desktop"
+    "desktop:dev": "npm run dev -w @eeg/desktop",
+    "postinstall": "node node_modules/electron/install.js",
+    "screenshot": "npm run build && EEG_DATA_DIR=/tmp/eeg-shot EEG_SCREENSHOT=$PWD/docs/screenshot.png xvfb-run -a -s '-screen 0 1920x1080x24' electron apps/desktop --no-sandbox --disable-gpu"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
