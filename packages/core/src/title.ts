@@ -6,7 +6,8 @@ const FILLER = new Set("hi hey hello yo ok okay so well um uh hmm honestly basic
 const STOP_TAIL = new Set("a an the and or but of to in on at for with my your is are was am be".split(" "));
 
 export function shortTitle(text: string, maxWords = 5, maxChars = 34): string {
-  const clauses = text.replace(/\s+/g, " ").trim().split(/(?<=[.!?;:])\s|\s[-–—]\s|,\s/);
+  // (no regex lookbehind: older iOS WebKit lacks it)
+  const clauses = text.replace(/\s+/g, " ").trim().replace(/([.!?;:])\s/g, "$1\u0000").split(/\u0000|\s[-–—]\s|,\s/);
   const wordsOf = (c: string) => c.replace(/[^\p{L}\p{N}'’&+#\- ]/gu, " ").split(/\s+/).filter(Boolean);
   let words = wordsOf(clauses.find((c) => wordsOf(c).some((w) => !FILLER.has(w.toLowerCase()))) ?? clauses[0] ?? "");
   while (words.length > 1 && FILLER.has(words[0]!.toLowerCase())) words.shift();

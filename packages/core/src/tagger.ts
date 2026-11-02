@@ -11,6 +11,7 @@
  */
 import { TOPIC_LEXICON, TOPICS, tokenize, topicHits } from "./topics.js";
 import { normalizeOllamaBaseUrl } from "./providers/ollama.js";
+import { timeoutSignal } from "./platform/env.js";
 
 export interface TopicTag {
   /** stable id (lexicon key, "x:<slug>" for specific topics, "kp:<phrase>" for keyphrases) */
@@ -206,7 +207,7 @@ export class OllamaTagger implements TopicTagger {
             { role: "user", content: text.slice(0, 2000) },
           ],
         }),
-        signal: signal ?? AbortSignal.timeout(this.cfg.timeoutMs ?? 20_000),
+        signal: signal ?? timeoutSignal(this.cfg.timeoutMs ?? 20_000),
       });
       if (!res.ok) throw new Error(`ollama ${res.status}`);
       const body = (await res.json()) as { message?: { content?: string } };

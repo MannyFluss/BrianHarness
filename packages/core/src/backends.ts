@@ -9,6 +9,7 @@ import { TOPIC_LEXICON, topicLabel } from "./topics.js";
 import { makeRng, pick, type Rng } from "./rng.js";
 import { OllamaBackend } from "./providers/ollama.js";
 import { isLocalUrl } from "./providers/transcript.js";
+import { defaultEnv, type Env } from "./platform/env.js";
 
 export interface GenerateRequest {
   messages: ChatMessage[];
@@ -115,7 +116,7 @@ const num = (v: string | undefined) => (v === undefined || v === "" ? undefined 
  *  EEG_BACKEND=openai  + EEG_API_KEY|OPENAI_API_KEY [EEG_BASE_URL, EEG_MODEL]  (OpenAI-compatible HTTP)
  *  EEG_TEMPERATURE, EEG_SEED apply to both. For subscription providers use createBackend().
  */
-export function createBackendFromEnv(env: Record<string, string | undefined> = process.env): ModelBackend {
+export function createBackendFromEnv(env: Env = defaultEnv()): ModelBackend {
   const kind = (env.EEG_BACKEND ?? "mock").toLowerCase();
   const temperature = num(env.EEG_TEMPERATURE), seed = num(env.EEG_SEED);
   if (kind === "ollama") {

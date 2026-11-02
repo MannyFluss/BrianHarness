@@ -12,7 +12,8 @@ import { InterestMap } from "./interest-map.js";
 import { makeRng, type Rng } from "./rng.js";
 import { TypingSignalSource, type SignalSource } from "./signals.js";
 import { buildStateNote } from "./state-note.js";
-import type { SessionStore } from "./store.js";
+import type { HarnessStorage } from "./platform/storage.js";
+import { randomId, systemClock, type Clock } from "./platform/env.js";
 import { createTagger, type TopicTag, type TopicTagger, type TopicTaggerSpec } from "./tagger.js";
 import { finalGuesses, type FinalGuess, type FinalGuessOptions, type TurnSnapshot } from "./final-guesses.js";
 
@@ -20,11 +21,11 @@ export interface HarnessSessionOptions {
   userId: string;
   backend: ModelBackend;
   /** null = in-memory only (tests, sims that don't want files) */
-  store?: SessionStore | null;
+  store?: HarnessStorage | null;
   /** extra sources (EEG, fake EEG); a TypingSignalSource is always present */
   sources?: SignalSource[];
   map?: InterestMap;
-  clock?: () => number;
+  clock?: Clock;
   seed?: number;
   policy?: DirectorPolicyOptions;
   /** EEG blending: weight, per-user z-scoring, quality / agreement weighting */
@@ -86,9 +87,9 @@ export class HarnessSession {
 
   constructor(private opts: HarnessSessionOptions) {
     this.userId = opts.userId;
-    this.clock = opts.clock ?? Date.now;
+    this.clock = opts.clock ?? systemClock;
     this.rng = makeRng(opts.seed ?? 1);
-    this.id = opts.sessionId ?? opts.store?.newSessionId() ?? `mem-${Math.random().toString(36).slice(2, 8)}`;
+    this.id = opts.sessionId ?? opts.store?.newSessionId() ?? `mem-${randomId(6)}`;
     this.map = opts.map ?? opts.store?.loadMap(opts.userId) ?? InterestMap.fresh(opts.userId);
     this.sources = [this.typing, ...(opts.sources ?? [])];
     const t = opts.tagger;
@@ -128,9 +129,9 @@ export class HarnessSession {
       ...this.transcript,
       { role: "system", content: stateNote },
     ];
-    const t0 = Date.now();
+    const t0 = systemClock();
     const { text } = await this.backend.generate({ messages, plan, stateNote });
-    const genMs = Date.now() - t0;
+    const genMs = systemClock() - t0;
     this.plans.push(plan);
     this.transcript.push({ role: "assistant", content: text });
     this.log({ type: "director_turn", t: nowIso(), turn: this.turn, plan, stateNote, text, backend: this.backend.id, genMs });

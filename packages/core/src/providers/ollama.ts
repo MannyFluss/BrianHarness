@@ -4,6 +4,7 @@
  * the Harness Researcher's sim.py uses, so both can share one local Ollama.
  * Local models are free; "*:cloud" models run on Ollama's cloud and count as paid.
  */
+import { timeoutSignal } from "../platform/env.js";
 import type { GenerateRequest, GenerateResult, ModelBackend } from "../backends.js";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
@@ -42,7 +43,7 @@ export const isOllamaCloudModel = (name: string) => /(:|-)cloud$/.test(name);
 export async function detectOllama(baseUrl = DEFAULT_OLLAMA_URL, timeoutMs = 1200, fetchImpl: typeof fetch = fetch): Promise<OllamaDetection> {
   const base = normalizeOllamaBaseUrl(baseUrl);
   try {
-    const res = await fetchImpl(`${base}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetchImpl(`${base}/api/tags`, { signal: timeoutSignal(timeoutMs) });
     if (!res.ok) return { running: false, baseUrl: base, models: [], error: `HTTP ${res.status}` };
     const body = (await res.json()) as { models?: Array<{ name?: string; model?: string; size?: number; details?: { family?: string; parameter_size?: string } }> };
     const models = (body.models ?? [])
@@ -81,7 +82,7 @@ export class OllamaBackend implements ModelBackend {
           ...(opts.json ? { format: "json" } : {}),
           options: { temperature: opts.temperature ?? this.cfg.temperature ?? 0.8, seed: this.cfg.seed ?? 42 },
         }),
-        signal: opts.signal ?? AbortSignal.timeout(this.cfg.timeoutMs ?? 120_000),
+        signal: opts.signal ?? timeoutSignal(this.cfg.timeoutMs ?? 120_000),
       });
       if (res.ok) {
         const body = (await res.json()) as { message?: { content?: string } };

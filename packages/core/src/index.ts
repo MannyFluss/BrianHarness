@@ -1,22 +1,12 @@
-export * from "./types.js";
-export * from "./topics.js";
-export * from "./rng.js";
-export * from "./signals.js";
-export * from "./engagement.js";
-export * from "./interest-map.js";
-export * from "./state-note.js";
-export * from "./director.js";
-export * from "./backends.js";
+/**
+ * Node entry (`@brianharness/core`): the browser-safe core plus Node-only pieces used by the
+ * desktop main process, the sidecar and the sim (files, Electron-keychain credential file,
+ * Claude Code CLI, pi-ai subscription sign-in, ProviderHub).
+ */
+export * from "./browser.js";
 export * from "./store.js";
-export * from "./session.js";
-export * from "./brand.js";
-export * from "./final-guesses.js";
-export * from "./providers/ollama.js";
-export * from "./providers/transcript.js";
 export * from "./providers/pi-ai.js";
 export * from "./providers/claude-code.js";
 export * from "./providers/factory.js";
 export * from "./providers/credential-store.js";
-export * from "./tagger.js";
 export * from "./providers/hub.js";
-export * from "./title.js";

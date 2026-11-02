@@ -1,13 +1,15 @@
 /**
  * Persistence: one JSONL log per session (append-only, like a replay file) and one
- * JSON interest-map save file per user (the save game). Node-only.
+ * JSON interest-map save file per user (the save game). Node-only: the HarnessStorage
+ * implementation for the desktop main process, sidecar and sim. Browsers use KVHarnessStorage.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { LogEvent } from "./types.js";
 import { InterestMap } from "./interest-map.js";
+import { newSessionIdFor, type HarnessStorage } from "./platform/storage.js";
 
-export class SessionStore {
+export class SessionStore implements HarnessStorage {
   readonly sessionsDir: string;
   readonly savesDir: string;
   constructor(readonly dataDir: string) {
@@ -17,7 +19,7 @@ export class SessionStore {
     mkdirSync(this.savesDir, { recursive: true });
   }
   newSessionId(now = new Date()): string {
-    return `${now.toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 6)}`;
+    return newSessionIdFor(now);
   }
   append(sessionId: string, event: LogEvent): void {
     appendFileSync(join(this.sessionsDir, `${sessionId}.jsonl`), JSON.stringify(event) + "\n");
