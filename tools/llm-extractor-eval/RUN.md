@@ -1,28 +1,41 @@
 # LLM interest-extractor eval (Phase C track 2)
 
-Runs on Manny's Mac (the box has no Ollama key). Self-contained: `run.mjs` + `prompts.jsonl`, Node >= 22.19, stdlib only,
-**no npm install, no repo build, no local ollama daemon**.
+Runs on Manny's Mac through the **signed-in Ollama app** (`http://127.0.0.1:11434`), which forwards `:cloud` models
+to Ollama's cloud, the same way Phases B and C ran. **No API key is needed.** The script is self-contained (`run.mjs` +
+`prompts.jsonl`): Node >= 22.19, stdlib only, no npm install, no repo build.
 
 ## What it does
 
 For 24 Phase B sessions (3 per persona, picked by a fixed hash order; list in `sessions.json`), it sends the prepared
-extractor prompt (system prompt with no hobby examples, plus the user's messages) to
-**Ollama Cloud `https://ollama.com/api/chat`** with `stream:false` and `Authorization: Bearer $OLLAMA_API_KEY`.
-The prompt is sent twice per session: after user turn 12 (the whole session) and after user turn 6. The answers come back to
-the box and are scored offline against the keyphrase-only baseline and keyphrase-idf on the same sessions.
+extractor prompt to `/api/chat` with `stream:false`. The prompt is a system prompt with no hobby examples, plus the
+user's messages. Each session is sent twice: after user turn 12 (the whole session) and after user turn 6. The answers
+come back to the box, where they are scored offline against the keyphrase-only baseline and keyphrase-idf on the same
+sessions.
 
-## Exact command
+## Exact commands (Mac)
 
 ```bash
-cd tools/llm-extractor-eval          # copy this whole folder to the Mac
-export OLLAMA_API_KEY=...            # Ollama Cloud key (ollama.com account), never printed or stored by the script
-node run.mjs --status                # 0 calls: shows the counter and what would be sent
-node run.mjs                         # gemma4:cloud, 24 sessions x turns 12 then 6 = 48 calls
+cd tools/llm-extractor-eval                              # copy this whole folder to the Mac
+node run.mjs --base-url http://127.0.0.1:11434 --status  # 0 calls: shows base, counter, what would be sent
+node run.mjs --base-url http://127.0.0.1:11434           # gemma4:cloud, 24 sessions x turns 12 then 6 = 48 calls
 ```
 
-Optional alternative instead of the default (still 48 calls, turn 12 only, two models):
-`node run.mjs --models gemma4:cloud,gpt-oss:120b-cloud --turns 12` (gpt-oss requests get `num_predict` >= 512 automatically;
-`gpt-oss:20b-cloud` prompts are prepared too).
+Optional alternative to the default (still 48 calls, turn 12 only, two models):
+`node run.mjs --base-url http://127.0.0.1:11434 --models gemma4:cloud,gpt-oss:120b-cloud --turns 12`.
+gpt-oss requests get `num_predict` >= 512 automatically; `gpt-oss:20b-cloud` prompts are prepared too.
+
+## Base URL, auth and the safety check
+
+- **Local** (`localhost` or `127.0.0.1`, any port): no `Authorization` header is ever sent, even if `OLLAMA_API_KEY`
+  happens to be set. **Safety:** before any call, it refuses to start if any model in `--models` or in `prompts.jsonl`
+  is not a cloud tag (`name:cloud` or `name:<tag>-cloud`), so nothing can run on the Mac itself by accident.
+- **Remote** (`https://ollama.com`): needs `OLLAMA_API_KEY` and sends `Authorization: Bearer ...`. The direct API uses
+  different names, so request bodies are mapped: `gemma4:cloud -> gemma4:31b`, `gpt-oss:120b-cloud -> gpt-oss:120b`,
+  `gpt-oss:20b-cloud -> gpt-oss:20b` (`REMOTE_NAMES` in run.mjs; the map is untested against the live API).
+  Cache keys and outputs keep the app names, so scoring is identical.
+- **Default** when `--base-url` is omitted: remote if `OLLAMA_API_KEY` is set, otherwise local `http://127.0.0.1:11434`.
+  Pass `--base-url` explicitly anyway.
+- Any other host is refused unless `--dry-run` is given (fake server tests only).
 
 ## Call budget
 
@@ -30,7 +43,7 @@ Optional alternative instead of the default (still 48 calls, turn 12 only, two m
   before it is sent, so timeouts and errors count. `--max-calls N` can only lower it.
 - The default uses 48. Rerunning is free for anything already answered: OK responses are cached in `out/cache/<key>.json`
   and never requested again. Only failed prompts are re-sent, and only while the cap allows.
-- It stops early on 401/403 (bad key), 429 (rate limit), or 3 failures before any success.
+- It stops early on 401/403 (bad key, or the app is not signed in), 429 (rate limit), or 3 failures before any success.
 
 ## Expected runtime
 

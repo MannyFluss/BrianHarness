@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // Self-contained LLM interest-extractor runner (Node >= 22.19, stdlib only, no npm install).
-// Sends the prepared prompts (prompts.jsonl) to Ollama Cloud, https://ollama.com/api/chat, stream:false,
-// with Authorization: Bearer $OLLAMA_API_KEY. Never uses a local ollama daemon.
+// Sends the prepared prompts (prompts.jsonl) to an Ollama /api/chat endpoint, stream:false:
+//   * LOCAL (default when OLLAMA_API_KEY is unset): http://127.0.0.1:11434, the signed-in Ollama app, which forwards
+//     *:cloud models to Ollama's cloud. No key, no Authorization header. Every model must be a cloud tag
+//     (":cloud" or "...-cloud"), or it refuses to start before any call, so nothing runs on the local machine.
+//   * REMOTE (default when OLLAMA_API_KEY is set): https://ollama.com/api/chat with Authorization: Bearer $OLLAMA_API_KEY.
+//     The direct API uses other names, mapped by REMOTE_NAMES below (e.g. gemma4:cloud -> gemma4:31b).
 //
-//   OLLAMA_API_KEY=... node run.mjs                     # DEFAULT: gemma4:cloud, 24 sessions x turns 12+6 = 48 calls
-//   OLLAMA_API_KEY=... node run.mjs --models gemma4:cloud,gpt-oss:120b-cloud --turns 12   # alt: 2 models x 24 x turn 12 = 48
-//   node run.mjs --status                                              # counter + cache, no calls
-//   node run.mjs --dry-run --base-url http://127.0.0.1:8765            # against fake_server.mjs, state in out-dry/
+//   node run.mjs --base-url http://127.0.0.1:11434 --status      # counter + cache, 0 calls
+//   node run.mjs --base-url http://127.0.0.1:11434               # DEFAULT set: gemma4:cloud, 24 sessions x turns 12+6 = 48 calls
+//   node run.mjs --base-url http://127.0.0.1:11434 --models gemma4:cloud,gpt-oss:120b-cloud --turns 12   # alt: 48 calls
+//   node run.mjs --dry-run --base-url http://127.0.0.1:8765      # against fake_server.mjs, state in out-dry/
 //
 // HARD CAP: at most 50 network calls in total, across runs and models, persisted in <out>/calls.json
 // (a call is counted BEFORE it is sent, so crashes/timeouts count too). Every OK response is cached in
@@ -20,22 +24,34 @@ const HARD_CAP = 50;
 const arg = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i > 0 ? process.argv[i + 1] : d; };
 const flag = (n) => process.argv.includes(`--${n}`);
 const dry = flag("dry-run");
-const baseUrl = (arg("base-url", "https://ollama.com")).replace(/\/+$/, "").replace(/\/(api\/chat|api|v1)$/, "");
-if (!dry && baseUrl !== "https://ollama.com") { console.error("refusing: real runs go to https://ollama.com only (use --dry-run for a fake server)"); process.exit(2); }
+const key = process.env.OLLAMA_API_KEY || undefined;
+const REMOTE = "https://ollama.com";
+const LOCAL_DEFAULT = "http://127.0.0.1:11434";
+const baseUrl = (arg("base-url", key ? REMOTE : LOCAL_DEFAULT)).replace(/\/+$/, "").replace(/\/(api\/chat|api|v1)$/, "");
+const isLocal = (() => { try { return ["127.0.0.1", "localhost"].includes(new URL(baseUrl).hostname); } catch { return false; } })();
+const isRemote = baseUrl === REMOTE;
+if (!dry && !isLocal && !isRemote) { console.error(`refusing: real runs go to ${REMOTE} or a localhost / 127.0.0.1 Ollama app, not ${baseUrl} (use --dry-run for a fake server)`); process.exit(2); }
+// names on the direct ollama.com API differ from the app's :cloud tags (request body only; cache keys stay the same)
+const REMOTE_NAMES = { "gemma4:cloud": "gemma4:31b", "gpt-oss:120b-cloud": "gpt-oss:120b", "gpt-oss:20b-cloud": "gpt-oss:20b" };
+const wireModel = (m) => (isRemote ? REMOTE_NAMES[m] ?? m : m);
+const isCloudTag = (m) => /:(cloud|[^:]*-cloud)$/.test(m);
 const OUT = path.resolve(arg("out", path.join(HERE, dry ? "out-dry" : "out")));
 const models = arg("models", "gemma4:cloud").split(",").map((s) => s.trim()).filter(Boolean);
 const limit = Number(arg("limit", "1000"));
 const turns = arg("turns", "12,6").split(",").map(Number);
 const maxCalls = Math.min(HARD_CAP, Number(arg("max-calls", String(HARD_CAP))));
 const timeoutMs = Number(arg("timeout-s", "180")) * 1000;
-const key = process.env.OLLAMA_API_KEY ?? (dry ? "dry-run-fake-key" : undefined);
 
-fs.mkdirSync(path.join(OUT, "cache"), { recursive: true });
 const counterFile = path.join(OUT, "calls.json");
 const counter = fs.existsSync(counterFile) ? JSON.parse(fs.readFileSync(counterFile, "utf8")) : { calls: 0, cap: HARD_CAP, log: [] };
 const saveCounter = () => fs.writeFileSync(counterFile, JSON.stringify(counter, null, 1) + "\n");
 const prompts = fs.readFileSync(path.join(HERE, "prompts.jsonl"), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 const cachePath = (k) => path.join(OUT, "cache", `${k}.json`);
+if (isLocal) {
+  const bad = [...new Set([...models, ...prompts.map((p) => p.model), ...prompts.map((p) => p.body?.model)])].filter((m) => !isCloudTag(String(m)));
+  if (bad.length) { console.error(`refusing (local base URL): non-cloud model(s) ${bad.join(", ")}; only :cloud / -cloud tags may go through the local Ollama app`); process.exit(2); }
+}
+fs.mkdirSync(path.join(OUT, "cache"), { recursive: true });
 
 function writeResponses() {
   const lines = [];
@@ -53,16 +69,17 @@ for (const m of models) {
   for (const t of turns) todoAll.push(...prompts.filter((p) => p.model === m && p.turn === t).slice(0, limit));
 }
 const todo = todoAll.filter((p) => !fs.existsSync(cachePath(p.key)));
+console.log(`base: ${baseUrl} (${isLocal ? "local Ollama app, no auth" : isRemote ? "ollama.com, Bearer key" : "dry-run target"})${isRemote ? "; wire names: " + models.map((m) => `${m}->${wireModel(m)}`).join(", ") : ""}`);
 console.log(`out: ${OUT}\nmodels: ${models.join(", ")}; turns ${turns.join(",")}; prompts selected ${todoAll.length}, already cached ${todoAll.length - todo.length}, to send ${todo.length}`);
 console.log(`call counter: ${counter.calls} used of ${HARD_CAP} (this run may use ${Math.max(0, Math.min(maxCalls, HARD_CAP) - counter.calls)})`);
 if (flag("status")) { console.log(`responses.jsonl: ${writeResponses()} lines`); process.exit(0); }
-if (todo.length && !key) { console.error("OLLAMA_API_KEY is not set; nothing sent"); process.exit(2); }
+if (todo.length && isRemote && !key) { console.error(`OLLAMA_API_KEY is not set (needed for ${REMOTE}); nothing sent`); process.exit(2); }
 
 let sent = 0, ok = 0, failed = 0;
 const t0 = Date.now();
 for (const p of todo) {
   if (counter.calls >= maxCalls) { console.log(`STOP: call cap reached (${counter.calls}/${maxCalls})`); break; }
-  const body = { ...p.body, stream: false };
+  const body = { ...p.body, model: wireModel(p.body.model ?? p.model), stream: false };
   if (/^gpt-oss/.test(p.model)) body.options = { ...(body.options ?? {}), num_predict: Math.max(512, body.options?.num_predict ?? 0) };
   counter.calls++; counter.log.push({ at: new Date().toISOString(), model: p.model, key: p.key, dry }); saveCounter();
   sent++;
@@ -70,7 +87,7 @@ for (const p of todo) {
   let status = 0, raw = "", err = "";
   try {
     const res = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      method: "POST", headers: { "content-type": "application/json", ...(key && !isLocal ? { authorization: `Bearer ${key}` } : {}) },
       body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
     });
     status = res.status; raw = await res.text();

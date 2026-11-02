@@ -14,6 +14,6 @@
 | `phaseC_tagger_leak_check.txt` | 00c9b5a | sim's `phaseC/check_personas_leak.mjs personas_c.json` (curated lists) + `tools/phaseC-tagger-eval/leak_check_idf.mjs` (idf stopwords, extractor prompt, neutral-convo labels) |
 | `phaseC_tagger_track2_dryrun.{md,jsonl}` | 00c9b5a | track 2 plumbing test against `fake_server.mjs`; NOT a model result |
 | `phaseC_tagger_track2_oracle_ceiling.{md,jsonl}` | 00c9b5a | track 2 ceiling: the persona's own passion injected as the extractor output; NOT a model result |
-| `phaseC_tagger_track2.{md,jsonl}` | (pending) | real gemma4:cloud responses from the Mac, scored with `python3 tools/llm-extractor-eval/score.py` |
+| `phaseC_tagger_track2.{md,jsonl}` | (pending) | real gemma4:cloud responses from the Mac (via the local Ollama app), scored with `python3 tools/llm-extractor-eval/score.py` |
 
 The Researcher's own `sweep_results.json` (in eeg-harness-sim) is theirs and is not mirrored here.
