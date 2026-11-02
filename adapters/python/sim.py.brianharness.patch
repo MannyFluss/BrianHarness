@@ -1,0 +1,50 @@
+--- sim.py	2026-11-01 19:09:16.673161071 -0800
++++ sim.py	2026-11-01 19:55:32.734025633 -0800
+@@ -325,13 +325,23 @@
+     pid = persona["id"]
+     mock_ctx = {"persona_id": pid, "keywords": persona["passion_keywords"],
+                 "talkativeness": persona["talkativeness"], "mock_adjacent": MOCK_ADJ.get(pid, "")}
+-    director = StandInDirector(llm, cfg.director_model, condition, seed, cfg.temperature, mock_ctx)
++    if condition == "brianharness":
++        sys.path.insert(0, cfg.bh_adapter_dir)
++        from brianharness_director import BrianHarnessDirector
++        tagger = {"kind": "ollama", "model": cfg.director_model, "baseUrl": cfg.url} if cfg.bh_tagger == "ollama" else {"kind": cfg.bh_tagger}
++        director = BrianHarnessDirector(
++            provider=cfg.bh_provider or ("mock" if cfg.mock else "ollama"),
++            model=None if (cfg.bh_provider or ("mock" if cfg.mock else "ollama")) == "mock" else cfg.director_model,
++            ollama_url=cfg.url, seed=seed, temperature=cfg.temperature, allow_paid=cfg.bh_allow_paid,
++            eeg_weight=cfg.bh_eeg_weight, tagger=tagger, text_signals=text_signals)
++    else:
++        director = StandInDirector(llm, cfg.director_model, condition, seed, cfg.temperature, mock_ctx)
+     psys = persona_system(persona)
+     pconv = []          # persona's view: director = "user", persona = "assistant"
+     rows, director_turns, internal_top1, user_words = [], [], [], []
+     base = {"run_id": run_id, "persona_id": pid, "condition": condition, "seed": seed,
+             "models": {"director": cfg.director_model, "persona": cfg.persona_model, "judge": cfg.judge_model},
+-            "director_impl": "standin", "script_version": SCRIPT_VERSION,
++            "director_impl": getattr(director, "director_impl", "standin"), "script_version": SCRIPT_VERSION,
+             "backend": "MOCK" if cfg.mock else cfg.url, "temperature": cfg.temperature}
+ 
+     def log(turn, speaker, text, guess=None, scores=None):
+@@ -357,6 +367,8 @@
+         log(turn + 1, "director", dmsg, guess=guess, scores=sig)
+ 
+     guesses = director.final_guesses()
++    if hasattr(director, "close"):
++        director.close()
+     log(cfg.turns, "director_final_guess", "; ".join(guesses), guess=guesses)
+ 
+     rraw = llm.chat(cfg.persona_model, [{"role": "system", "content": psys}] + pconv +
+@@ -424,6 +436,12 @@
+     ap.add_argument("--mock", action="store_true", help="use built-in mock LLM (no network)")
+     ap.add_argument("--smoke", action="store_true", help="1 persona x 2 conditions x 1 seed x 4 turns, into ./smoke/")
+     ap.add_argument("--dry-estimate", action="store_true")
++    ap.add_argument("--bh-adapter-dir", default=os.environ.get("BH_ADAPTER_DIR", "/workspace/eeg-harness/adapters/python"),
++                    help="dir holding brianharness_director.py (condition 'brianharness')")
++    ap.add_argument("--bh-provider", default=None, help="BrianHarness backend: mock|ollama|... (default: mock with --mock, else ollama)")
++    ap.add_argument("--bh-allow-paid", action="store_true", help="let the BrianHarness Director use paid/cloud models (e.g. *:cloud)")
++    ap.add_argument("--bh-eeg-weight", type=float, default=None)
++    ap.add_argument("--bh-tagger", default="lexicon", choices=["lexicon", "keyphrase", "ollama"])
+     cfg = ap.parse_args()
+ 
+     if cfg.smoke:

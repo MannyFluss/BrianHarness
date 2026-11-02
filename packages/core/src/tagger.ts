@@ -33,7 +33,7 @@ export type TopicTaggerSpec =
 
 /** Specific (open-vocab) topics: id -> label, parent, phrases (lowercase, matched on word boundaries). */
 export const SPECIFIC_TOPICS: Record<string, { label: string; parent?: string; phrases: string[] }> = {
-  "x:ham-radio": { label: "amateur (ham) radio", parent: "programming", phrases: ["ham radio", "amateur radio", "morse", "morse code", "qso", "call sign", "callsign", "dx", "antenna", "shortwave", "hf band", "contest log", "transceiver"] },
+  "x:ham-radio": { label: "amateur (ham) radio", phrases: ["ham radio", "amateur radio", "morse", "morse code", "qso", "call sign", "callsign", "dx", "antenna", "shortwave", "hf band", "contest log", "transceiver"] },
   "x:watch-restoration": { label: "restoring vintage mechanical watches", parent: "art", phrases: ["watch", "watches", "wristwatch", "wristwatches", "movement", "movements", "mainspring", "balance wheel", "horology", "watchmaking", "escapement", "caseback", "crystal", "dial"] },
   "x:birding-big-year": { label: "competitive birding (big year)", parent: "nature", phrases: ["big year", "life list", "lifer", "lifers", "ebird", "twitching", "twitcher", "warbler", "warblers", "species count", "birding", "birder", "birders", "birdwatching", "binoculars"] },
   "x:slime-molds": { label: "slime molds (myxomycetes)", parent: "nature", phrases: ["slime mold", "slime molds", "slime mould", "physarum", "myxomycete", "myxomycetes", "plasmodium", "oat flakes", "fruiting bodies"] },
@@ -96,21 +96,31 @@ function countPhrase(text: string, phrase: string): number {
 
 /** Broad lexicon + curated specific topics. Specific topics need 1 strong phrase (2+ words) or 2 hits. */
 export function lexiconTags(text: string): TopicTag[] {
-  const out: TopicTag[] = Object.entries(topicHits(text)).map(([id, w]) => ({ id, label: TOPIC_LEXICON[id]!.label, weight: w }));
-  const low = text.toLowerCase();
+  let rest = text.toLowerCase();
+  const specific: TopicTag[] = [];
   for (const [id, t] of Object.entries(SPECIFIC_TOPICS)) {
     let hits = 0, strong = false;
+    const matched: string[] = [];
     for (const p of t.phrases) {
-      const c = countPhrase(low, p);
+      const c = countPhrase(rest, p);
       if (c) {
         hits += c;
+        matched.push(p);
         if (p.includes(" ") || p.length >= 9) strong = true;
       }
     }
-    if (hits >= 2 || strong) out.push({ id, label: t.label, parent: t.parent, weight: hits + (strong ? 1 : 0) });
+    if (hits >= 2 || strong) {
+      specific.push({ id, label: t.label, ...(t.parent ? { parent: t.parent } : {}), weight: hits + (strong ? 1 : 0) });
+      // multi-word phrases are consumed so "morse code" doesn't also count as programming's "code"
+      for (const p of matched) if (p.includes(" ")) rest = rest.split(p).join(" ");
+    }
   }
-  return out.sort((a, b) => b.weight - a.weight);
+  const broad: TopicTag[] = Object.entries(topicHits(rest)).map(([id, w]) => ({ id, label: TOPIC_LEXICON[id]!.label, weight: w }));
+  return [...specific, ...broad].sort((a, b) => b.weight - a.weight);
 }
+
+/** open-vocab (specific) topic ids: lexicon specifics, Ollama labels, keyphrases */
+export const isSpecificTopic = (id: string) => /^(x|o|kp):/.test(id);
 
 export class LexiconTagger implements TopicTagger {
   readonly kind = "lexicon";

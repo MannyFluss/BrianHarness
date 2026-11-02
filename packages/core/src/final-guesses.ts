@@ -4,6 +4,7 @@
  * displaced by a last-turn wobble, and a specific (open-vocab) refinement beats its broad parent.
  */
 import type { InterestMap } from "./interest-map.js";
+import { isSpecificTopic } from "./tagger.js";
 
 export interface TurnSnapshot {
   turn: number;
@@ -28,7 +29,7 @@ export interface FinalGuess {
 export interface FinalGuessOptions {
   /** per-turn decay of older snapshots (default 0.85) */
   decay?: number;
-  /** bonus for open-vocab topics that refine a broader one (default 0.08) */
+  /** bonus for specific open-vocab topics (x:/o:/kp:) over broad lexicon ones (default 0.08) */
   specificityBonus?: number;
 }
 
@@ -54,7 +55,7 @@ export function finalGuesses(map: InterestMap, history: TurnSnapshot[], k = 3, o
     if (parent) p = Math.max(p, 0.5 * (wsum > 0 ? (pers.get(parent) ?? 0) / wsum : 0)); // inherit the parent's lead
     const nconf = Math.min(1, c.n / 3);
     const cur = Math.max(0, Math.min(1, 0.5 + 2 * (c.mean - base)));
-    const score = 0.45 * p + 0.4 * cur * nconf + 0.15 * nconf + (parent ? spec : 0);
+    const score = 0.45 * p + 0.4 * cur * nconf + 0.15 * nconf + (parent || isSpecificTopic(t) ? spec : 0);
     return { topic: t, label: map.label(t), score: Math.round(score * 1000) / 1000, mean: c.mean, n: c.n, persistence: Math.round(p * 1000) / 1000, ...(parent ? { parent } : {}) };
   });
   return scored.sort((a, b) => b.score - a.score || b.mean - a.mean).slice(0, k);
