@@ -1,0 +1,42 @@
+ablation {"zScore":true,"minHistory":3,"qualityWeighting":true,"agreementWeighting":true,"refWindowSec":20,"flatBoost":1.6,"typingSdLow":0.06,"typingSdHigh":0.12,"maxWeight":0.6}
+
+== eeg weight 0.25, per-user normalisation OFF (harness as-is), profile consumer ==
+typing-only (no EEG source)                    informative: found  89% top3  92% | flat-chatty: found   4% top3  36% | flat-terse: found   0% top3  64%
+sham: noise (d=0, same artifacts)              informative: found  90% top3  92% | flat-chatty: found   6% top3  36% | flat-terse: found   0% top3  61%
+EEG d=0.5                                      informative: found  91% top3  94% | flat-chatty: found   6% top3  41% | flat-terse: found   0% top3  64%
+EEG d=1                                        informative: found  91% top3  93% | flat-chatty: found   8% top3  43% | flat-terse: found   1% top3  71%
+EEG d=2                                        informative: found  91% top3  94% | flat-chatty: found  10% top3  45% | flat-terse: found   1% top3  81%
+EEG d=3                                        informative: found  89% top3  93% | flat-chatty: found  12% top3  47% | flat-terse: found   2% top3  85%
+sham: yoked (replay of another session, d=2)   informative: found  90% top3  95% | flat-chatty: found   5% top3  39% | flat-terse: found   0% top3  68%
+
+== eeg weight 0.25, per-user normalisation ON (driver-side), profile consumer ==
+sham: noise (d=0, same artifacts)              informative: found  89% top3  93% | flat-chatty: found   3% top3  36% | flat-terse: found   0% top3  58%
+EEG d=0.5                                      informative: found  89% top3  94% | flat-chatty: found   6% top3  39% | flat-terse: found   1% top3  64%
+EEG d=1                                        informative: found  90% top3  96% | flat-chatty: found   7% top3  42% | flat-terse: found   0% top3  72%
+EEG d=2                                        informative: found  93% top3  97% | flat-chatty: found   8% top3  43% | flat-terse: found   2% top3  78%
+EEG d=3                                        informative: found  92% top3  95% | flat-chatty: found  11% top3  45% | flat-terse: found   2% top3  80%
+sham: yoked (replay of another session, d=2)   informative: found  91% top3  94% | flat-chatty: found   6% top3  40% | flat-terse: found   0% top3  53%
+
+== eeg weight 0.5, per-user normalisation OFF (harness as-is), profile consumer ==
+sham: noise (d=0, same artifacts)              informative: found  83% top3  92% | flat-chatty: found   5% top3  38% | flat-terse: found   2% top3  53%
+EEG d=0.5                                      informative: found  86% top3  91% | flat-chatty: found   7% top3  42% | flat-terse: found   3% top3  60%
+EEG d=1                                        informative: found  84% top3  90% | flat-chatty: found  14% top3  48% | flat-terse: found   9% top3  68%
+EEG d=2                                        informative: found  87% top3  91% | flat-chatty: found  21% top3  52% | flat-terse: found  19% top3  79%
+EEG d=3                                        informative: found  88% top3  93% | flat-chatty: found  27% top3  58% | flat-terse: found  25% top3  86%
+sham: yoked (replay of another session, d=2)   informative: found  74% top3  91% | flat-chatty: found   5% top3  41% | flat-terse: found   2% top3  56%
+
+== eeg weight 0.5, per-user normalisation ON (driver-side), profile consumer ==
+sham: noise (d=0, same artifacts)              informative: found  87% top3  92% | flat-chatty: found   3% top3  35% | flat-terse: found   3% top3  58%
+EEG d=0.5                                      informative: found  86% top3  92% | flat-chatty: found   6% top3  37% | flat-terse: found   3% top3  64%
+EEG d=1                                        informative: found  87% top3  92% | flat-chatty: found   8% top3  43% | flat-terse: found   6% top3  70%
+EEG d=2                                        informative: found  88% top3  92% | flat-chatty: found  16% top3  51% | flat-terse: found  14% top3  82%
+EEG d=3                                        informative: found  88% top3  92% | flat-chatty: found  22% top3  54% | flat-terse: found  27% top3  87%
+sham: yoked (replay of another session, d=2)   informative: found  79% top3  92% | flat-chatty: found   1% top3  33% | flat-terse: found   2% top3  54%
+
+== headset profile at d=2, weight 0.5, normalisation ON ==
+EEG d=2 profile=clean                          informative: found  75% top3  91% | flat-chatty: found  21% top3  54% | flat-terse: found  15% top3  82%
+EEG d=2 profile=lab                            informative: found  84% top3  91% | flat-chatty: found  21% top3  53% | flat-terse: found  17% top3  86%
+EEG d=2 profile=consumer                       informative: found  88% top3  92% | flat-chatty: found  16% top3  51% | flat-terse: found  14% top3  82%
+EEG d=2 profile=rough                          informative: found  91% top3  94% | flat-chatty: found  10% top3  48% | flat-terse: found   6% top3  81%
+
+wrote sweep_results.json
