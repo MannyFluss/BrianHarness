@@ -135,6 +135,19 @@ export function ModelPicker({ info, onChanged, openRef }: { info: Info | null; o
               )}
             </div>
           ))}
+          {info?.extractorPromptVersion && bridge().providers.setExtractorPrompt && (
+            <div className="mx-2 mb-1 mt-1 border-t border-border/60 pt-1.5 text-[10.5px] text-muted-foreground" data-testid="extractor-setting">
+              <div className="flex items-center gap-1.5">
+                <span className="flex-1 uppercase tracking-wider">interest extractor prompt</span>
+                {(["v2", "v1"] as const).map((v) => (
+                  <button key={v} disabled={!!busy} onClick={() => void bridge().providers.setExtractorPrompt!(v).then(onChanged, (e: Error) => setError(e.message))} className={cn("eeg-tap-chip rounded px-1.5 py-0.5 uppercase tracking-wider", info.extractorPromptVersion === v ? "bg-accent text-foreground" : "hover:bg-accent/60")}>
+                    {v}{v === "v1" ? " (rollback)" : ""}
+                  </button>
+                ))}
+              </div>
+              {info.tagger && <div className="mt-0.5 truncate text-muted-foreground/70" title={info.tagger}>next session: {info.tagger}</div>}
+            </div>
+          )}
           {error && <div className="mx-2 mb-1 rounded bg-red-500/10 px-2 py-1.5 text-[11px] text-red-300">{error}</div>}
         </div>,
         document.body,

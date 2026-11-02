@@ -2,9 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  HarnessSession, MockBackend, SPECIFIC_TOPICS, createTagger, idfCandidates, IDF_STOPWORDS, IDF_EVALUATIVE, zipfOf, defaultFreqTable, parseZipf10, idf,
+  HarnessSession, MockBackend, MemoryHarnessStorage, SPECIFIC_TOPICS, createTagger, idfCandidates, IDF_STOPWORDS, IDF_EVALUATIVE, zipfOf, defaultFreqTable, parseZipf10, idf,
   LlmInterestExtractor, EXTRACTOR_SYSTEM_PROMPT, EXTRACTOR_SYSTEM_PROMPT_V2, buildExtractorPrompt, promptKey, requestBody, parseExtractorResponse,
-  KeyphraseIdfTagger, isLocalOllamaUrl, isCloudModelTag, eegReorder, finalGuesses, InterestMap, LEAD_EEG_Z,
+  DEFAULT_EXTRACTOR_PROMPT_VERSION, parsePromptVersion, KeyphraseIdfTagger, isLocalOllamaUrl, isCloudModelTag, eegReorder, finalGuesses, InterestMap, LEAD_EEG_Z,
 } from "../src/index.ts";
 
 const curatedLabels = Object.values(SPECIFIC_TOPICS).map((t) => t.label.toLowerCase());
@@ -166,17 +166,21 @@ test("llm-extract: the system prompt names no persona passion (no examples that 
   for (const l of curatedLabels) for (const sp of [EXTRACTOR_SYSTEM_PROMPT, EXTRACTOR_SYSTEM_PROMPT_V2]) assert.ok(!sp.toLowerCase().includes(l), `prompt mentions curated "${l}"`);
 });
 
-test("llm-extract promptVersion: v1 default (cached keys unchanged), v2 selectable with its own cache key", async () => {
+test("llm-extract promptVersion: v2 default (Nov 2 2026), v1 pinnable rollback with its own cache key", async () => {
   const msgs = ["hello", "I prep my meals on sunday"];
-  const v1 = buildExtractorPrompt(msgs), v2 = buildExtractorPrompt(msgs, "gemma4:cloud", 12, "v2");
+  const v1 = buildExtractorPrompt(msgs, "gemma4:cloud", 12, "v1"), v2 = buildExtractorPrompt(msgs);
+  assert.equal(DEFAULT_EXTRACTOR_PROMPT_VERSION, "v2");
+  assert.equal(promptKey(buildExtractorPrompt(msgs, "gemma4:cloud", 12, "v2")), promptKey(v2));
+  assert.equal(parsePromptVersion("v1"), "v1"); assert.equal(parsePromptVersion("v3"), undefined); assert.equal(parsePromptVersion(undefined), undefined);
   assert.equal(v1.messages[0]!.content, EXTRACTOR_SYSTEM_PROMPT);
   assert.equal(v2.messages[0]!.content, EXTRACTOR_SYSTEM_PROMPT_V2);
   assert.notEqual(promptKey(v1), promptKey(v2));
   assert.match(EXTRACTOR_SYSTEM_PROMPT_V2, /enthusias/); assert.match(EXTRACTOR_SYSTEM_PROMPT_V2, /chores/);
-  assert.equal(promptKey(new LlmInterestExtractor({}).promptFor(msgs)), promptKey(v1));
-  assert.equal(promptKey(new LlmInterestExtractor({ promptVersion: "v2" }).promptFor(msgs)), promptKey(v2));
+  assert.equal(promptKey(new LlmInterestExtractor({}).promptFor(msgs)), promptKey(v2));
+  assert.equal(new LlmInterestExtractor({}).promptVersion, "v2");
+  assert.equal(promptKey(new LlmInterestExtractor({ promptVersion: "v1" }).promptFor(msgs)), promptKey(v1));
   // a v2 extractor offline with only v1 answers cached: refused, never fetched
-  const store = new Map([[promptKey(buildExtractorPrompt(["x"])), "{}"]]);
+  const store = new Map([[promptKey(buildExtractorPrompt(["x"], "gemma4:cloud", 12, "v1")), "{}"]]);
   let fetched = 0;
   const tg = new LlmInterestExtractor({ promptVersion: "v2", everyN: 1, base: "none", offline: true, cache: { get: (k) => store.get(k), set: () => {} }, fetchImpl: (async () => { fetched++; return new Response("{}"); }) as unknown as typeof fetch });
   await tg.tag("x");
@@ -336,4 +340,26 @@ test("keyphrase-idf: evaluative adjectives, superlatives and intensified words a
   const find = (t: string) => idfCandidates(t).find((c) => c.key === "snazzy");
   const plain = find("that shop is snazzy"), graded = find("that shop is so snazzy");
   assert.ok(plain && graded && graded.key === "snazzy" && Math.abs(graded.score - plain.score / 2) < 1e-9, JSON.stringify([plain, graded]));
+});
+
+test("session end logs {type:'final'} (top1/top3 + extractor prompt version/model) and a running top1 per turn; no mode", async () => {
+  const cache = { get: () => JSON.stringify({ message: { content: JSON.stringify({ interests: [{ label: "sourdough baking", confidence: 0.9, turns: [1, 2] }] }) } }), set: () => {} };
+  for (const adaptation of ["adaptive", "baseline"] as const) {
+    const store = new MemoryHarnessStorage();
+    const s = new HarnessSession({ userId: "u", backend: new MockBackend(1), store, seed: 3, adaptation, tagger: new LlmInterestExtractor({ everyN: 2, offline: true, cache }) });
+    await s.start();
+    for (const t of ["my starter bubbled over again", "the crumb on this loaf is so open"]) await s.reply(t);
+    await s.end();
+    const lines = store.readSession(s.id) as unknown as Array<Record<string, unknown>>;
+    const fin = lines.find((l) => l.type === "final")!;
+    assert.ok(fin, "final record");
+    assert.equal(fin.top1, "sourdough baking");
+    assert.equal((fin.top3 as string[])[0], "sourdough baking");
+    assert.equal(fin.extractorPromptVersion, "v2"); assert.equal(fin.model, "gemma4:cloud"); assert.equal(fin.tagger, "llm-extract");
+    assert.deepEqual(Object.keys(fin).sort(), ["extractorPromptVersion", "model", "t", "tagger", "top1", "top3", "top3Ids", "turns", "type"]);
+    assert.ok(!/adapt|baseline/i.test(JSON.stringify(fin)), "final carries no mode");
+    const iu = lines.filter((l) => l.type === "interest_update");
+    assert.equal(iu.length, 2); assert.equal(iu[1]!.top1, "sourdough baking");
+    assert.equal(lines.findIndex((l) => l.type === "final") + 1, lines.findIndex((l) => l.type === "session_end"));
+  }
 });

@@ -18,6 +18,7 @@ export * from "./final-guesses.js";
 export * from "./tagger.js";
 export * from "./tagger-idf.js";
 export * from "./llm-extractor.js";
+export * from "./app-tagger.js";
 export * from "./title.js";
 export * from "./host.js";
 export * from "./study.js";

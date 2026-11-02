@@ -108,7 +108,9 @@ def main():
     if a.responses:
         turns = [int(x) for x in a.llm_turns.split(",")]
         for m in a.llm_models.split(","):
-            b = {"kind": "llm-extract", "model": m, "atTurns": turns, "responsesFile": os.path.abspath(a.responses)}
+            # promptVersion pinned to v1: responses.jsonl was made with the v1 prompt (the core default is v2 since
+            # Nov 2 2026); unpinned, every cached answer would miss and the replay would change silently
+            b = {"kind": "llm-extract", "model": m, "atTurns": turns, "responsesFile": os.path.abspath(a.responses), "promptVersion": "v1"}
             # merge variants (core LlmExtractorOptions.rank / observeScale); "lead" is the core default
             taggers["llm-extract %s alone, old merge (reference)" % m] = dict(b, base="none", rank="none")
             taggers["llm-extract %s + keyphrase-idf, old merge (rank none)" % m] = dict(b, rank="none")

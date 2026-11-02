@@ -49,7 +49,13 @@ export type ExportResult = { ok: boolean; files: number; via: "share-sheet" | "s
 /** Phase D study status as the UI may show it: never the mode or the schedule. */
 export type StudyStatusView = { enabled: boolean; next: number; total: number; scheduled: boolean; error?: string };
 export type SessionItem = { id: string; title: string; turns: number; startedAt: string | null; active: boolean };
-export type Info = { backend: string; paid: boolean; provider: string; model: string | null; dataDir: string; userId: string; platform: string; appName: string };
+export type Info = {
+  backend: string; paid: boolean; provider: string; model: string | null; dataDir: string; userId: string; platform: string; appName: string;
+  /** extractor prompt setting ("v2" default; "v1" = rollback) */
+  extractorPromptVersion?: "v1" | "v2";
+  /** topic tagger the NEXT session uses, e.g. "llm-extract gemma4:cloud via Ollama Cloud (prompt v2)" */
+  tagger?: string;
+};
 export type ProviderId = "mock" | "ollama" | "ollama-cloud" | "openai-compatible" | "openai" | "claude-code" | "anthropic";
 export type ProviderStatus = {
   id: ProviderId;
@@ -77,6 +83,8 @@ export interface ProvidersBridge {
   setApiKey(provider: KeyProvider, key: string): Promise<{ ok: boolean }>;
   /** optional: set a provider's server URL (in-process transport; Electron stores ollamaUrl) */
   setEndpoint?(provider: "ollama" | "openai-compatible", url: string): Promise<{ ok: boolean }>;
+  /** settings rollback flag for the llm-extract prompt ("v2" default, "v1" rollback); next session on */
+  setExtractorPrompt?(version: "v1" | "v2"): Promise<Info>;
   logout(provider: KeyProvider): Promise<{ ok: boolean }>;
   login(provider: "openai" | "anthropic"): Promise<{ ok: boolean; error?: string }>;
   cancelLogin(): Promise<boolean>;

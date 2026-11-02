@@ -39,7 +39,8 @@ export class HarnessHost {
       storage: HarnessStorage | null;
       backend: () => Promise<ModelBackend>;
       logRawEvents?: boolean;
-      tagger?: TopicTagger | TopicTaggerSpec;
+      /** a spec / tagger, or a factory called once per new session (e.g. re-read the selected provider) */
+      tagger?: TopicTagger | TopicTaggerSpec | (() => TopicTagger | TopicTaggerSpec | undefined | Promise<TopicTagger | TopicTaggerSpec | undefined>);
       seed?: () => number;
       clock?: Clock;
       /** Phase D blinded study (StudyController); absent = every session adaptive, no study fields */
@@ -49,6 +50,17 @@ export class HarnessHost {
     },
   ) {
     this.clock = cfg.clock ?? systemClock;
+  }
+
+  private async sessionTagger(): Promise<TopicTagger | TopicTaggerSpec | undefined> {
+    const t = this.cfg.tagger;
+    if (typeof t !== "function") return t;
+    try {
+      return await t();
+    } catch (err) {
+      console.warn("[brianharness] tagger selection failed; using keyphrase-idf:", (err as Error).message);
+      return { kind: "keyphrase-idf" };
+    }
   }
 
   async newSession(opts: TurnOptions = {}): Promise<{ sessionId: string; director: DirectorTurnResult; hud: HudState; title: string }> {
@@ -73,7 +85,7 @@ export class HarnessHost {
       store: this.cfg.storage,
       logRawEvents: this.cfg.logRawEvents ?? true,
       seed: this.cfg.seed ? this.cfg.seed() : this.clock() % 100000,
-      tagger: this.cfg.tagger,
+      tagger: await this.sessionTagger(),
     });
     const d = await this.session.start(opts);
     return { sessionId: this.session.id, director: d, hud: this.session.hud(), title: "New chat" };

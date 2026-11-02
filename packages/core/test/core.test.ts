@@ -93,7 +93,7 @@ test("session writes JSONL log and autosaves the interest map", async () => {
   assert.ok(director.stateNote.includes("User brought up"));
   await s.end();
   const events = store.readSession(s.id).map((e) => e.type);
-  assert.deepEqual(events, ["session_start", "director_turn", "user_turn", "interest_update", "director_turn", "session_end"]);
+  assert.deepEqual(events, ["session_start", "director_turn", "user_turn", "interest_update", "director_turn", "final", "session_end"]);
   assert.ok(existsSync(store.savePath("manny")));
   const save = JSON.parse(readFileSync(store.savePath("manny"), "utf8"));
   assert.ok(save.topics.games.mean > 0);

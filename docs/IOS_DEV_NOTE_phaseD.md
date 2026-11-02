@@ -54,6 +54,21 @@ What to check, with Safari Web Inspector on the device, `localStorage["bh.debug"
    unsigned simulator build it reports -34018 and stays off. HUD then shows "Study session i/10" and hides
    the interest map / plan.
 
+## Interest extractor (new in this build: llm-extract, prompt v2 by default)
+
+- With **Ollama Cloud / OpenAI / Anthropic** selected **and an Ollama Cloud API key saved**, sessions tag
+  topics with llm-extract (`gemma4:cloud`, prompt **v2**, rank lead) every 6th user turn, through the same
+  CapacitorHttp `fetchImpl` as the backends (POST `https://ollama.com/api/chat`, Bearer key). Mock, a LAN
+  Ollama without a `:cloud` model, or OpenAI/Anthropic without an Ollama Cloud key -> keyphrase-idf (no call).
+  A failed / refused call keeps keyphrase-idf labels; the session never breaks.
+- One hard cap of **50 extractor calls** shared by all sessions on the device (settings KV key
+  `llm-extract/calls`). Model picker -> "interest extractor prompt: v2 / v1 (rollback)"; the line below it
+  names the tagger the next session uses.
+- Each session JSONL now ends with `{type:"final", top1, top3, top3Ids, tagger, extractorPromptVersion?, model?}`
+  just before `session_end`, and `interest_update` carries the running `top1`. No study mode in either.
+- To check on device: pick Ollama Cloud with a key, send 6 replies, end the session; the Files copy of
+  `bh-session-*.jsonl` should contain one `final` line with `"extractorPromptVersion":"v2"`.
+
 ## Export contract (what the files contain)
 
 One JSONL per session: `session_start` (with `study: {id, index, total, scheduleHash}` in study

@@ -35,6 +35,11 @@ import {
   type TopicTagger,
   type TopicTaggerSpec,
   type ExportFile,
+  APP_EXTRACTOR_MAX_CALLS,
+  DEFAULT_EXTRACTOR_PROMPT_VERSION,
+  appTaggerSpec,
+  kvCallCounter,
+  parsePromptVersion,
 } from "@brianharness/core/browser";
 import { saveViaBHExport, shareViaBHExport } from "./bh-export";
 import type { BHExportPlugin, EegBridge, ExportResult, Info, KeyProvider, ProviderId, ProviderStatus } from "./types";
@@ -70,7 +75,11 @@ export interface InProcessOptions {
    * CapacitorHttp-backed fetch to bypass WebView CORS/CSP. Default: the page's fetch.
    */
   fetchImpl?: typeof fetch;
-  /** topic tagger (default: offline lexicon). An Ollama spec gets fetchImpl and the settings' Ollama URL. */
+  /**
+   * topic tagger override (tests). Default: per session, appTaggerSpec(): llm-extract (prompt v2, rank lead)
+   * with a real cloud provider and an Ollama Cloud key, else keyphrase-idf. An Ollama spec gets fetchImpl
+   * and the settings' Ollama URL.
+   */
   tagger?: TopicTagger | TopicTaggerSpec;
   /**
    * true when fetchImpl bypasses browser CORS (CapacitorHttp). Default: true iff fetchImpl was passed.
@@ -98,7 +107,14 @@ export interface InProcessOptions {
   download?: (files: ExportFile[], name: string) => boolean;
 }
 
-type WebSettings = { provider: ProviderKind; model?: string; ollamaUrl?: string; openaiCompatibleUrl?: string };
+type HostTagger = ConstructorParameters<typeof HarnessHost>[0]["tagger"];
+const CLOUD_PROVIDERS: ProviderKind[] = ["ollama-cloud", "openai", "anthropic"];
+
+type WebSettings = {
+  provider: ProviderKind; model?: string; ollamaUrl?: string; openaiCompatibleUrl?: string;
+  /** llm-extract prompt rollback flag (absent = DEFAULT_EXTRACTOR_PROMPT_VERSION, v2) */
+  extractorPromptVersion?: "v1" | "v2";
+};
 const SETTINGS_KEY = "settings";
 
 function guessPlatform() {
@@ -191,11 +207,12 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   const getHost = async () => {
     if (host) return host;
     const { storage } = await ready;
-    let tagger = opts.tagger;
+    let tagger: HostTagger = opts.tagger;
     if (tagger && !("tag" in tagger) && tagger.kind === "ollama") {
       const s = await loadSettings();
       tagger = { ...tagger, baseUrl: tagger.baseUrl ?? normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL), fetchImpl: tagger.fetchImpl ?? fetchImpl };
     }
+    if (!tagger) tagger = async () => (await chooseTagger()).spec;
     host = new HarnessHost({
       userId,
       storage,
@@ -214,9 +231,33 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
     return host;
   };
 
+  // llm-extract: one persisted call cap shared by every session; answers cached for the app's lifetime
+  const extractorCalls = kvCallCounter(settingsKV, APP_EXTRACTOR_MAX_CALLS);
+  const extractorCache = new Map<string, string>();
+  const chooseTagger = async () => {
+    const s = await loadSettings();
+    const ollamaCloudKey = CLOUD_PROVIDERS.includes(s.provider) ? await readApiKey(credentials, "ollama-cloud").catch(() => null) : null;
+    return appTaggerSpec({
+      provider: s.provider,
+      model: s.model,
+      ollamaUrl: normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL),
+      ollamaCloudKey,
+      canReachOllamaCloud: nativeFetch,
+      ollamaCloudUrl: opts.ollamaCloudUrl,
+      promptVersion: parsePromptVersion(s.extractorPromptVersion),
+      counter: extractorCalls,
+      cache: { get: (k) => extractorCache.get(k), set: (k, v) => void extractorCache.set(k, v) },
+      fetchImpl,
+    });
+  };
+
   const info = async (): Promise<Info> => {
     const s = await loadSettings();
-    return { backend: backend?.id ?? "…", paid: !!backend?.paid, provider: s.provider, model: s.model ?? null, dataDir: storageName, userId, platform, appName: APP_NAME };
+    const t = opts.tagger ? "custom" : (await chooseTagger()).reason;
+    return {
+      backend: backend?.id ?? "…", paid: !!backend?.paid, provider: s.provider, model: s.model ?? null, dataDir: storageName, userId, platform, appName: APP_NAME,
+      extractorPromptVersion: parsePromptVersion(s.extractorPromptVersion) ?? DEFAULT_EXTRACTOR_PROMPT_VERSION, tagger: t,
+    };
   };
 
   const status = async (): Promise<ProviderStatus[]> => {
@@ -375,6 +416,12 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         if (u && !/^https?:\/\//.test(u)) throw new Error("URL must start with http:// or https://");
         await saveSettings(provider === "ollama" ? { ollamaUrl: u || undefined } : { openaiCompatibleUrl: u || undefined });
         return { ok: true };
+      },
+      async setExtractorPrompt(version) {
+        const v = parsePromptVersion(version);
+        if (!v) throw new Error("extractor prompt version must be v1 or v2");
+        await saveSettings({ extractorPromptVersion: v === DEFAULT_EXTRACTOR_PROMPT_VERSION ? undefined : v });
+        return info();
       },
       async logout(provider: KeyProvider) {
         await credentials.delete(provider);

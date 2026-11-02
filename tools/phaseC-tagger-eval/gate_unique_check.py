@@ -34,7 +34,8 @@ def replay(root, r, tmp):
     cdir = os.path.join(tmp, os.path.basename(root) + "_" + r["run_id"])
     shutil.copytree(os.path.join(GATE, "extractor_cache", r["run_id"]), cdir)
     t = {"kind": "llm-extract", "provider": "ollama", "baseUrl": "http://127.0.0.1:11434", "model": "gemma4:cloud",
-         "atTurns": [6, 11], "numPredict": 768, "base": "keyphrase-idf", "cacheDir": cdir, "maxCalls": 0, "rank": "lead"}
+         "atTurns": [6, 11], "numPredict": 768, "base": "keyphrase-idf", "cacheDir": cdir, "maxCalls": 0, "rank": "lead",
+         "promptVersion": "v1"}  # the gate cache holds v1-prompt answers (core default is v2 since Nov 2 2026)
     sp = Side(root)
     try:
         sp.call({"cmd": "start", "options": {"provider": "mock", "seed": r["seed"], "tagger": t}})

@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld("eeg", {
     select: (provider, model) => ipcRenderer.invoke("providers:select", { provider, model }),
     setApiKey: (provider, key) => ipcRenderer.invoke("providers:apiKey", { provider, key }),
     setEndpoint: (provider, url) => ipcRenderer.invoke("providers:endpoint", { provider, url }),
+    setExtractorPrompt: (version) => ipcRenderer.invoke("providers:extractorPrompt", { version }),
     logout: (provider) => ipcRenderer.invoke("providers:logout", { provider }),
     login: (provider) => ipcRenderer.invoke("providers:login", { provider }),
     cancelLogin: () => ipcRenderer.invoke("providers:cancelLogin"),

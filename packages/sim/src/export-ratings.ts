@@ -20,6 +20,8 @@ export interface UnsealedSchedule { order: string[]; scheduleHash?: string }
 
 const META = ["sessionId", "studyIndex", "scheduleHash", "turn", "userTurn", "t", "engagement", "baseline", "text.words", "text.chars"] as const;
 const RATING = ["turn_rating", "turn_rating_dismissed", "turn_rating_reason", "turn_rating_shownAt", "turn_rating_answeredAt", "session_rating", "session_rating_dismissed", "session_hooked", "session_blindGuess"] as const;
+/** interest labels: running top-1 after this turn (interest_update.top1) + the session's {type:'final'} record */
+const LABELS = ["top1_running", "final_top1", "final_top3", "extractor_prompt_version", "extractor_model"] as const;
 
 export function readSessionLogs(paths: string[]): SessionLog[] {
   const files: string[] = [];
@@ -49,6 +51,9 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
     const ratings = events.filter((e) => e.type === "rating");
     const lastOf = <T extends Ev>(xs: T[]) => xs[xs.length - 1];
     const sess = lastOf(ratings.filter((r) => r.scope === "session"));
+    const fin = lastOf(events.filter((e) => e.type === "final")) as (Ev & { top1?: string | null; top3?: string[]; extractorPromptVersion?: string; model?: string }) | undefined;
+    const top1At = new Map<number, unknown>();
+    for (const iu of events.filter((e) => e.type === "interest_update")) if ("top1" in iu) top1At.set(iu.turn as number, iu.top1);
     for (const u of events.filter((e) => e.type === "user_turn")) {
       const features = (u.features ?? {}) as Record<string, number>;
       for (const k of Object.keys(features)) if (k.startsWith("typing.") || k.startsWith("text.")) featureKeys.add(k);
@@ -74,10 +79,15 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
         session_rating_dismissed: sess ? sess.dismissed : undefined,
         session_hooked: opts.hooked === false ? undefined : sess?.hooked,
         session_blindGuess: sess?.blindGuess,
+        top1_running: top1At.get(u.turn as number),
+        final_top1: fin?.top1 ?? undefined,
+        final_top3: fin?.top3?.join(" | "),
+        extractor_prompt_version: fin?.extractorPromptVersion,
+        extractor_model: fin?.model,
       });
     }
   }
-  const cols: string[] = [...META, ...[...featureKeys].filter((k) => !(META as readonly string[]).includes(k)).sort(), ...RATING];
+  const cols: string[] = [...META, ...[...featureKeys].filter((k) => !(META as readonly string[]).includes(k)).sort(), ...RATING, ...LABELS];
   if (opts.schedule) {
     const sh = opts.schedule;
     if (!Array.isArray(sh.order)) throw new Error("--schedule: not an unsealed schedule (no order[])");

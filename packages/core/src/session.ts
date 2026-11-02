@@ -294,13 +294,27 @@ export class HarnessSession {
       ...(this.opts.logRawEvents ? { rawEvents: events } : {}),
       keyGaps: keyGaps(events, window),
     });
-    this.log({ type: "interest_update", t: nowIso(), turn: this.turn, topTopics: this.map.topTopics(5).map(([t, m]) => [t, m]), hypothesis });
+    // running top-1 label (final-guess ranking, pure: no state change) so label drift is visible per turn
+    const top1 = this.finalGuesses(1)[0]?.label ?? null;
+    this.log({ type: "interest_update", t: nowIso(), turn: this.turn, topTopics: this.map.topTopics(5).map(([t, m]) => [t, m]), hypothesis, top1 });
     if (!this.baseline) this.opts.store?.saveMap(this.map);
     return { frame: this.frame, hypothesis };
   }
 
   async end(): Promise<void> {
     for (const s of this.sources) await s.stop?.();
+    const g = this.finalGuesses(3);
+    const tg = this.tagger as TopicTagger & { model?: string; promptVersion?: string };
+    this.log({
+      type: "final",
+      t: nowIso(),
+      turns: this.turn,
+      top1: g[0]?.label ?? null,
+      top3: g.map((x) => x.label),
+      top3Ids: g.map((x) => x.topic),
+      tagger: tg.kind,
+      ...(tg.promptVersion ? { extractorPromptVersion: tg.promptVersion, model: tg.model } : {}),
+    });
     this.log({ type: "session_end", t: nowIso(), turns: this.turn });
     if (!this.baseline) this.opts.store?.saveMap(this.map);
   }

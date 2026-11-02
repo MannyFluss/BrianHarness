@@ -18,6 +18,7 @@ import type { RankPrior, TopicTag, TopicTagger } from "./tagger.js";
 import { KeyphraseIdfTagger, stem, type KeyphraseIdfOptions } from "./tagger-idf.js";
 import { normalizeOllamaBaseUrl } from "./providers/ollama.js";
 import { LEAD_EEG_Z } from "./final-guesses.js";
+import { timeoutSignal } from "./platform/env.js";
 
 export interface ExtractorCache {
   get(key: string): string | undefined | Promise<string | undefined>;
@@ -46,9 +47,10 @@ export interface LlmExtractorOptions {
   base?: "keyphrase-idf" | "none";
   baseOptions?: KeyphraseIdfOptions;
   /**
-   * system prompt version (default "v1" = the prompt the cached track-2 and gate answers were made with, so
-   * they replay at 0 calls). "v2" adds rank-by-enthusiasm + no routines/chores/logistics; unscored until new
-   * calls are made (different prompt = different cache key).
+   * system prompt version. Default "v2" (DEFAULT_EXTRACTOR_PROMPT_VERSION, Director decision Nov 2 2026: the
+   * Researcher's ext2 scoring, top-1 17 vs 12, 5 wins / 0 losses): v1 + rank-by-enthusiasm + no
+   * routines/chores/logistics. "v1" = rollback, and the prompt the cached track-2 / gate answers were made
+   * with: replays of those caches must pin "v1" (different prompt = different cache key).
    */
   promptVersion?: ExtractorPromptVersion;
   /** max candidate interests used per call (default 4) */
@@ -125,6 +127,10 @@ export const EXTRACTOR_SYSTEM_PROMPT_V2 = [
   "with 0-5 items, most enthusiastic first. confidence = how sure you are this is a real, personal interest the user cares about.",
 ].join(" ");
 export type ExtractorPromptVersion = "v1" | "v2";
+/** default extractor prompt (was "v1" until Nov 2 2026; pin "v1" to replay v1 caches) */
+export const DEFAULT_EXTRACTOR_PROMPT_VERSION: ExtractorPromptVersion = "v2";
+/** "v1" | "v2" from a setting / env value; anything else -> undefined (= the default) */
+export const parsePromptVersion = (v: unknown): ExtractorPromptVersion | undefined => (v === "v1" || v === "v2" ? v : undefined);
 export const EXTRACTOR_PROMPTS: Record<ExtractorPromptVersion, string> = { v1: EXTRACTOR_SYSTEM_PROMPT, v2: EXTRACTOR_SYSTEM_PROMPT_V2 };
 
 export interface ExtractorPrompt {
@@ -132,7 +138,7 @@ export interface ExtractorPrompt {
   messages: Array<{ role: "system" | "user"; content: string }>;
 }
 
-export function buildExtractorPrompt(userMessages: string[], model = "gemma4:cloud", contextTurns = 12, version: ExtractorPromptVersion = "v1"): ExtractorPrompt {
+export function buildExtractorPrompt(userMessages: string[], model = "gemma4:cloud", contextTurns = 12, version: ExtractorPromptVersion = DEFAULT_EXTRACTOR_PROMPT_VERSION): ExtractorPrompt {
   const system = EXTRACTOR_PROMPTS[version];
   if (!system) throw new Error(`unknown extractor promptVersion ${String(version)}`);
   const from = Math.max(0, userMessages.length - contextTurns);
@@ -214,6 +220,7 @@ export class LlmInterestExtractor implements TopicTagger {
     this.base = (o.base ?? "keyphrase-idf") === "none" ? null : new KeyphraseIdfTagger(o.baseOptions);
   }
   get model() { return this.o.model ?? "gemma4:cloud"; }
+  get promptVersion(): ExtractorPromptVersion { return this.o.promptVersion ?? DEFAULT_EXTRACTOR_PROMPT_VERSION; }
   private due(turn: number): boolean {
     if (this.o.atTurns?.length) return this.o.atTurns.includes(turn);
     const n = this.o.everyN ?? 6;
@@ -222,7 +229,7 @@ export class LlmInterestExtractor implements TopicTagger {
 
   /** the prompt that WOULD be sent after this many user messages (for preparing offline runs) */
   promptFor(userMessages: string[]): ExtractorPrompt {
-    return buildExtractorPrompt(userMessages, this.model, this.o.contextTurns, this.o.promptVersion ?? "v1");
+    return buildExtractorPrompt(userMessages, this.model, this.o.contextTurns, this.promptVersion);
   }
 
   async tag(text: string, signal?: AbortSignal): Promise<TopicTag[]> {
@@ -299,7 +306,7 @@ export class LlmInterestExtractor implements TopicTagger {
           method: "POST",
           headers: { "content-type": "application/json", ...(this.o.apiKey && !local ? { authorization: `Bearer ${this.o.apiKey}` } : {}) },
           body: JSON.stringify(requestBody(p, this.o.numPredict)),
-          signal: signal ?? AbortSignal.timeout(this.o.timeoutMs ?? 90_000),
+          signal: signal ?? timeoutSignal(this.o.timeoutMs ?? 90_000),
         });
         status = res.status;
         this.calls.http[String(status)] = (this.calls.http[String(status)] ?? 0) + 1;

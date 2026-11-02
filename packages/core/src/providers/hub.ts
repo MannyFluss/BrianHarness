@@ -27,6 +27,8 @@ export interface ProviderChoice {
 }
 export interface HubSettings extends ProviderChoice {
   ollamaUrl?: string;
+  /** llm-extract prompt rollback flag (absent = DEFAULT_EXTRACTOR_PROMPT_VERSION, v2) */
+  extractorPromptVersion?: "v1" | "v2";
 }
 export type HubKeyProvider = "openai" | "anthropic" | "ollama-cloud";
 export interface ModelOption {

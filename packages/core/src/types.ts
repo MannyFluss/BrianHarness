@@ -159,5 +159,10 @@ export type LogEvent =
       keyGaps?: number[];
     }
   | RatingRecord
-  | { type: "interest_update"; t: string; turn: number; topTopics: Array<[string, number]>; hypothesis: string | null }
+  | { type: "interest_update"; t: string; turn: number; topTopics: Array<[string, number]>; hypothesis: string | null; top1?: string | null }
+  /**
+   * Session-end interest labels (written just before session_end): the final top-3 guesses as labels, the
+   * extractor that produced them (prompt version + model for llm-extract). Never carries the study mode.
+   */
+  | { type: "final"; t: string; turns: number; top1: string | null; top3: string[]; top3Ids: string[]; tagger: string; extractorPromptVersion?: string; model?: string }
   | { type: "session_end"; t: string; turns: number };

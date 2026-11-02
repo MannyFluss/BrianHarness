@@ -17,6 +17,7 @@ import {
   HarnessSession, PreparedFeatureSource, SessionStore, createBackend, detectOllama, parseBackendRef,
   synthesizeTypingFromText, type BackendSpec, type EegBlendOptions, type FeatureMap, type ProviderKind, type TypingEvent,
   type HarnessSession as HS, type TopicTaggerSpec, type LlmExtractorOptions, type ExtractorCache, type FreqTable, parseZipf10, isLocalOllamaUrl,
+  DEFAULT_EXTRACTOR_PROMPT_VERSION, parsePromptVersion,
 } from "@brianharness/core";
 
 /**
@@ -48,6 +49,14 @@ export interface SidecarLlmExtractOptions extends LlmExtractorOptions {
   maxCalls?: number;
 }
 
+let promptWarned = false;
+function warnPromptDefault() {
+  if (promptWarned) return;
+  promptWarned = true;
+  process.stderr.write(`[sidecar] llm-extract without promptVersion: using the default ${DEFAULT_EXTRACTOR_PROMPT_VERSION} (was v1 before Nov 2 2026). ` +
+    `v1-made caches miss under v2; pass "promptVersion":"v1" (or BH_LLM_PROMPT_VERSION=v1) to replay them. See docs/SIDECAR.md.\n`);
+}
+
 /** Build the llm-extract tagger spec: key from OLLAMA_API_KEY, disk cache, persisted hard call cap. */
 export function llmExtractSpec(o: SidecarLlmExtractOptions, allowNetwork: boolean): LlmExtractorOptions & { kind: "llm-extract" } {
   const mem = new Map<string, string>();
@@ -67,6 +76,13 @@ export function llmExtractSpec(o: SidecarLlmExtractOptions, allowNetwork: boolea
   const max = o.maxCalls ?? 50;
   const counter = dir ? path.join(dir, "calls.json") : null;
   const { responsesFile: _r, cacheDir: _c, maxCalls: _m, ...core } = o;
+  // prompt version: explicit option > BH_LLM_PROMPT_VERSION env > core default (v2 since Nov 2 2026; was v1)
+  const envVer = parsePromptVersion(process.env.BH_LLM_PROMPT_VERSION);
+  if (process.env.BH_LLM_PROMPT_VERSION && !envVer) throw new Error(`BH_LLM_PROMPT_VERSION must be v1 or v2 (got ${process.env.BH_LLM_PROMPT_VERSION})`);
+  if (!core.promptVersion) {
+    core.promptVersion = envVer ?? DEFAULT_EXTRACTOR_PROMPT_VERSION;
+    if (!envVer) warnPromptDefault();
+  }
   const url = core.baseUrl ?? "https://ollama.com";
   // a key is needed only for ollama.com; a local Ollama app (localhost / 127.0.0.1) takes none
   const local = isLocalOllamaUrl(url);

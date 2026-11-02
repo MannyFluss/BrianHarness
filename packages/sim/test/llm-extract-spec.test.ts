@@ -51,3 +51,19 @@ test("llmExtractSpec: concurrent reservations on one cacheDir are counted exactl
   assert.equal(loc.offline, false); assert.equal(loc.apiKey, undefined);
   assert.equal(llmExtractSpec({ baseUrl: "http://127.0.0.1:11434" }, false).offline, true);
 });
+
+test("llmExtractSpec promptVersion: explicit > BH_LLM_PROMPT_VERSION > default v2; bad env value throws", () => {
+  const prev = process.env.BH_LLM_PROMPT_VERSION;
+  try {
+    delete process.env.BH_LLM_PROMPT_VERSION;
+    assert.equal(llmExtractSpec({}, false).promptVersion, "v2");
+    assert.equal(llmExtractSpec({ promptVersion: "v1" }, false).promptVersion, "v1");
+    process.env.BH_LLM_PROMPT_VERSION = "v1";
+    assert.equal(llmExtractSpec({}, false).promptVersion, "v1");
+    assert.equal(llmExtractSpec({ promptVersion: "v2" }, false).promptVersion, "v2");
+    process.env.BH_LLM_PROMPT_VERSION = "v9";
+    assert.throws(() => llmExtractSpec({}, false), /v1 or v2/);
+  } finally {
+    if (prev === undefined) delete process.env.BH_LLM_PROMPT_VERSION; else process.env.BH_LLM_PROMPT_VERSION = prev;
+  }
+});

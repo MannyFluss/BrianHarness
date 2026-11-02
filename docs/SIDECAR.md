@@ -39,7 +39,7 @@ One session at a time; after `end` you can `start` again.
 | `allowPaid` | must be `true` **and** the process started with `--allow-paid` for paid backends (`*:cloud` Ollama models, remote APIs, subscriptions). Local Ollama / mock never need it. |
 | `eegWeight` | base EEG blend weight (default 0.25) |
 | `engagement` | `EegBlendOptions`: `{weight, zScore, minHistory, qualityWeighting, agreementWeighting, refWindowSec, flatBoost, typingSdLow, typingSdHigh, maxWeight}` |
-| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"keyphrase-only"}` (leak-free) \| `{"kind":"keyphrase-idf"}` (leak-free, IDF) \| `{"kind":"llm-extract","model":"gemma4:cloud","everyN":6,"cacheDir":"...","maxCalls":50,"rank":"lead"}` (paid; `rank` `lead`\|`lead-eeg`\|`soft`\|`none`; `promptVersion` `v1` (default) \| `v2`) \| `{"kind":"keyphrase-generic"}` \| `{"kind":"lexicon-generic"}` \| `{"kind":"keyphrase","lexicon":"full\|generic\|broad\|none"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
+| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"keyphrase-only"}` (leak-free) \| `{"kind":"keyphrase-idf"}` (leak-free, IDF) \| `{"kind":"llm-extract","model":"gemma4:cloud","everyN":6,"cacheDir":"...","maxCalls":50,"rank":"lead"}` (paid; `rank` `lead`\|`lead-eeg`\|`soft`\|`none`; `promptVersion` `v2` (default since Nov 2 2026) \| `v1` (pin it to replay v1 caches; env `BH_LLM_PROMPT_VERSION`)) \| `{"kind":"keyphrase-generic"}` \| `{"kind":"lexicon-generic"}` \| `{"kind":"keyphrase","lexicon":"full\|generic\|broad\|none"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
 | `userId`, `sessionId`, `dataDir` | ids; `dataDir` writes the session JSONL + interest-map save file there |
 | `charsPerSec` | speed for synthesized typing (default 5) |
 
@@ -210,10 +210,25 @@ Taggers without an extractor have no prior, so their ranking is unchanged. Sweep
 
 ### Extractor prompt versions
 
+> **Default changed (Nov 2 2026, Director decision):** `promptVersion` now defaults to **`v2`** (was `v1`), in core,
+> the sidecar and the dogfood app. Basis: the Researcher's ext2 scoring (`phaseC/ext2/results_ext2.md`: top-1 17 vs 12,
+> 5 wins / 0 losses). **A `llm-extract` spec without `promptVersion` now builds v2 prompts, so v1-made caches
+> (Track 2 `responses.jsonl`, the gate `extractor_cache`, any `BH_LLM_CACHE` dir filled before Nov 2) MISS**: offline /
+> `maxCalls: 0` runs refuse those calls (labels fall back to keyphrase-idf and change); with `allowPaid` + `--allow-paid`
+> they make NEW v2 calls. The sidecar prints a one-time stderr warning when it applies the default.
+
+Pin a version explicitly (precedence: spec option > env > default):
+- spec: `{"kind":"llm-extract", ..., "promptVersion":"v1"}` (or `"v2"`);
+- env for the sidecar process: `BH_LLM_PROMPT_VERSION=v1` (applies to every llm-extract spec that has no
+  `promptVersion`; the Python adapter's `tagger="llm-extract"` shortcut also forwards it); any other value is an error;
+- app: Settings -> model picker -> "interest extractor prompt: v1 (rollback)"; desktop also `BH_LLM_PROMPT_VERSION=v1`.
+
+The replays in this repo pin v1 (`tools/phaseC-tagger-eval/replay_taggers.py`, `gate_unique_check.py`,
+`tools/llm-extractor-eval/prepare.mjs`; `score.py` goes through `replay_taggers.py`), so they still replay at 0 calls.
+
 `promptVersion` picks the extractor system prompt; it is part of the cache key (`promptKey` hashes model + messages).
-- `v1` (default): the prompt every cached answer was made with, so all cached replays (Track 2, gate) still hit.
-- `v2`: ranks interests by the enthusiasm the user shows (not by how often a word appears) and excludes routines,
+- `v2` (default): ranks interests by the enthusiasm the user shows (not by how often a word appears) and excludes routines,
   chores, errands, work tasks and logistics (meal prep, commuting, cleaning, paying bills). Still no examples, so it names no passion; both
   leak checks cover both versions.
-- v2 is **unscored**: no v2 answers are cached, and scoring it needs new extractor calls (none were made). Offline, a
-  v2 extractor refuses instead of falling back to a v1 answer.
+- `v1` (rollback): the prompt every cached Track 2 / gate answer was made with.
+- Offline, an extractor whose version has no cached answer refuses instead of falling back to the other version's answer.

@@ -46,6 +46,9 @@ test("export-ratings: one row per user turn, ratings joined, no mode column; --s
   assert.equal(s1[2]!.turn_rating_dismissed, "true");
   assert.ok(s1.every((r) => r.session_rating === "5" && r.scheduleHash === scheduleHash));
   assert.ok(csv.includes('"the herons, ""really"""'), "CSV-quoted free text");
+  for (const c of ["top1_running", "final_top1", "final_top3", "extractor_prompt_version", "extractor_model"]) assert.ok(head.split(",").includes(c), c);
+  assert.ok(s1.every((r) => r.final_top1 && r.final_top1 === s1[0]!.final_top1), "session final top1 on every row");
+  assert.ok(s1.every((r) => r.top1_running), "running top1 per turn");
   assert.ok(!ratingsCsv(readSessionLogs([dir]), { hooked: false }).includes("herons"));
 
   // unsealed join (explicit, hash-checked)

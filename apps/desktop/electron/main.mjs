@@ -8,7 +8,10 @@ import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electro
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { BRAND, HarnessHost, ProviderHub, SessionStore, StudyController, backendSpecFromEnv, createBackend, credentialSecretStore, zipFiles } from "@brianharness/core";
+import {
+  BRAND, HarnessHost, ProviderHub, SessionStore, StudyController, backendSpecFromEnv, createBackend, credentialSecretStore, zipFiles,
+  APP_EXTRACTOR_MAX_CALLS, DEFAULT_EXTRACTOR_PROMPT_VERSION, appTaggerSpec, kvCallCounter, normalizeOllamaBaseUrl, DEFAULT_OLLAMA_URL, parsePromptVersion, readApiKey,
+} from "@brianharness/core";
 import { runDemo } from "./demo.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -48,7 +51,38 @@ const fileKV = {
 const study = new StudyController(credentialSecretStore({ read: (id) => hub.credentials.read(id), modify: (id, fn) => hub.credentials.modify(id, fn) }), fileKV);
 // dev/debug only: hash and unseal (never in a packaged build unless BH_STUDY_DEBUG=1)
 const studyDebug = !app.isPackaged || process.env.BH_STUDY_DEBUG === "1";
-const host = new HarnessHost({ userId, storage: store, backend: () => ensureBackend(), logRawEvents: true, seed: () => Date.now() % 100000, study });
+// Topic tagger, chosen per new session (core appTaggerSpec): llm-extract (prompt v2 by default, rank lead,
+// gemma4:cloud) with a real cloud provider + an Ollama Cloud key, else keyphrase-idf. Prompt rollback:
+// BH_LLM_PROMPT_VERSION=v1 (env, wins) or the settings flag (providers:extractorPrompt). Network calls are
+// reserved against one persisted cap (<userData>/llm-extract-calls.json, BH_LLM_MAX_CALLS, default 50).
+const callsFile = () => join(app.getPath("userData"), "llm-extract-calls.json");
+const callsKV = {
+  get: async () => { try { return readFileSync(callsFile(), "utf8"); } catch { return null; } },
+  set: async (_k, v) => writeFileSync(callsFile(), v, { mode: 0o600 }),
+  remove: async () => {},
+  keys: async () => [],
+};
+const extractorCalls = kvCallCounter(callsKV, Number(process.env.BH_LLM_MAX_CALLS ?? APP_EXTRACTOR_MAX_CALLS));
+const extractorCache = new Map();
+const envPromptVersion = parsePromptVersion(process.env.BH_LLM_PROMPT_VERSION);
+const promptVersionSetting = () => envPromptVersion ?? parsePromptVersion(hub?.settings().extractorPromptVersion) ?? DEFAULT_EXTRACTOR_PROMPT_VERSION;
+let taggerReason = "keyphrase-idf";
+async function chooseTagger() {
+  const s = hub.settings();
+  const cloud = ["ollama-cloud", "openai", "anthropic"].includes(s.provider);
+  const c = appTaggerSpec({
+    provider: s.provider,
+    model: s.model,
+    ollamaUrl: normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL),
+    ollamaCloudKey: cloud ? (process.env.OLLAMA_API_KEY || (await readApiKey(hub.credentials, "ollama-cloud").catch(() => null))) : null,
+    promptVersion: promptVersionSetting(),
+    counter: extractorCalls,
+    cache: { get: (k) => extractorCache.get(k), set: (k, v) => void extractorCache.set(k, v) },
+  });
+  taggerReason = c.reason;
+  return c.spec;
+}
+const host = new HarnessHost({ userId, storage: store, backend: () => ensureBackend(), logRawEvents: true, seed: () => Date.now() % 100000, study, tagger: chooseTagger });
 /** @type {BrowserWindow | null} */
 let mainWin = null;
 
@@ -78,7 +112,10 @@ async function ensureBackend() {
 
 function info() {
   const s = hub.settings();
-  return { backend: backend?.id ?? "…", paid: !!backend?.paid, provider: s.provider, model: s.model ?? null, dataDir, userId, platform: process.platform, appName: BRAND.name };
+  return {
+    backend: backend?.id ?? "…", paid: !!backend?.paid, provider: s.provider, model: s.model ?? null, dataDir, userId, platform: process.platform, appName: BRAND.name,
+    extractorPromptVersion: promptVersionSetting(), tagger: taggerReason,
+  };
 }
 
 // Token streaming: when the renderer passes a request id (rid), deltas go back as "harness:token".
@@ -140,6 +177,12 @@ ipcMain.handle("providers:endpoint", async (_e, { provider, url }) => {
   if (u && !/^https?:\/\//.test(u)) throw new Error("URL must start with http:// or https://");
   hub.saveSettings({ ollamaUrl: u || undefined });
   return { ok: true };
+});
+ipcMain.handle("providers:extractorPrompt", async (_e, { version }) => {
+  const v = parsePromptVersion(version);
+  if (!v) throw new Error("extractor prompt version must be v1 or v2");
+  hub.saveSettings({ extractorPromptVersion: v === DEFAULT_EXTRACTOR_PROMPT_VERSION ? undefined : v });
+  return info();
 });
 ipcMain.handle("providers:logout", async (_e, { provider }) => {
   await hub.logout(provider);

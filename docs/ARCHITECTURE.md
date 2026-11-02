@@ -28,6 +28,7 @@ eeg-harness/
     src/signals.ts       SignalSource plugin interface, TypingSignalSource, FakeEegSource
     src/engagement.ts    FeatureMap -> engagement score 0..1 (weights in one table)
     src/topics.ts        topic lexicon + detectTopics() (v0 keyword tagger)
+    src/app-tagger.ts    dogfood-app tagger choice: llm-extract (prompt v2 default) with a cloud provider + Ollama Cloud key, else keyphrase-idf; shared call cap
     src/interest-map.ts  per-user save file: topic + question-style scores, hypothesis, UCB
     src/director.ts      the Director policy: explore / exploit / relax
     src/state-note.ts    the [DIRECTOR STATE] note injected before each Director turn

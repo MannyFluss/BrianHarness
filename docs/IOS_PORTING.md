@@ -407,6 +407,20 @@ median, timing reliability and the flags.
   `study:unseal` (dev / `BH_STUDY_DEBUG=1` only). If the secure store fails (e.g. -34018) the study does
   not start and sessions run unblinded without study fields.
 
+### Interest extractor in the app (Nov 2 2026: llm-extract, prompt v2 default)
+
+`packages/core/src/app-tagger.ts` (`appTaggerSpec`) picks the tagger per new session (HarnessHost now accepts a
+tagger factory): a real cloud provider (Ollama Cloud, OpenAI, Anthropic) plus an Ollama Cloud key -> llm-extract
+(`gemma4:cloud`, rank `lead`, base keyphrase-idf, every 6th user turn, prompt `DEFAULT_EXTRACTOR_PROMPT_VERSION` = v2);
+a LAN Ollama whose selected model is a `:cloud` tag -> llm-extract through that app; anything else (mock, local models,
+no key, a plain browser that cannot reach ollama.com) -> keyphrase-idf. Extractor failures and refusals return no
+labels, so keyphrase-idf keeps tagging. Every network call is reserved against one persisted cap (`kvCallCounter`, 50 by
+default; iOS/web: settings KV `llm-extract/calls`; desktop: `<userData>/llm-extract-calls.json`, `BH_LLM_MAX_CALLS`).
+Rollback: settings `extractorPromptVersion: "v1"` (model picker toggle, `providers.setExtractorPrompt`), desktop also
+`BH_LLM_PROMPT_VERSION=v1`. Session logs gain `{type:"final", top1, top3, top3Ids, tagger, extractorPromptVersion?, model?}`
+and `interest_update.top1`; the exporter CSV has `top1_running, final_top1, final_top3, extractor_prompt_version,
+extractor_model`. None carries the study mode. Tests: `apps/desktop/test/app-extractor.test.ts` (fake fetch only).
+
 ### Export
 
 - Sidebar "Export logs": iOS `BHExport.share` (all session JSONL + interest map); Electron native save

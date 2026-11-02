@@ -60,6 +60,9 @@ class BrianHarnessDirector:
                       "everyN": int(os.environ.get("BH_LLM_EVERY", "6")),
                       "cacheDir": os.environ.get("BH_LLM_CACHE", os.path.join(os.getcwd(), "llm_extract_cache")),
                       "maxCalls": int(os.environ.get("BH_LLM_MAX_CALLS", "50"))}
+            # BH_LLM_PROMPT_VERSION=v1|v2 pins the extractor prompt (unset = the sidecar default, v2 since Nov 2 2026)
+            if os.environ.get("BH_LLM_PROMPT_VERSION"):
+                tagger["promptVersion"] = os.environ["BH_LLM_PROMPT_VERSION"]
         elif isinstance(tagger, str):
             tagger = {"kind": tagger}
         opts = {"provider": provider, "seed": seed, "allowPaid": bool(allow_paid)}

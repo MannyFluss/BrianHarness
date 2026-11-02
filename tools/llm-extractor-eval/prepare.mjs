@@ -43,7 +43,7 @@ fs.writeFileSync(path.join(HERE, "sessions.json"), JSON.stringify({
 }, null, 1) + "\n");
 const lines = [];
 for (const model of MODELS) for (const turn of TURNS) for (const s of order) {
-  const p = buildExtractorPrompt(s.user.slice(0, turn), model);
+  const p = buildExtractorPrompt(s.user.slice(0, turn), model, 12, "v1"); // track 2 = the v1 prompt (core default is v2 since Nov 2 2026)
   lines.push(JSON.stringify({ key: promptKey(p), model, session: s.session, persona: s.persona, turn, body: requestBody(p) }));
 }
 fs.writeFileSync(path.join(HERE, "prompts.jsonl"), lines.join("\n") + "\n");
