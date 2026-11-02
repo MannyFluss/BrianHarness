@@ -1,0 +1,48 @@
+## node tools/phaseC-tagger-eval/leak_check_idf.mjs (prompts v1 + v2)
+== personas_c.json
+PASS c01_rosa    single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: low,old); prompt hits: none; neutral-convo leaks: none
+     candidates (info): sea@5.3 glass@4.9 beach@5.1 tideline@<3 low(not a candidate)@5.3 tide@4.1 beachcombing@<3 cobalt@3.5 shards@3 frosted(not a candidate)@3.1 beachcomber@<3 mermaid@3.3 tears@4.1 bottle@4.2 stoppers@<3 old(not a candidate)@5.6 china@5.1 bits(not a candidate)@4 wrack@<3 line(not a candidate)@5.7
+PASS c02_dev     single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: pick,a); prompt hits: none; neutral-convo leaks: none
+     candidates (info): lockpicking@<3 lock@4.4 picking@3.9 locksport@<3 picks(not a candidate)@3.8 tension@4.2 wrench@3.2 pin@4.1 tumbler@<3 security@5 pins@3.8 padlock@<3 pick(not a candidate)@4.3 a(not a candidate)@7.3 locks@4.1 spool@<3 disc@4.6 detainer@<3 bypass@4 locksmith@<3 belt@4.5 ranking@4.4
+PASS c03_june    single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: case); prompt hits: none; neutral-convo leaks: none
+     candidates (info): bookbinding@<3 binding@4.2 coptic@3.6 stitch@3.5 signatures@3.7 bone@4.5 folder@3.2 awl@<3 endpapers@<3 case(not a candidate)@5.3 book(not a candidate)@5.6 books(not a candidate)@5.4 kettle@3.6 marbling@<3 repair@4.4 arts@5.1 linen@3.7 thread@3.9 press@5
+PASS c04_harold  single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: change); prompt hits: none; neutral-convo leaks: none
+     candidates (info): bell@4.8 ringing@3.5 change(not a candidate)@5.2 bells@4.1 peal@<3 belfry@3.2 plain@4.7 bob@4.7 grandsire@<3 ringers@<3 bellringing@<3 campanology@<3 church(not a candidate)@5.7 tower@5.1 quarter@4.6 chamber@4.7 rope@4.1 handbells@<3
+PASS c05_zane    single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: none); prompt hits: none; neutral-convo leaks: none
+     candidates (info): pinball@3.4 flippers@3.1 tilt@3.6 playfield@<3 multiball@<3 nudge@<3 arcade@4.2 wizard@4 mode@4.7 flipper@3 nudging@<3 post@5.3 pass@4.9 cradle@3.8 ifpa@<3 league(not a candidate)@5.5 bar@4.9
+PASS c06_mei     single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: none); prompt hits: none; neutral-convo leaks: none
+     candidates (info): caving@<3 cave@4.6 caves@4.3 spelunking@<3 srt@<3 rope@4.1 survey@4.4 passages@4 spelunker@<3 caver@<3 cavers@<3 speleology@<3 potholing@<3 single(not a candidate)@5.6 technique@4.8 squeeze@3.5 crawl@3.5 underground@4.8 stalactites@3.1 headlamp@<3 rappel@<3 abseil@<3
+PASS c07_ines    single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: top); prompt hits: none; neutral-convo leaks: none
+     candidates (info): perfume@3.6 fragrance@3.6 scent@3.8 accord@3.7 aroma@3.5 perfumery@3 essential@4.6 oils@4 base@5.2 notes@4.9 perfumes@3.3 perfumer@<3 fragrances@3.2 scents@<3 chemicals@4.1 top(not a candidate)@5.3 heart@5 maceration@<3 sillage@<3 cologne@4 smell@4.1
+PASS c08_bev     single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: saw); prompt hits: none; neutral-convo leaks: none
+     candidates (info): rockhounding@<3 agate@3.1 agates@<3 geode@<3 geodes@<3 lapidary@<3 rock@5.3 tumbler@<3 cabochon@<3 rockhound@<3 picking@3.9 jasper@3.8 thunder@4.2 eggs@4.7 tumbling@3.3 trim@4.1 saw(not a candidate)@5.2 gravel@4.1 bar@4.9 minerals@4.3 gemstones@3.2
+== personas.json
+PASS p01_dana    single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: big,year); prompt hits: none; neutral-convo leaks: none
+     candidates (info): bird@4.8 birding@3.4 warbler@3.5 species(not a candidate)@5.6 binoculars@3.4 migration@4.2 ebird@<3 big(not a candidate)@5.2 year(not a candidate)@6
+PASS p02_marcus  single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: none); prompt hits: none; neutral-convo leaks: none
+     candidates (info): watch@4.6 watches@4 movement@5.2 mechanical@4.6 tweezers@<3 loupe@<3 gears@3.7 restoring@3.8 vintage@3.9
+PASS p03_priya   single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: none); prompt hits: none; neutral-convo leaks: none
+     candidates (info): slime@3.2 mold@3.8 physarum@<3 myxomycete@<3 fungi@3.9 log@4.2 oat@<3 spores@3.6 macro@3.6 photography@4.6
+PASS p04_gloria  single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: call); prompt hits: none; neutral-convo leaks: none
+     candidates (info): radio@5.3 ham@4.1 morse@3.9 antenna@4.2 call(not a candidate)@5.1 sign@4.8 frequency@4.6 contest@4.6 shortwave@3.3
+PASS p05_kai     single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: none); prompt hits: none; neutral-convo leaks: none
+     candidates (info): tetris@3.1 nes@<3 rolling@4.5 hypertapping@<3 level(not a candidate)@5.4 29(not a candidate)@<3 ctwc@<3 killscreen@<3 blocks@4.6
+PASS p06_tomas   single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: none); prompt hits: none; neutral-convo leaks: none
+     candidates (info): sketch@4 watercolor@3.4 drawing@4.5 ink@4 architecture@4.9 buildings@5.3 sketchbook@<3 urban@4.9 sketchers@<3
+PASS p07_helen   single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: none); prompt hits: none; neutral-convo leaks: none
+     candidates (info): byzantine@4.3 byzantium@3.3 constantinople@4.1 justinian@3.1 basil@3.9 empire@4.9 medieval@4.8 hagia@<3 sophia@3.9
+PASS p08_obi     single-word passion keywords in the stopword list: none (generic parts of multi-word keyphrases, info: none); prompt hits: none; neutral-convo leaks: none
+     candidates (info): bee@4.1 bees@4.1 hive@3.5 honey@4.2 beekeeping@3.1 queen@4.9 pollinator@<3 apiary@<3
+all personas PASS (no single-word passion keyword in the stopword list or the extractor prompt; no label the user did not write)
+
+## (cd eeg-harness-sim && EH_ROOT=/workspace/eeg-harness node phaseC/check_personas_leak.mjs)
+curated specifics: 46 topics, 330 phrases; broad topics: 12
+PASS c01_rosa    medium curated tags: none; curated phrase/label hits: none; broad-parent keywords (allowed, info only): art:"color"
+PASS c02_dev     terse  curated tags: none; curated phrase/label hits: none; broad-parent keywords (allowed, info only): none
+PASS c03_june    medium curated tags: none; curated phrase/label hits: none; broad-parent keywords (allowed, info only): none
+PASS c04_harold  chatty curated tags: none; curated phrase/label hits: none; broad-parent keywords (allowed, info only): music:"band"
+PASS c05_zane    terse  curated tags: none; curated phrase/label hits: none; broad-parent keywords (allowed, info only): sports:"league"
+PASS c06_mei     terse  curated tags: none; curated phrase/label hits: none; broad-parent keywords (allowed, info only): none
+PASS c07_ines    medium curated tags: none; curated phrase/label hits: none; broad-parent keywords (allowed, info only): none
+PASS c08_bev     chatty curated tags: none; curated phrase/label hits: none; broad-parent keywords (allowed, info only): none
+all personas PASS (no curated specific topic, phrase or label word matches)

@@ -11,11 +11,104 @@
  *   -> {"cmd":"final_guesses","k":3}   -> {"cmd":"hud"}   -> {"cmd":"end"}
  */
 import { createInterface } from "node:readline";
+import fs from "node:fs";
+import path from "node:path";
 import {
   HarnessSession, PreparedFeatureSource, SessionStore, createBackend, detectOllama, parseBackendRef,
   synthesizeTypingFromText, type BackendSpec, type EegBlendOptions, type FeatureMap, type ProviderKind, type TypingEvent,
-  type HarnessSession as HS, type TopicTaggerSpec,
+  type HarnessSession as HS, type TopicTaggerSpec, type LlmExtractorOptions, type ExtractorCache, type FreqTable, parseZipf10, isLocalOllamaUrl,
 } from "@brianharness/core";
+
+/**
+ * Optional external IDF frequency table for keyphrase-idf (dev/research only; never bundled): a file in the
+ * "<zipf*10>:<words>" line format, e.g. research/wordfreq/wordfreq_small_en_zipf10.txt (CC BY-SA 4.0).
+ * Selected per session by tagger option "freqFile" (also "baseOptions.freqFile" for llm-extract), or for every
+ * session by env BH_IDF_FREQ_FILE. Default (neither set): the bundled CC0 Common Voice table in core.
+ */
+const FREQ_CACHE = new Map<string, FreqTable>();
+export function loadFreqFile(file: string): FreqTable {
+  const abs = path.resolve(file);
+  let t = FREQ_CACHE.get(abs);
+  if (!t) { t = parseZipf10(fs.readFileSync(abs, "utf8"), path.basename(abs)); FREQ_CACHE.set(abs, t); }
+  return t;
+}
+function withFreqFile<T extends object>(opts: T): T {
+  const { freqFile, ...rest } = opts as T & { freqFile?: string };
+  const file = freqFile ?? process.env.BH_IDF_FREQ_FILE;
+  return (file ? { ...rest, freqTable: loadFreqFile(file) } : rest) as T;
+}
+
+/** Sidecar-only (Node) options for {"kind":"llm-extract"} on top of the core LlmExtractorOptions. */
+export interface SidecarLlmExtractOptions extends LlmExtractorOptions {
+  /** JSONL of {"key","raw"} responses (e.g. tools/llm-extractor-eval/out/responses.jsonl); used as a read-only cache */
+  responsesFile?: string;
+  /** directory for a read-write disk cache (<key>.json) + calls.json counter */
+  cacheDir?: string;
+  /** hard cap on network calls, persisted in <cacheDir>/calls.json (default 50) */
+  maxCalls?: number;
+}
+
+/** Build the llm-extract tagger spec: key from OLLAMA_API_KEY, disk cache, persisted hard call cap. */
+export function llmExtractSpec(o: SidecarLlmExtractOptions, allowNetwork: boolean): LlmExtractorOptions & { kind: "llm-extract" } {
+  const mem = new Map<string, string>();
+  if (o.responsesFile && fs.existsSync(o.responsesFile)) {
+    for (const l of fs.readFileSync(o.responsesFile, "utf8").split("\n")) {
+      if (!l.trim()) continue;
+      const r = JSON.parse(l) as { key?: string; raw?: string; ok?: boolean };
+      if (r.key && typeof r.raw === "string" && r.ok !== false) mem.set(r.key, r.raw);
+    }
+  }
+  const dir = o.cacheDir;
+  if (dir) fs.mkdirSync(dir, { recursive: true });
+  const cache: ExtractorCache = {
+    get: (k) => mem.get(k) ?? (dir && fs.existsSync(path.join(dir, `${k}.json`)) ? fs.readFileSync(path.join(dir, `${k}.json`), "utf8") : undefined),
+    set: (k, raw) => { mem.set(k, raw); if (dir) fs.writeFileSync(path.join(dir, `${k}.json`), raw); },
+  };
+  const max = o.maxCalls ?? 50;
+  const counter = dir ? path.join(dir, "calls.json") : null;
+  const { responsesFile: _r, cacheDir: _c, maxCalls: _m, ...core } = o;
+  const url = core.baseUrl ?? "https://ollama.com";
+  // a key is needed only for ollama.com; a local Ollama app (localhost / 127.0.0.1) takes none
+  const local = isLocalOllamaUrl(url);
+  const apiKey = local ? undefined : o.apiKey ?? process.env.OLLAMA_API_KEY;
+  let memCalls = 0; // in-memory counter when there is no cacheDir (per spec = per case)
+  return {
+    ...core, kind: "llm-extract", cache, apiKey,
+    offline: core.offline || !allowNetwork || (!local && !apiKey),
+    reserveCall: () => (counter ? reserveAtomic(counter, max) : memCalls < max ? (memCalls++, true) : false),
+  };
+}
+
+/**
+ * Atomic persisted call counter: read-check-increment under an exclusive lock file, then write via rename,
+ * so concurrent sessions / processes sharing one cacheDir never lose an update (the old in-memory snapshot
+ * recorded 1 call for 3 made by parallel cases). Each call re-reads the file; the cap holds across all users.
+ */
+export function reserveAtomic(counter: string, max: number): boolean {
+  const lock = counter + ".lock";
+  const deadline = Date.now() + 5000;
+  let fd = -1;
+  while (fd < 0) {
+    try { fd = fs.openSync(lock, "wx"); } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      // stale lock (crashed holder) after 10 s
+      try { if (Date.now() - fs.statSync(lock).mtimeMs > 10_000) fs.rmSync(lock, { force: true }); } catch { /* raced */ }
+      if (Date.now() > deadline) throw new Error(`call counter lock busy: ${lock}`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+  try {
+    const cur = fs.existsSync(counter) ? (JSON.parse(fs.readFileSync(counter, "utf8")) as { calls?: number }).calls ?? 0 : 0;
+    if (cur >= max) return false;
+    const tmp = `${counter}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ calls: cur + 1, max }));
+    fs.renameSync(tmp, counter);
+    return true;
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(lock, { force: true });
+  }
+}
 
 export const SIDECAR_PROTOCOL = "brianharness-sidecar/1";
 
@@ -42,9 +135,10 @@ export interface StartOptions {
   /**
    * topic tagger: {"kind":"lexicon"} (default) | {"kind":"keyphrase"} | {"kind":"keyphrase-only"} (leak-free:
    * no curated hobby list) | {"kind":"keyphrase-generic"} | {"kind":"lexicon-generic"} |
-   * {"kind":"keyphrase","lexicon":"full|generic|broad|none"} | {"kind":"ollama","model":"...","baseUrl":"..."}
+   * {"kind":"keyphrase","lexicon":"full|generic|broad|none"} | {"kind":"keyphrase-idf"} (leak-free, IDF-weighted; optional "freqFile": external dev-only frequency table) |
+   * {"kind":"llm-extract", ...SidecarLlmExtractOptions} | {"kind":"ollama","model":"...","baseUrl":"..."}
    */
-  tagger?: TopicTaggerSpec;
+  tagger?: TopicTaggerSpec | ({ kind: "llm-extract" } & SidecarLlmExtractOptions);
   /** write JSONL logs / interest-map save files here */
   dataDir?: string;
   /** typing synthesis when a reply has no events: chars/sec (default 5) */
@@ -69,7 +163,7 @@ export class Sidecar {
       case "reply":
         return this.reply(m);
       case "hud":
-        return { hud: this.need().hud(), ledger: this.ledger() };
+        return { hud: this.need().hud(), ledger: this.ledger(), tagger: { kind: this.need().tagger.kind, ...("freqTable" in this.need().tagger ? { freq: (this.need().tagger as unknown as { freqTable: { name: string } }).freqTable.name } : {}), ...("calls" in this.need().tagger ? { calls: (this.need().tagger as unknown as { calls: unknown }).calls } : {}) } };
       case "final_guesses":
         return { guesses: this.need().finalGuesses(Number(m.k ?? 3)) };
       case "end": {
@@ -116,6 +210,15 @@ export class Sidecar {
     if (backend.paid && !(o.allowPaid && this.globalAllowPaid)) {
       throw new Error(`backend ${backend.id} is paid / uses subscription quota: needs options.allowPaid AND the --allow-paid flag`);
     }
+    let tagger = o.tagger as TopicTaggerSpec | undefined;
+    if (tagger?.kind === "llm-extract") {
+      // network calls spend Ollama-cloud quota: same double opt-in as paid backends; otherwise cache-only
+      tagger = llmExtractSpec(tagger as SidecarLlmExtractOptions, !!(o.allowPaid && this.globalAllowPaid));
+      const t = tagger as LlmExtractorOptions;
+      if (t.base !== "none") tagger = { ...tagger, baseOptions: withFreqFile({ ...(t.baseOptions ?? {}) }) } as TopicTaggerSpec;
+    } else if (tagger?.kind === "keyphrase-idf") {
+      tagger = withFreqFile(tagger);
+    }
     const engagement: EegBlendOptions = { ...(o.engagement ?? {}), ...(o.eegWeight !== undefined ? { weight: o.eegWeight } : {}) };
     this.src = new PreparedFeatureSource("eeg");
     this.session = new HarnessSession({
@@ -127,7 +230,7 @@ export class Sidecar {
       clock: () => this.clock,
       seed,
       engagement,
-      tagger: o.tagger,
+      tagger,
     });
     const d = await this.session.start();
     return { protocol: SIDECAR_PROTOCOL, sessionId: this.session.id, backend: backend.id, paid: backend.paid, director: { text: d.text, plan: d.plan } };

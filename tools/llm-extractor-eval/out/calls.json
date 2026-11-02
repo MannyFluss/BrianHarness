@@ -1,0 +1,294 @@
+{
+ "calls": 48,
+ "cap": 50,
+ "log": [
+  {
+   "at": "2026-11-02T08:15:08.821Z",
+   "model": "gemma4:cloud",
+   "key": "f5856a2648784bca",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:09.791Z",
+   "model": "gemma4:cloud",
+   "key": "a2ba74d7e586291e",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:10.481Z",
+   "model": "gemma4:cloud",
+   "key": "f855f85ccd0e5775",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:11.450Z",
+   "model": "gemma4:cloud",
+   "key": "5b067ae2f5574c3b",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:12.303Z",
+   "model": "gemma4:cloud",
+   "key": "2620aa151b712a9b",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:13.299Z",
+   "model": "gemma4:cloud",
+   "key": "9112d4674c6a4d92",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:14.329Z",
+   "model": "gemma4:cloud",
+   "key": "8e1ee64329362847",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:15.234Z",
+   "model": "gemma4:cloud",
+   "key": "0d18a0f1cd625c90",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:15.935Z",
+   "model": "gemma4:cloud",
+   "key": "9a6701ad36927202",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:16.604Z",
+   "model": "gemma4:cloud",
+   "key": "8ffc442ecaeee7b2",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:18.514Z",
+   "model": "gemma4:cloud",
+   "key": "0c79bd7e13e079a7",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:19.240Z",
+   "model": "gemma4:cloud",
+   "key": "642c83d3743dbc1f",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:20.093Z",
+   "model": "gemma4:cloud",
+   "key": "928166508673bf6c",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:21.116Z",
+   "model": "gemma4:cloud",
+   "key": "5ef0188d249c1417",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:21.858Z",
+   "model": "gemma4:cloud",
+   "key": "ae611dc3f7843491",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:22.610Z",
+   "model": "gemma4:cloud",
+   "key": "91026d7d1e8fad16",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:23.329Z",
+   "model": "gemma4:cloud",
+   "key": "283b0b872766d16c",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:24.044Z",
+   "model": "gemma4:cloud",
+   "key": "2684bfefe3e27d5e",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:24.918Z",
+   "model": "gemma4:cloud",
+   "key": "147013f6efc6f8e6",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:25.655Z",
+   "model": "gemma4:cloud",
+   "key": "ec23196f0d552f36",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:26.517Z",
+   "model": "gemma4:cloud",
+   "key": "e3319d69980ea4bb",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:27.137Z",
+   "model": "gemma4:cloud",
+   "key": "5c01a0d33ea618a7",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:27.778Z",
+   "model": "gemma4:cloud",
+   "key": "eb6e3c9da6d41b0b",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:28.434Z",
+   "model": "gemma4:cloud",
+   "key": "10c6acf698f8de8b",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:29.169Z",
+   "model": "gemma4:cloud",
+   "key": "c91885d859ef2556",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:30.503Z",
+   "model": "gemma4:cloud",
+   "key": "85ddf7472682024e",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:31.040Z",
+   "model": "gemma4:cloud",
+   "key": "828fa069213c575f",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:31.630Z",
+   "model": "gemma4:cloud",
+   "key": "3eaea3155da52eaa",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:32.359Z",
+   "model": "gemma4:cloud",
+   "key": "eeb020eab2226326",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:32.727Z",
+   "model": "gemma4:cloud",
+   "key": "71e4a96b8d963bdc",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:33.129Z",
+   "model": "gemma4:cloud",
+   "key": "3c93c7d867a3144a",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:34.612Z",
+   "model": "gemma4:cloud",
+   "key": "1238bf16762c1fc3",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:35.799Z",
+   "model": "gemma4:cloud",
+   "key": "8895a96214cc96c7",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:36.542Z",
+   "model": "gemma4:cloud",
+   "key": "5b8788ca4708605e",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:36.983Z",
+   "model": "gemma4:cloud",
+   "key": "a6674129bc7e8728",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:37.607Z",
+   "model": "gemma4:cloud",
+   "key": "0981efd1bd367df8",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:38.512Z",
+   "model": "gemma4:cloud",
+   "key": "5524a236704e3abe",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:39.398Z",
+   "model": "gemma4:cloud",
+   "key": "d31f338424261e5a",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:40.046Z",
+   "model": "gemma4:cloud",
+   "key": "b2169b072c514989",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:40.755Z",
+   "model": "gemma4:cloud",
+   "key": "113bba3f80186347",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:48.361Z",
+   "model": "gemma4:cloud",
+   "key": "df97fe8818340128",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:48.938Z",
+   "model": "gemma4:cloud",
+   "key": "06e38d2dd57845e5",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:49.693Z",
+   "model": "gemma4:cloud",
+   "key": "a8b1a6a0c0a773f7",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:50.796Z",
+   "model": "gemma4:cloud",
+   "key": "da566d736c02d7fd",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:52.259Z",
+   "model": "gemma4:cloud",
+   "key": "6405f81191baecfd",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:52.831Z",
+   "model": "gemma4:cloud",
+   "key": "ff30d5e86ed96086",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:53.409Z",
+   "model": "gemma4:cloud",
+   "key": "f7594b6532b1f0ac",
+   "dry": false
+  },
+  {
+   "at": "2026-11-02T08:15:53.951Z",
+   "model": "gemma4:cloud",
+   "key": "f30ebf6f68485c50",
+   "dry": false
+  }
+ ]
+}

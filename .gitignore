@@ -5,3 +5,6 @@ release/
 data/
 *.log
 dist-web/
+__pycache__/
+*.pyc
+tools/llm-extractor-eval/out-dry/

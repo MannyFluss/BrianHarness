@@ -256,9 +256,10 @@ export class HarnessSession {
       // low engagement count against the question style that carried them
       if (!plan.scout) this.map.observeStyle(plan.style, score, 1);
     }
-    for (const t of mentioned) {
+    for (const tag of tags) {
+      const t = tag.id;
       if (t === plan?.topic || t === plan?.altTopic) continue;
-      observe(t, Math.min(1, score + 0.1), 0.7); // user steered there unprompted
+      observe(t, Math.min(1, score + 0.1), tag.observeWeight ?? 0.7); // user steered there unprompted
     }
     // Roll child evidence (specific hobbies, keyphrases) up to ancestors that weren't credited
     // directly this turn, once per ancestor (strongest child wins), so the parent accumulates it.
@@ -278,7 +279,8 @@ export class HarnessSession {
     for (const s of this.sources) s.clear(sentAt);
 
     const hypothesis = this.map.hypothesis();
-    this.snapshots.push({ turn: this.turn, hypothesis, top: this.map.topTopics(3) });
+    const eegOk = features["eeg.engagementIndex"] !== undefined && eegQuality(features, this.opts.engagement?.refWindowSec).quality > 0;
+    this.snapshots.push({ turn: this.turn, hypothesis, top: this.map.topTopics(3), ...(eegOk ? { eegLn: Math.log(Math.max(1e-6, features["eeg.engagementIndex"]!)) } : {}) });
     this.log({
       type: "user_turn",
       t: nowIso(),
@@ -330,7 +332,7 @@ export class HarnessSession {
 
   /** Top-k final guesses at the user's interests (no LLM call; see final-guesses.ts). */
   finalGuesses(k = 3, opts?: FinalGuessOptions): FinalGuess[] {
-    return finalGuesses(this.map, this.snapshots, k, opts);
+    return finalGuesses(this.map, this.snapshots, k, { prior: this.tagger.rankPrior?.() ?? null, ...opts });
   }
 
   hud(): HudState {

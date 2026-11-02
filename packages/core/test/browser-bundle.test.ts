@@ -31,7 +31,8 @@ test("browser entry bundles for platform=browser with no Node built-ins or heavy
   assert.ok(!/\brequire\(/.test(code), "no require()");
   assert.ok(!code.includes("process.env"), "no bare process.env (use defaultEnv())");
   for (const banned of ["crypto.subtle", "randomUUID", "child_process", "safeStorage"]) assert.ok(!code.includes(banned), `bundle mentions ${banned}`);
-  assert.ok(code.length < 400_000, `browser core bundle unexpectedly large: ${code.length}`);
+  // ~320 KB of it is the bundled CC0 word-frequency table (wordfreq/cv-en.ts) that keyphrase-idf needs in the app
+  assert.ok(code.length < 600_000, `browser core bundle unexpectedly large: ${code.length}`);
 });
 
 test("browser bundle runs a full mock session in a bare VM (no process/require/Buffer)", async () => {

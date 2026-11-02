@@ -1,0 +1,155 @@
+{
+ "note": "Phase B sessions (runs_b), 3 per persona by fnv1a64(session) order; extractor called after user turns 6 and 12",
+ "turns": [
+  6,
+  12
+ ],
+ "sessions": [
+  "runs_b/full_w025/p01_dana__bh_yoked_d2__s11",
+  "runs_b/full_w025/p02_marcus__bh_eeg_d1__s11",
+  "runs_b/w05/p03_priya__bh_yoked_d2__s11",
+  "runs_b/w05/p04_gloria__bh_eeg_d2__s22",
+  "runs_b/full_w025/p05_kai__bh_eeg_d2__s22",
+  "runs_b/w05/p06_tomas__bh_yoked_d2__s11",
+  "runs_b/w05/p07_helen__bh_yoked_d2__s11",
+  "runs_b/full_w025/p08_obi__bh_typing__s11",
+  "runs_b/full_w025/p01_dana__bh_yoked_d2__s22",
+  "runs_b/full_w025/p02_marcus__bh_eeg_d1__s22",
+  "runs_b/w05/p03_priya__bh_yoked_d2__s22",
+  "runs_b/w05/p04_gloria__bh_eeg_d2__s11",
+  "runs_b/full_w025/p05_kai__bh_eeg_d2__s11",
+  "runs_b/w05/p06_tomas__bh_yoked_d2__s22",
+  "runs_b/w05/p07_helen__bh_yoked_d2__s22",
+  "runs_b/full_w025/p08_obi__bh_typing__s22",
+  "runs_b/full_w025/p01_dana__bh_eeg_d1__s11",
+  "runs_b/full_w025/p02_marcus__bh_eeg_d2__s22",
+  "runs_b/full_w025/p03_priya__bh_eeg_d2__s11",
+  "runs_b/full_w025/p04_gloria__bh_typing__s22",
+  "runs_b/w05/p05_kai__bh_eeg_d2__s11",
+  "runs_b/full_w025/p06_tomas__bh_typing__s22",
+  "runs_b/full_w025/p07_helen__bh_yoked_d2__s22",
+  "runs_b/full_w025/p08_obi__bh_eeg_d2__s22"
+ ],
+ "detail": [
+  {
+   "session": "runs_b/full_w025/p01_dana__bh_yoked_d2__s11",
+   "persona": "p01_dana",
+   "condition": "bh_yoked_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p02_marcus__bh_eeg_d1__s11",
+   "persona": "p02_marcus",
+   "condition": "bh_eeg_d1"
+  },
+  {
+   "session": "runs_b/w05/p03_priya__bh_yoked_d2__s11",
+   "persona": "p03_priya",
+   "condition": "bh_yoked_d2"
+  },
+  {
+   "session": "runs_b/w05/p04_gloria__bh_eeg_d2__s22",
+   "persona": "p04_gloria",
+   "condition": "bh_eeg_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p05_kai__bh_eeg_d2__s22",
+   "persona": "p05_kai",
+   "condition": "bh_eeg_d2"
+  },
+  {
+   "session": "runs_b/w05/p06_tomas__bh_yoked_d2__s11",
+   "persona": "p06_tomas",
+   "condition": "bh_yoked_d2"
+  },
+  {
+   "session": "runs_b/w05/p07_helen__bh_yoked_d2__s11",
+   "persona": "p07_helen",
+   "condition": "bh_yoked_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p08_obi__bh_typing__s11",
+   "persona": "p08_obi",
+   "condition": "bh_typing"
+  },
+  {
+   "session": "runs_b/full_w025/p01_dana__bh_yoked_d2__s22",
+   "persona": "p01_dana",
+   "condition": "bh_yoked_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p02_marcus__bh_eeg_d1__s22",
+   "persona": "p02_marcus",
+   "condition": "bh_eeg_d1"
+  },
+  {
+   "session": "runs_b/w05/p03_priya__bh_yoked_d2__s22",
+   "persona": "p03_priya",
+   "condition": "bh_yoked_d2"
+  },
+  {
+   "session": "runs_b/w05/p04_gloria__bh_eeg_d2__s11",
+   "persona": "p04_gloria",
+   "condition": "bh_eeg_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p05_kai__bh_eeg_d2__s11",
+   "persona": "p05_kai",
+   "condition": "bh_eeg_d2"
+  },
+  {
+   "session": "runs_b/w05/p06_tomas__bh_yoked_d2__s22",
+   "persona": "p06_tomas",
+   "condition": "bh_yoked_d2"
+  },
+  {
+   "session": "runs_b/w05/p07_helen__bh_yoked_d2__s22",
+   "persona": "p07_helen",
+   "condition": "bh_yoked_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p08_obi__bh_typing__s22",
+   "persona": "p08_obi",
+   "condition": "bh_typing"
+  },
+  {
+   "session": "runs_b/full_w025/p01_dana__bh_eeg_d1__s11",
+   "persona": "p01_dana",
+   "condition": "bh_eeg_d1"
+  },
+  {
+   "session": "runs_b/full_w025/p02_marcus__bh_eeg_d2__s22",
+   "persona": "p02_marcus",
+   "condition": "bh_eeg_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p03_priya__bh_eeg_d2__s11",
+   "persona": "p03_priya",
+   "condition": "bh_eeg_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p04_gloria__bh_typing__s22",
+   "persona": "p04_gloria",
+   "condition": "bh_typing"
+  },
+  {
+   "session": "runs_b/w05/p05_kai__bh_eeg_d2__s11",
+   "persona": "p05_kai",
+   "condition": "bh_eeg_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p06_tomas__bh_typing__s22",
+   "persona": "p06_tomas",
+   "condition": "bh_typing"
+  },
+  {
+   "session": "runs_b/full_w025/p07_helen__bh_yoked_d2__s22",
+   "persona": "p07_helen",
+   "condition": "bh_yoked_d2"
+  },
+  {
+   "session": "runs_b/full_w025/p08_obi__bh_eeg_d2__s22",
+   "persona": "p08_obi",
+   "condition": "bh_eeg_d2"
+  }
+ ]
+}

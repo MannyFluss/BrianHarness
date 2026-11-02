@@ -22,7 +22,8 @@
     "build:web": "npm run build -w @brianharness/core && npm run build:web -w @brianharness/desktop",
     "dev:web": "npm run build -w @brianharness/core && npm run dev:web -w @brianharness/desktop",
     "serve:lan": "npm run build:web && npm run serve:lan -w @brianharness/desktop",
-    "test:web-csp": "npm run build:web && npm run test:web-csp -w @brianharness/desktop"
+    "test:web-csp": "npm run build:web && npm run test:web-csp -w @brianharness/desktop",
+    "check:bundle-freq": "node scripts/check-bundle-freq.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

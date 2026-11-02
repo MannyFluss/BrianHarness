@@ -13,6 +13,8 @@ import { parseChatBody } from "./providers/response-body.js";
 import { TOPIC_LEXICON, TOPICS, tokenize, topicHits } from "./topics.js";
 import { normalizeOllamaBaseUrl } from "./providers/ollama.js";
 import { timeoutSignal } from "./platform/env.js";
+import { KeyphraseIdfTagger, type KeyphraseIdfOptions } from "./tagger-idf.js";
+import { LlmInterestExtractor, type LlmExtractorOptions } from "./llm-extractor.js";
 
 export interface TopicTag {
   /** stable id (lexicon key, "x:<slug>" for specific topics, "kp:<phrase>" for keyphrases) */
@@ -22,11 +24,36 @@ export interface TopicTag {
   parent?: string;
   /** strength (keyword hits) */
   weight: number;
+  /**
+   * interest-map evidence weight when the user mentions this topic unprompted (default 0.7).
+   * keyphrase-idf scales it by distinctiveness; the LLM extractor by confidence.
+   */
+  observeWeight?: number;
+}
+
+/** A tagger's whole-conversation opinion for the final ranking (see final-guesses.ts FinalGuessOptions.prior). */
+export interface RankPrior {
+  /** topic ids, best first (e.g. the LLM extractor's latest answer in its own order) */
+  ranked: string[];
+  /** Infinity = these lead the final guesses in this order (rest filled by the engagement ranking);
+   *  finite w = soft prior, adds w * 0.85^rank to the engagement score */
+  weight: number;
+  /** topic ids never shown as guesses (e.g. keyphrase duplicates of a ranked label) */
+  suppress?: string[];
+  /**
+   * lead mode only: 1-based user turns each ranked topic cites (aligned with ranked). With reorderZ set,
+   * EEG engagement on those turns may move a topic above an earlier one (finalGuesses, "lead-eeg").
+   */
+  cites?: number[][];
+  /** one-sided z for the EEG reorder test (LEAD_EEG_Z); unset = keep the ranked order */
+  reorderZ?: number;
 }
 
 export interface TopicTagger {
   readonly kind: string;
   tag(text: string, signal?: AbortSignal): Promise<TopicTag[]>;
+  /** optional ranking prior for finalGuesses; taggers without one keep the plain engagement ranking */
+  rankPrior?(): RankPrior | null;
 }
 
 /**
@@ -48,6 +75,10 @@ export type TopicTaggerSpec =
   | { kind: "keyphrase-only"; minRepeats?: number }
   /** keyphrase with lexicon "generic" */
   | { kind: "keyphrase-generic"; minRepeats?: number }
+  /** leak-free, IDF-weighted distinctive terms + proper nouns, clustered across turns (tagger-idf.ts) */
+  | ({ kind: "keyphrase-idf" } & KeyphraseIdfOptions)
+  /** LLM interest extractor every N turns on top of keyphrase-idf (llm-extractor.ts) */
+  | ({ kind: "llm-extract" } & LlmExtractorOptions)
   | { kind: "ollama"; model: string; baseUrl?: string; timeoutMs?: number; fetchImpl?: typeof fetch };
 
 /** Specific (open-vocab) topics: id -> label, parent, phrases (lowercase, matched on word boundaries). */
@@ -314,6 +345,10 @@ export function createTagger(spec?: TopicTaggerSpec): TopicTagger {
       return new KeyphraseTagger((spec as { minRepeats?: number }).minRepeats, "none");
     case "keyphrase-generic":
       return new KeyphraseTagger((spec as { minRepeats?: number }).minRepeats, "generic");
+    case "keyphrase-idf":
+      return new KeyphraseIdfTagger(spec as KeyphraseIdfOptions);
+    case "llm-extract":
+      return new LlmInterestExtractor(spec as LlmExtractorOptions);
     case "ollama":
       return new OllamaTagger(spec as { model: string; baseUrl?: string });
     default:
