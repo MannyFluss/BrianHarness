@@ -1,4 +1,4 @@
-import { FakeEegSource, HarnessSession, MockBackend, SessionStore, type ModelBackend } from "@eeg/core";
+import { FakeEegSource, HarnessSession, MockBackend, SessionStore, type ModelBackend } from "@brianharness/core";
 import type { Persona } from "./personas.js";
 import { SimUser } from "./sim-user.js";
 
@@ -97,6 +97,12 @@ export interface Summary {
   foundRate: number;
   meanTurnsToFind: number | null;
   styleHitRate: number;
+  /** final hypothesis is a wrong topic (the lock-in trap's end state) */
+  wrongFinal: number;
+  /** no hypothesis at all at the end (the low-confidence failure) */
+  noHypothesis: number;
+  /** runs with a wrong hypothesis held for >= 6 consecutive turns at any point */
+  lockIns: number;
 }
 
 export function summarize(results: RunResult[]): Summary[] {
@@ -110,6 +116,18 @@ export function summarize(results: RunResult[]): Summary[] {
       foundRate: found.length / rs.length,
       meanTurnsToFind: found.length ? found.reduce((a, r) => a + r.turnsToFind!, 0) / found.length : null,
       styleHitRate: rs.filter((r) => r.topStyle === r.favoriteStyle).length / rs.length,
+      wrongFinal: rs.filter((r) => r.finalHypothesis !== null && r.finalHypothesis !== r.passion).length,
+      noHypothesis: rs.filter((r) => r.finalHypothesis === null).length,
+      lockIns: rs.filter((r) => longestWrongStreak(r) >= 6).length,
     };
   });
+}
+
+export function longestWrongStreak(r: RunResult): number {
+  let best = 0, cur = 0;
+  for (const h of r.hypothesisByTurn) {
+    cur = h !== null && h !== r.passion ? cur + 1 : 0;
+    best = Math.max(best, cur);
+  }
+  return best;
 }

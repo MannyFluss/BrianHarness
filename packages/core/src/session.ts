@@ -69,6 +69,8 @@ export class HarnessSession {
   transcript: ChatMessage[] = [];
   turn = 0;
   promptShownAt = 0;
+  /** word counts of this user's replies so far (for the relative-length feature) */
+  wordCounts: number[] = [];
   private rng: Rng;
   private clock: () => number;
 
@@ -131,6 +133,13 @@ export class HarnessSession {
     this.typing.pushMany(events);
     const window = { from: this.promptShownAt, to: sentAt };
     const features: FeatureMap = { ...textFeatures(text) };
+    const words = features["text.words"] ?? 0;
+    if (this.wordCounts.length >= 2) {
+      const sorted = [...this.wordCounts].sort((a, b) => a - b);
+      const med = sorted[Math.floor(sorted.length / 2)]!;
+      features["text.relWords"] = Math.log((words + 1) / (med + 1));
+    }
+    this.wordCounts.push(words);
     for (const s of this.sources) Object.assign(features, s.summarize(window));
     const { score } = estimateEngagement(features);
     const baseline = this.frame ? this.frame.baseline + BASELINE_ALPHA * (score - this.frame.baseline) : score;
@@ -151,7 +160,9 @@ export class HarnessSession {
           this.map.observeTopic(plan.topic, score, 1);
         }
       }
-      this.map.observeStyle(plan.style, score, 1);
+      // forced scouting turns probe topics the user likely doesn't care about; don't let that
+      // low engagement count against the question style that carried them
+      if (!plan.scout) this.map.observeStyle(plan.style, score, 1);
     }
     for (const t of mentioned) {
       if (t === plan?.topic || t === plan?.altTopic) continue;

@@ -1,4 +1,4 @@
-import type { QuestionStyle } from "@eeg/core";
+import type { QuestionStyle } from "@brianharness/core";
 
 export interface Persona {
   id: string;

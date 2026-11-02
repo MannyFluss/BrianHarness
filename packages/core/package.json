@@ -1,11 +1,22 @@
 {
-  "name": "@eeg/core",
+  "name": "@brianharness/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Headless EEG Harness core: signal sources, turn telemetry, engagement, interest map, state note, Director, model backends, session logging.",
+  "description": "Headless BrianHarness core: signal sources, turn telemetry, engagement, interest map, state note, Director, model providers, session logging.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "scripts": { "build": "tsc -p ." }
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./brand.json": "./src/brand.json"
+  },
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "1.4.0"
+  }
 }

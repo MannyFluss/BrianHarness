@@ -3,7 +3,7 @@
  * infers what is being asked, and replies with text plus synthetic keystroke events
  * whose speed, length, pauses, and deletions depend on its hidden interest.
  */
-import { TOPIC_LEXICON, detectTopics, makeRng, pick, type QuestionStyle, type Rng, type TypingEvent } from "@eeg/core";
+import { TOPIC_LEXICON, detectTopics, makeRng, pick, type QuestionStyle, type Rng, type TypingEvent } from "@brianharness/core";
 import type { Persona } from "./personas.js";
 
 const FILLER = ["honestly", "i guess", "kind of", "sometimes", "like", "you know", "it depends", "for sure", "a bit", "mostly", "really", "actually"];

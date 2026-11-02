@@ -5,7 +5,7 @@ import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { HarnessSession, SessionStore, createBackendFromEnv } from "@eeg/core";
+import { HarnessSession, SessionStore, createBackendFromEnv } from "@brianharness/core";
 import { runDemo } from "./demo.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));

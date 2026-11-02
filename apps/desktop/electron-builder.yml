@@ -1,4 +1,4 @@
-# Packaging sketch for Manny's Mac (arm64). Run ON the Mac: npm run dist:mac -w @eeg/desktop
+# Packaging sketch for Manny's Mac (arm64). Run ON the Mac: npm run dist:mac -w @brianharness/desktop
 appId: dev.mannyfluss.eegharness
 productName: EEG Harness
 executableName: eeg-harness

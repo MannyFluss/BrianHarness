@@ -7,7 +7,8 @@ import type { FeatureMap } from "./types.js";
 import { tokenize, topicHits } from "./topics.js";
 
 export const ENGAGEMENT_WEIGHTS = {
-  length: 0.32, // more words = more invested
+  length: 0.22, // more words = more invested
+  relLength: 0.14, // longer than THIS user's own norm (log ratio to their running median)
   latency: 0.18, // starting to type quickly
   fluency: 0.12, // few long thinking pauses
   elaboration: 0.2, // concrete topic vocabulary
@@ -40,6 +41,8 @@ export function estimateEngagement(f: FeatureMap): EngagementBreakdown {
   const words = f["text.words"] ?? 0;
   const parts: Record<string, number> = {
     length: words / (words + 15),
+    // only present once the session knows the user's median; 0.5 = "typical for them"
+    relLength: f["text.relWords"] === undefined ? 0.5 : clamp01(0.5 + 0.5 * Math.tanh(f["text.relWords"]!)),
     latency: f["typing.replyLatencyMs"] === undefined ? 0.5 : Math.exp(-(f["typing.replyLatencyMs"] ?? 0) / 8000),
     fluency: clamp01(1 - (f["typing.pauses"] ?? 0) * 0.2),
     elaboration: clamp01((f["text.topicHits"] ?? 0) / 4),
@@ -48,13 +51,14 @@ export function estimateEngagement(f: FeatureMap): EngagementBreakdown {
   };
   let score =
     W.length * parts.length! +
+    W.relLength * parts.relLength! +
     W.latency * parts.latency! +
     W.fluency * parts.fluency! +
     W.elaboration * parts.elaboration! +
     W.curiosity * parts.curiosity! -
     W.hesitation * parts.hesitation!;
   // normalise positive weight mass to 1
-  score = score / (W.length + W.latency + W.fluency + W.elaboration + W.curiosity);
+  score = score / (W.length + W.relLength + W.latency + W.fluency + W.elaboration + W.curiosity);
   if (f["eeg.engagementIndex"] !== undefined) {
     parts.eeg = clamp01((f["eeg.engagementIndex"]! - 0.2) / 1.0);
     score = (1 - W.eeg) * score + W.eeg * parts.eeg;

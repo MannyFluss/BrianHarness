@@ -9,7 +9,7 @@ first from **how they type**, later from **EEG**. This doc is the map; the code 
 |---|---|---|
 | Desktop shell | **Electron** (hiddenInset traffic lights, `#141414`, 1440x900) | Same shell as LearnHarness; one codebase for Mac/Win/Linux |
 | UI | **React 19 + Tailwind v4 + lucide icons**, built with **Vite** | Same visual system as LearnHarness (its tokens, fonts, radii) |
-| Core | **TypeScript, headless, zero runtime deps** (`@eeg/core`) | Runs in Electron main, the sim CLI, tests, and later a server |
+| Core | **TypeScript, headless, zero runtime deps** (`@brianharness/core`) | Runs in Electron main, the sim CLI, tests, and later a server |
 | Models | `ModelBackend` interface: **Mock** (default, offline) + **OpenAI-compatible** (opt-in) | No spend without explicit opt-in; pi-ai can slot in as another backend |
 | Storage | **JSONL per session** + **JSON save file per user** | Append-only, greppable, trivially loadable in Python/pandas |
 
@@ -23,7 +23,7 @@ feel is identical; if we later want a web build, the same core can sit behind a 
 
 ```
 eeg-harness/
-  packages/core/     @eeg/core   headless harness (no UI, no Electron)
+  packages/core/     @brianharness/core   headless harness (no UI, no Electron)
     src/types.ts         contracts: TypingEvent, FeatureMap, FrameState, DirectorPlan, LogEvent
     src/signals.ts       SignalSource plugin interface, TypingSignalSource, FakeEegSource
     src/engagement.ts    FeatureMap -> engagement score 0..1 (weights in one table)
@@ -34,8 +34,8 @@ eeg-harness/
     src/backends.ts      ModelBackend, MockBackend, OpenAICompatibleBackend, createBackendFromEnv
     src/store.ts         SessionStore: sessions/<id>.jsonl + saves/<user>.interest.json
     src/session.ts       HarnessSession: the turn loop that ties it all together
-  packages/sim/      @eeg/sim    simulated-user test runner (CLI + library)
-  apps/desktop/      @eeg/desktop Electron app (electron/ = main+preload, src/ = React UI)
+  packages/sim/      @brianharness/sim    simulated-user test runner (CLI + library)
+  apps/desktop/      @brianharness/desktop Electron app (electron/ = main+preload, src/ = React UI)
   docs/
 ```
 
@@ -67,7 +67,7 @@ eeg-harness/
 ## 4. Data flow (one turn)
 
 ```
-renderer (React)                         Electron main (Node)                 @eeg/core
+renderer (React)                         Electron main (Node)                 @brianharness/core
 -----------------                        --------------------                 ---------
 Director msg rendered -> shownAt
 user types: input events  ---------->    (batched with the message)

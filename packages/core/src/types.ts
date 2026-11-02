@@ -28,6 +28,8 @@ export interface DirectorPlan {
   altTopic?: string;
   style: QuestionStyle;
   reason: string;
+  /** forced scouting checkpoint (anti-lock-in) */
+  scout?: boolean;
 }
 
 export interface ChatMessage {

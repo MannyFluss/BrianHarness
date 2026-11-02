@@ -1,5 +1,5 @@
 {
-  "name": "@eeg/desktop",
+  "name": "@brianharness/desktop",
   "productName": "EEG Harness",
   "version": "0.1.0",
   "private": true,
@@ -14,7 +14,7 @@
     "dist:mac": "npm run build && electron-builder --mac --arm64"
   },
   "dependencies": {
-    "@eeg/core": "0.1.0"
+    "@brianharness/core": "0.1.0"
   },
   "devDependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.2.0",

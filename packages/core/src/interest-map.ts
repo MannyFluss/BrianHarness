@@ -71,17 +71,34 @@ export class InterestMap {
       .map(([t, c]) => [t, c.mean, c.n]);
   }
 
+  /** Engagement level this user typically gives, from all observed topics (n-weighted). */
+  userBaseline(): number | null {
+    let w = 0, m = 0;
+    for (const c of Object.values(this.data.topics)) {
+      if (c.n <= 0) continue;
+      w += c.n;
+      m += c.n * c.mean;
+    }
+    return w > 0 ? m / w : null;
+  }
+
   /**
    * The Director's current best guess at the user's passion, or null if not confident:
-   * top topic needs mean >= minMean, n >= minN, and a margin over the runner-up.
+   * top topic needs n >= minN, a margin over the runner-up, and a mean that is either
+   * >= minMean in absolute terms OR clearly above THIS user's own baseline (relLift).
+   * The relative path is what lets terse users (short replies, low absolute scores)
+   * still produce a confident guess; floor stops it firing on uniformly flat users.
    */
-  hypothesis(opts: { minMean?: number; minN?: number; margin?: number } = {}): string | null {
-    const { minMean = 0.55, minN = 1.5, margin = 0.08 } = opts;
+  hypothesis(opts: { minMean?: number; minN?: number; margin?: number; relLift?: number; floor?: number } = {}): string | null {
+    const { minMean = 0.55, minN = 1.5, margin = 0.08, relLift = 0.1, floor = 0.3 } = opts;
     const ranked = Object.entries(this.data.topics).filter(([, c]) => c.n > 0).sort((a, b) => b[1].mean - a[1].mean);
     const top = ranked[0];
     if (!top) return null;
     const second = ranked[1]?.[1].mean ?? PRIOR_MEAN;
-    if (top[1].mean >= minMean && top[1].n >= minN && top[1].mean - second >= margin) return top[0];
+    const base = this.userBaseline() ?? top[1].mean;
+    const strongEnough = top[1].mean >= minMean || (top[1].mean >= floor && top[1].mean - base >= relLift);
+    const relMargin = top[1].mean >= minMean ? margin : Math.min(margin, 0.06);
+    if (strongEnough && top[1].n >= minN && top[1].mean - second >= relMargin) return top[0];
     return null;
   }
 

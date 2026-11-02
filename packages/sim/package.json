@@ -1,5 +1,5 @@
 {
-  "name": "@eeg/sim",
+  "name": "@brianharness/sim",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,5 +9,5 @@
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
   "bin": { "eeg-sim": "./dist/cli.js" },
   "scripts": { "build": "tsc -p ." },
-  "dependencies": { "@eeg/core": "0.1.0" }
+  "dependencies": { "@brianharness/core": "0.1.0" }
 }

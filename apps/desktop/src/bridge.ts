@@ -1,4 +1,4 @@
-// Types for window.eeg (exposed by electron/preload.cjs). Mirrors @eeg/core shapes loosely
+// Types for window.eeg (exposed by electron/preload.cjs). Mirrors @brianharness/core shapes loosely
 // so the renderer bundle never imports Node code.
 export type TypingEvent = { t: number; kind: "insert" | "delete" | "paste" | "nav" | "submit" | "focus" | "blur"; len: number };
 export type Plan = { turn: number; mode: "explore" | "exploit" | "relax"; topic: string; altTopic?: string; style: string; reason: string };

@@ -26,6 +26,6 @@ Without `EEG_BACKEND=openai` the app always uses the free offline mock.
 
 ## Packaging for macOS (Apple Silicon)
 
-On the Mac: `npm install && npm run dist:mac -w @eeg/desktop` -> `apps/desktop/release/*.dmg` (unsigned).
+On the Mac: `npm install && npm run dist:mac -w @brianharness/desktop` -> `apps/desktop/release/*.dmg` (unsigned).
 For a signed/notarized build, set a Developer ID identity and notarize credentials in
 `apps/desktop/electron-builder.yml`. An app icon (`build/icon.icns`) is still TODO.
