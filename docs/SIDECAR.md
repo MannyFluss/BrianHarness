@@ -39,7 +39,7 @@ One session at a time; after `end` you can `start` again.
 | `allowPaid` | must be `true` **and** the process started with `--allow-paid` for paid backends (`*:cloud` Ollama models, remote APIs, subscriptions). Local Ollama / mock never need it. |
 | `eegWeight` | base EEG blend weight (default 0.25) |
 | `engagement` | `EegBlendOptions`: `{weight, zScore, minHistory, qualityWeighting, agreementWeighting, refWindowSec, flatBoost, typingSdLow, typingSdHigh, maxWeight}` |
-| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
+| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"keyphrase-only"}` (leak-free) \| `{"kind":"keyphrase-generic"}` \| `{"kind":"lexicon-generic"}` \| `{"kind":"keyphrase","lexicon":"full\|generic\|broad\|none"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
 | `userId`, `sessionId`, `dataDir` | ids; `dataDir` writes the session JSONL + interest-map save file there |
 | `charsPerSec` | speed for synthesized typing (default 5) |
 
@@ -94,7 +94,7 @@ d = BrianHarnessDirector(provider="ollama", model="gemma3:4b", ollama_url="http:
 - `--bh-provider`: default mock with `--mock`, else ollama with `--director-model` and `--url`;
 - `--bh-allow-paid`: needed for `*:cloud`;
 - `--bh-eeg-weight`;
-- `--bh-tagger lexicon|keyphrase|ollama`.
+- `--bh-tagger lexicon|lexicon-generic|keyphrase|keyphrase-generic|keyphrase-only|ollama`.
 
 It also logs `director_impl: "brianharness"` and the same row schema:
 
@@ -103,5 +103,22 @@ python3 sim.py --mock --smoke --conditions typing,brianharness                  
 python3 sim.py --conditions baseline,typing,brianharness --bh-allow-paid --bh-tagger ollama   # gemma4:cloud = paid
 ```
 
-Caveat: the default lexicon tagger's curated hobby list includes the 8 Phase-A passions, so lexicon
-runs on those personas are optimistic. Report `--bh-tagger keyphrase` or `ollama` for honest open-vocab numbers.
+**Label leak (defaults unchanged on purpose).** The curated specific-hobby list (`SPECIFIC_TOPICS` in
+`packages/core/src/tagger.ts`) contains the 8 Phase-A persona passions verbatim (`SIM_PERSONA_SPECIFICS`:
+big-year birding, watch restoration, slime molds, ham radio, NES Tetris, urban sketching, Byzantine
+history, beekeeping). `lexicon` (default) **and `keyphrase`** both merge that list, so a "correct"
+specific guess on those personas can be a leaked label rather than discovered vocabulary.
+
+| tagger | curated specifics | broad topics (space, cooking, ...) | labels |
+|---|---|---|---|
+| `lexicon` (default), `keyphrase` | all | yes | can leak persona passions |
+| `lexicon-generic`, `keyphrase-generic` | all except the 8 persona passions | yes | no persona leak; other curated hobbies stay |
+| `{"kind":"keyphrase","lexicon":"broad"}` | none | yes | broad categories + user's phrases |
+| `keyphrase-only` | none | none | **only the user's own words** (`kp:` phrases) |
+
+For honest open-vocab numbers on the Phase-A personas use `--bh-tagger keyphrase-only` (or
+`keyphrase-generic` to keep non-persona curated hobbies). `keyphrase-only` rolls a phrase up to its
+phrase cluster (the recurring word it most often shares messages with, e.g. `kp:ham-radio` -> `kp:radio`),
+or keeps the phrase as its own root. A test asserts it never emits a curated label that isn't in the
+user's text. Note that the Director's own question topics are still broad categories, so broad topics
+can enter the interest map through the questions it asks, not through tagging.

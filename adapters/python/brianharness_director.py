@@ -51,6 +51,9 @@ class BrianHarnessDirector:
         self._timeout = timeout_s
         self._signals_fn = text_signals or _text_signals
         self.lengths, self.ledger, self.last_top3, self._opening = [], {}, [], None
+        # tagger: a spec dict, or a kind string, e.g. "keyphrase-only" (leak-free; see docs/SIDECAR.md)
+        if isinstance(tagger, str):
+            tagger = {"kind": tagger}
         opts = {"provider": provider, "seed": seed, "allowPaid": bool(allow_paid)}
         for k, v in (("model", model), ("ollamaUrl", ollama_url), ("baseUrl", base_url), ("temperature", temperature),
                      ("eegWeight", eeg_weight), ("engagement", engagement), ("tagger", tagger),
