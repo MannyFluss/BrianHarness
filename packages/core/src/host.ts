@@ -8,7 +8,7 @@ import type { DirectorTurnResult, HudState } from "./session.js";
 import { HarnessSession } from "./session.js";
 import type { HarnessStorage } from "./platform/storage.js";
 import { systemClock, type Clock } from "./platform/env.js";
-import { sessionTitle } from "./title.js";
+import { isFillerOnly, sessionTitle } from "./title.js";
 import type { TypingEvent } from "./types.js";
 import type { TopicTagger, TopicTaggerSpec } from "./tagger.js";
 
@@ -66,6 +66,7 @@ export class HarnessHost {
     const out = await s.reply(text, Array.isArray(p.events) ? p.events : [], typeof p.sentAt === "number" ? p.sentAt : this.clock());
     const hud = s.hud();
     const t = this.titles.get(s.id) ?? { firstUserText: text, topicLabel: null, turns: 0 };
+    if (isFillerOnly(t.firstUserText)) t.firstUserText = text; // "hi" then "I restore watches" -> title from the 2nd
     t.turns = s.turn;
     t.topicLabel = hud.hypothesis ? s.map.label(hud.hypothesis) : null;
     this.titles.set(s.id, t);
@@ -85,7 +86,8 @@ export class HarnessHost {
     if (!st) return this.session ? [{ id: this.session.id, title: "New chat", turns: this.session.turn, startedAt: null, active: true }] : [];
     return st.listSessions().slice(0, limit).map((id) => {
       const events = st.readSession(id);
-      const firstUser = events.find((e) => e.type === "user_turn");
+      const users = events.filter((e) => e.type === "user_turn");
+      const firstUser = users.find((e) => e.type === "user_turn" && !isFillerOnly(e.text)) ?? users[0];
       const start = events.find((e) => e.type === "session_start");
       const t = this.titles.get(id);
       return {
