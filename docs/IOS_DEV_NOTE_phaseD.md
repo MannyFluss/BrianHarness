@@ -82,7 +82,9 @@ sessions the HUD and a small banner above the composer (`data-testid="extractor-
 turn; it is identical in adaptive and baseline sessions (the tagger runs in both), so it reveals no mode.
 Electron and the sidecar print it to stderr once per session/reason. Exporter CSV columns: `effective_tagger,
 extractor_fallback, extractor_fallback_reason, extractor_calls_{attempted,ok,failed,capped}`. iOS: nothing to
-do beyond rebuilding; the banner is in the shared web UI.
+do beyond rebuilding; the banner is in the shared web UI. Screenshots (offline, fake Ollama returning 503
+to every extractor call): `docs/screenshot-fallback-banner-iphone.png`, `docs/screenshot-fallback-banner-desktop.png`
+(`apps/desktop/scripts/fallback-banner-shot.mjs`).
 
 ## Export contract (what the files contain)
 
