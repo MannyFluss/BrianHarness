@@ -6,6 +6,8 @@ eegWeight; final top-3 scored with the sim's rescore.py). Reads the sim dir only
   python3 tools/phaseC-tagger-eval/replay_taggers.py                 # track 1: keyphrase-only vs keyphrase-idf, all 144
   python3 tools/phaseC-tagger-eval/replay_taggers.py --sessions tools/llm-extractor-eval/sessions.json \\
       --responses tools/llm-extractor-eval/out/responses.jsonl --tag llm   # track 2 matched subset (no network)
+  python3 tools/phaseC-tagger-eval/replay_taggers.py --idf-freq-file research/wordfreq/wordfreq_small_en_zipf10.txt \
+      --tag idf_cc0_vs_wordfreq   # bundled CC0 table vs the dev-only wordfreq research table, all 144
 """
 import argparse, collections, json, os, subprocess, sys
 sys.dont_write_bytecode = True
@@ -22,6 +24,7 @@ class Side:
     def __init__(self):
         env = dict(os.environ)
         env.pop("OLLAMA_API_KEY", None)  # replay never spends calls, even if a key is set
+        env.pop("BH_IDF_FREQ_FILE", None)  # columns choose their frequency table explicitly (freqFile)
         self.p = subprocess.Popen(["node", SIDECAR], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, text=True, env=env, cwd=HE)
 
@@ -96,9 +99,12 @@ def main():
     ap.add_argument("--llm-models", default="gemma4:cloud", help="comma list; one llm-extract column per model")
     ap.add_argument("--llm-turns", default="12", help="user turns the extractor was called at (must match the prepared prompts)")
     ap.add_argument("--tag", default="track1")
+    ap.add_argument("--idf-freq-file", help="extra keyphrase-idf column with this external zipf10 table (e.g. research/wordfreq/...)")
     a = ap.parse_args()
     only = set(json.load(open(a.sessions))["sessions"]) if a.sessions else None
-    taggers = {"keyphrase-only (af1bbbe baseline)": {"kind": "keyphrase-only"}, "keyphrase-idf (track 1)": {"kind": "keyphrase-idf"}}
+    taggers = {"keyphrase-only (af1bbbe baseline)": {"kind": "keyphrase-only"}, "keyphrase-idf (bundled CC0 table)": {"kind": "keyphrase-idf"}}
+    if a.idf_freq_file:
+        taggers["keyphrase-idf (freqFile %s)" % os.path.basename(a.idf_freq_file)] = {"kind": "keyphrase-idf", "freqFile": os.path.abspath(a.idf_freq_file)}
     if a.responses:
         turns = [int(x) for x in a.llm_turns.split(",")]
         for m in a.llm_models.split(","):
@@ -130,7 +136,7 @@ def main():
                                        "category": sc["rescore_category"],
                                        "ledger_hits": [v["label"] for v in ledger.values() if rs.level(pid, v["label"]) in ("exact", "close")][:5],
                                        "x_ids": sorted(k for k in ledger if k.startswith("x:")),
-                                       "calls": tg.get("calls"), "labels_from_user_text": prov}
+                                       "calls": tg.get("calls"), "freq": tg.get("freq"), "labels_from_user_text": prov}
             if a.responses:
                 for m in a.llm_models.split(","):
                     labels = direct.get((m, d + "/" + r["run_id"]), [])[:3]
