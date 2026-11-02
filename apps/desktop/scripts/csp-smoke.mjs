@@ -53,6 +53,7 @@ try {
     if (url === `${OLLAMA}/api/chat`) return json({ message: { content: "FAKE-OLLAMA-REPLY what do you like about that?" } });
     if (/api\.openai\.com|openrouter\.ai|:1234\//.test(url)) return json({ choices: [{ message: { content: "fake" } }] });
     if (url === "https://ollama.com/api/chat") return json({ message: { content: "fake" } });
+    if (url.startsWith("https://api.strangeriver.org/")) return json({ choices: [{ message: { content: "fake" } }] });
     if (/api\.anthropic\.com/.test(url)) return json({ content: [{ type: "text", text: "fake" }] });
     return route.abort(); // never touch the real network
   });
@@ -76,7 +77,7 @@ try {
   if (detected !== 1) failures.push(`Ollama /api/tags fetch: ${detected}`);
 
   // 2. hosted APIs allowed by connect-src
-  for (const u of ["http://192.168.0.114:1234/v1/chat/completions", "https://api.openai.com/v1/chat/completions", "https://api.anthropic.com/v1/messages", "https://openrouter.ai/api/v1/chat/completions", "https://ollama.com/api/chat"]) {
+  for (const u of ["http://192.168.0.114:1234/v1/chat/completions", "https://api.openai.com/v1/chat/completions", "https://api.anthropic.com/v1/messages", "https://openrouter.ai/api/v1/chat/completions", "https://ollama.com/api/chat", "https://api.strangeriver.org/v1/chat/completions", "https://api.strangeriver.org/v1/sessions"]) {
     const r = await page.evaluate(async (u) => { try { return (await fetch(u, { method: "POST", headers: { "content-type": "application/json", "x-test": "1" }, body: "{}" })).status; } catch (e) { return String(e); } }, u);
     if (r !== 200) failures.push(`${u}: ${r}`);
   }
@@ -98,4 +99,4 @@ if (failures.length) {
   console.error("csp-smoke FAILED:\n  " + failures.join("\n  "));
   process.exit(1);
 }
-console.log("csp-smoke OK: LAN Ollama + LM Studio :1234 + OpenAI/Anthropic/OpenRouter/ollama.com allowed, other origins blocked");
+console.log("csp-smoke OK: LAN Ollama + LM Studio :1234 + OpenAI/Anthropic/OpenRouter/ollama.com/api.strangeriver.org allowed, other origins blocked");

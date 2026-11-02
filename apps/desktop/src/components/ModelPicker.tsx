@@ -4,8 +4,10 @@ import { createPortal } from "react-dom";
 import { bridge, type AuthEvent, type AuthPrompt, type Info, type KeyProvider, type ProviderId, type ProviderStatus } from "../bridge";
 import { cn } from "../lib";
 
-const SHORT: Record<ProviderId, string> = { mock: "Mock", ollama: "Ollama", "ollama-cloud": "Ollama Cloud", "openai-compatible": "OpenAI-compatible", openai: "ChatGPT", "claude-code": "Claude Code", anthropic: "Claude" };
-const isKeyProvider = (id: ProviderId): id is KeyProvider => id === "openai" || id === "anthropic" || id === "openai-compatible" || id === "ollama-cloud";
+const SHORT: Record<ProviderId, string> = { mock: "Mock", ollama: "Ollama", "ollama-cloud": "Ollama Cloud", "openai-compatible": "OpenAI-compatible", openai: "ChatGPT", "claude-code": "Claude Code", anthropic: "Claude", "spider-cloud": "Spider Cloud" };
+const isKeyProvider = (id: ProviderId) => id === "openai" || id === "anthropic" || id === "openai-compatible" || id === "ollama-cloud" || id === "spider-cloud";
+/** credential id for a provider row (Spider Cloud's device token lives at credentials/spider) */
+const keyId = (id: ProviderId): KeyProvider => (id === "spider-cloud" ? "spider" : (id as KeyProvider));
 
 export function pickerLabel(info: Info | null) {
   if (!info) return "…";
@@ -21,7 +23,7 @@ export function ModelPicker({ info, onChanged, openRef }: { info: Info | null; o
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [keyFor, setKeyFor] = useState<KeyProvider | null>(null);
-  const [urlFor, setUrlFor] = useState<{ provider: "ollama" | "openai-compatible"; url: string } | null>(null);
+  const [urlFor, setUrlFor] = useState<{ provider: "ollama" | "openai-compatible" | "spider-cloud"; url: string } | null>(null);
   const [auth, setAuth] = useState<{ provider: string; events: AuthEvent[]; prompt: AuthPrompt | null } | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const pop = useRef<HTMLDivElement>(null);
@@ -95,13 +97,13 @@ export function ModelPicker({ info, onChanged, openRef }: { info: Info | null; o
               <div className="flex items-center gap-2">
                 <span className={cn("size-1.5 shrink-0 rounded-full", p.available && p.signedIn ? "bg-[var(--signal)]" : p.available ? "bg-amber-400/80" : "bg-muted-foreground/40")} />
                 <span className="flex-1 truncate text-sm text-foreground">{p.label}</span>
-                {p.endpoint !== undefined && bridge().providers.setEndpoint && (p.id === "ollama" || p.id === "openai-compatible") && (
-                  <button onClick={() => setUrlFor({ provider: p.id as "ollama" | "openai-compatible", url: p.endpoint ?? "" })} className="eeg-tap-chip flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-accent hover:text-foreground">
+                {p.endpoint !== undefined && bridge().providers.setEndpoint && (p.id === "ollama" || p.id === "openai-compatible" || p.id === "spider-cloud") && (
+                  <button onClick={() => setUrlFor({ provider: p.id as "ollama" | "openai-compatible" | "spider-cloud", url: p.endpoint ?? "" })} className="eeg-tap-chip flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-accent hover:text-foreground">
                     <LinkIcon className="size-3" /> url
                   </button>
                 )}
                 {isKeyProvider(p.id) && p.signedIn && p.authSource && (
-                  <button onClick={() => void logout(p.id as KeyProvider)} className="eeg-tap-chip flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-accent hover:text-foreground">
+                  <button onClick={() => void logout(keyId(p.id))} className="eeg-tap-chip flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-accent hover:text-foreground">
                     <LogOutIcon className="size-3" /> {p.auth.includes("oauth") ? "sign out" : "forget key"}
                   </button>
                 )}
@@ -110,8 +112,8 @@ export function ModelPicker({ info, onChanged, openRef }: { info: Info | null; o
                     <LogInIcon className="size-3" /> sign in
                   </button>
                 )}
-                {isKeyProvider(p.id) && !p.authSource && p.auth.includes("api_key") && (p.available || p.id !== "ollama-cloud") && (
-                  <button onClick={() => setKeyFor(p.id as KeyProvider)} className="eeg-tap-chip flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-accent hover:text-foreground">
+                {isKeyProvider(p.id) && !p.authSource && p.auth.includes("api_key") && (p.available || (p.id !== "ollama-cloud" && p.id !== "spider-cloud")) && (
+                  <button onClick={() => setKeyFor(keyId(p.id))} className="eeg-tap-chip flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-accent hover:text-foreground">
                     <KeyRoundIcon className="size-3" /> key
                   </button>
                 )}
@@ -178,7 +180,7 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
   );
 }
 
-function EndpointDialog({ state, onClose, onSaved }: { state: { provider: "ollama" | "openai-compatible"; url: string }; onClose: () => void; onSaved: () => void }) {
+function EndpointDialog({ state, onClose, onSaved }: { state: { provider: "ollama" | "openai-compatible" | "spider-cloud"; url: string }; onClose: () => void; onSaved: () => void }) {
   const [url, setUrl] = useState(state.url);
   const [err, setErr] = useState<string | null>(null);
   const save = async () => {
@@ -190,14 +192,17 @@ function EndpointDialog({ state, onClose, onSaved }: { state: { provider: "ollam
     }
   };
   const ollama = state.provider === "ollama";
+  const spider = state.provider === "spider-cloud";
   return (
-    <Modal title={ollama ? "Ollama server URL" : "OpenAI-compatible server URL"} onClose={onClose}>
+    <Modal title={ollama ? "Ollama server URL" : spider ? "Spider Cloud URL (advanced)" : "OpenAI-compatible server URL"} onClose={onClose}>
       <p className="mb-2 text-xs text-muted-foreground">
-        {ollama
+        {spider
+          ? "Worker origin, default https://api.strangeriver.org. Leave empty for the default."
+          : ollama
           ? "Base URL of Ollama, e.g. http://192.168.1.20:11434 (your Mac's LAN IP when on a phone). Run Ollama with OLLAMA_HOST=0.0.0.0 and OLLAMA_ORIGINS allowing this app's origin."
           : "Base URL ending in /v1, e.g. http://192.168.1.20:1234/v1 (LM Studio). The server must send CORS headers."}
       </p>
-      <input autoFocus inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void save()} placeholder={ollama ? "http://192.168.1.20:11434" : "http://192.168.1.20:1234/v1"} className="w-full rounded-md border border-border bg-background px-3 py-2 text-[16px]" />
+      <input autoFocus inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void save()} placeholder={ollama ? "http://192.168.1.20:11434" : spider ? "https://api.strangeriver.org" : "http://192.168.1.20:1234/v1"} className="w-full rounded-md border border-border bg-background px-3 py-2 text-[16px]" />
       {err && <div className="mt-2 text-[11px] text-red-300">{err}</div>}
       <div className="mt-3 flex justify-end gap-2">
         <button onClick={onClose} className="eeg-tap rounded-md px-3 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent">Cancel</button>
@@ -207,7 +212,7 @@ function EndpointDialog({ state, onClose, onSaved }: { state: { provider: "ollam
   );
 }
 
-const KEY_TITLE: Record<KeyProvider, string> = { openai: "OpenAI API key", anthropic: "Anthropic API key", "openai-compatible": "Server API key (optional)", "ollama-cloud": "Ollama API key" };
+const KEY_TITLE: Record<KeyProvider, string> = { openai: "OpenAI API key", anthropic: "Anthropic API key", "openai-compatible": "Server API key (optional)", "ollama-cloud": "Ollama API key", spider: "Spider Cloud device token (bhd_…)" };
 function ApiKeyDialog({ provider, onClose, onSaved }: { provider: KeyProvider; onClose: () => void; onSaved: () => void }) {
   const [key, setKey] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -221,8 +226,8 @@ function ApiKeyDialog({ provider, onClose, onSaved }: { provider: KeyProvider; o
   };
   return (
     <Modal title={KEY_TITLE[provider]} onClose={onClose}>
-      <p className="mb-2 text-xs text-muted-foreground">{bridge().credentialNote ?? "Stored only on this device."} {provider === "ollama-cloud" ? "Requests run on Ollama's servers under that account's plan limits." : "Usage is billed to that API account."}</p>
-      <input autoFocus type="password" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void save()} placeholder={provider === "anthropic" ? "sk-ant-..." : provider === "ollama-cloud" ? "Ollama API key" : "sk-..."} className="w-full rounded-md border border-border bg-background px-3 py-2 text-[16px]" />
+      <p className="mb-2 text-xs text-muted-foreground">{bridge().credentialNote ?? "Stored only on this device."} {provider === "ollama-cloud" ? "Requests run on Ollama's servers under that account's plan limits." : provider === "spider" ? "Set it once; it's used for chat, the interest extractor and log upload. Works after Manny's deploy." : "Usage is billed to that API account."}</p>
+      <input autoFocus type="password" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void save()} placeholder={provider === "anthropic" ? "sk-ant-..." : provider === "ollama-cloud" ? "Ollama API key" : provider === "spider" ? "bhd_..." : "sk-..."} className="w-full rounded-md border border-border bg-background px-3 py-2 text-[16px]" />
       {err && <div className="mt-2 text-[11px] text-red-300">{err}</div>}
       <div className="mt-3 flex justify-end gap-2">
         <button onClick={onClose} className="eeg-tap rounded-md px-3 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-accent">Cancel</button>

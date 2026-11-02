@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
   BRAND, HarnessHost, ProviderHub, SessionStore, StudyController, backendSpecFromEnv, createBackend, credentialSecretStore, zipFiles,
-  APP_EXTRACTOR_MAX_CALLS, DEFAULT_EXTRACTOR_PROMPT_VERSION, appTaggerSpec, kvCallCounter, normalizeOllamaBaseUrl, DEFAULT_OLLAMA_URL, parsePromptVersion, readApiKey,
+  APP_EXTRACTOR_MAX_CALLS, DEFAULT_EXTRACTOR_PROMPT_VERSION, appTaggerSpec, kvCallCounter, normalizeOllamaBaseUrl, SPIDER_CREDENTIAL_ID, DEFAULT_OLLAMA_URL, parsePromptVersion, readApiKey,
 } from "@brianharness/core";
 import { runDemo } from "./demo.mjs";
 
@@ -75,6 +75,8 @@ async function chooseTagger() {
     model: s.model,
     ollamaUrl: normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL),
     ollamaCloudKey: cloud ? (process.env.OLLAMA_API_KEY || (await readApiKey(hub.credentials, "ollama-cloud").catch(() => null))) : null,
+    spiderToken: s.provider === "spider-cloud" ? (process.env.BH_SPIDER_TOKEN || (await readApiKey(hub.credentials, SPIDER_CREDENTIAL_ID).catch(() => null))) : null,
+    spiderUrl: s.spiderCloudUrl,
     promptVersion: promptVersionSetting(),
     counter: extractorCalls,
     cache: { get: (k) => extractorCache.get(k), set: (k, v) => void extractorCache.set(k, v) },
@@ -173,10 +175,10 @@ ipcMain.handle("providers:apiKey", async (_e, { provider, key }) => {
   return { ok: true };
 });
 ipcMain.handle("providers:endpoint", async (_e, { provider, url }) => {
-  if (provider !== "ollama") throw new Error("only the Ollama URL is configurable on desktop");
+  if (provider !== "ollama" && provider !== "spider-cloud") throw new Error("only the Ollama and Spider Cloud URLs are configurable on desktop");
   const u = String(url ?? "").trim();
   if (u && !/^https?:\/\//.test(u)) throw new Error("URL must start with http:// or https://");
-  hub.saveSettings({ ollamaUrl: u || undefined });
+  hub.saveSettings(provider === "ollama" ? { ollamaUrl: u || undefined } : { spiderCloudUrl: u || undefined });
   return { ok: true };
 });
 ipcMain.handle("providers:extractorPrompt", async (_e, { version }) => {

@@ -19,7 +19,7 @@ test("ProviderHub: detects providers, stores API keys 0600 in the data dir, pers
     const hub = new ProviderHub({ dataDir: dir, fetchImpl: fakeFetch, claudeBin: join(dir, "no-claude") });
     let st = await hub.status();
     const by = (id: string) => st.find((p) => p.id === id)!;
-    assert.deepEqual(st.map((p) => p.id), ["mock", "ollama", "ollama-cloud", "openai", "claude-code", "anthropic"]);
+    assert.deepEqual(st.map((p) => p.id), ["mock", "ollama", "spider-cloud", "ollama-cloud", "openai", "claude-code", "anthropic"]);
     assert.equal(by("ollama").available, true);
     assert.deepEqual(by("ollama").models.map((m) => [m.id, m.paid]), [["gemma3:4b", false], ["gemma4:cloud", true]]);
     assert.equal(by("claude-code").available, false);

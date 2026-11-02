@@ -40,6 +40,10 @@ import {
   appTaggerSpec,
   kvCallCounter,
   parsePromptVersion,
+  SPIDER_CLOUD_DEFAULT_MODEL,
+  SPIDER_CREDENTIAL_ID,
+  listSpiderCloudModels,
+  normalizeSpiderUrl,
 } from "@brianharness/core/browser";
 import { saveViaBHExport, shareViaBHExport } from "./bh-export";
 import type { BHExportPlugin, EegBridge, ExportResult, Info, KeyProvider, ProviderId, ProviderStatus } from "./types";
@@ -114,8 +118,11 @@ type WebSettings = {
   provider: ProviderKind; model?: string; ollamaUrl?: string; openaiCompatibleUrl?: string;
   /** llm-extract prompt rollback flag (absent = DEFAULT_EXTRACTOR_PROMPT_VERSION, v2) */
   extractorPromptVersion?: "v1" | "v2";
+  /** Spider Cloud Worker origin (advanced settings; default https://api.strangeriver.org) */
+  spiderCloudUrl?: string;
 };
 const SETTINGS_KEY = "settings";
+export const SPIDER_NO_CORS = "Spider Cloud needs the native app: the Worker sends no CORS headers for browsers.";
 
 function guessPlatform() {
   const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
@@ -187,6 +194,10 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       if (!nativeFetch) throw new Error(OLLAMA_CLOUD_NO_CORS);
       return createBrowserBackend({ provider: p, model: s.model ?? OLLAMA_CLOUD_DEFAULT_MODEL, baseUrl: opts.ollamaCloudUrl, apiKey: await readApiKey(credentials, p), fetchImpl, streaming });
     }
+    if (p === "spider-cloud") {
+      if (!nativeFetch) throw new Error(SPIDER_NO_CORS);
+      return createBrowserBackend({ provider: p, model: s.model ?? SPIDER_CLOUD_DEFAULT_MODEL, baseUrl: normalizeSpiderUrl(s.spiderCloudUrl), apiKey: await readApiKey(credentials, SPIDER_CREDENTIAL_ID), fetchImpl, streaming });
+    }
     if (p === "openai-compatible") return createBrowserBackend({ provider: p, baseUrl: s.openaiCompatibleUrl, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl, streaming });
     if (p === "openai" || p === "anthropic") return createBrowserBackend({ provider: p, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl, streaming });
     return createBrowserBackend({ provider: "mock", seed: 42, mockTokenDelayMs: opts.mockTokenDelayMs });
@@ -243,6 +254,9 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       ollamaUrl: normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL),
       ollamaCloudKey,
       canReachOllamaCloud: nativeFetch,
+      spiderToken: s.provider === "spider-cloud" ? await readApiKey(credentials, SPIDER_CREDENTIAL_ID).catch(() => null) : null,
+      spiderUrl: s.spiderCloudUrl,
+      canReachSpider: nativeFetch,
       ollamaCloudUrl: opts.ollamaCloudUrl,
       promptVersion: parsePromptVersion(s.extractorPromptVersion),
       counter: extractorCalls,
@@ -263,13 +277,16 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   const status = async (): Promise<ProviderStatus[]> => {
     const s = await loadSettings();
     const ollamaUrl = normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL);
-    const [ollama, oaKey, anKey, ocKey, cloudKey] = await Promise.all([
+    const spiderUrl = normalizeSpiderUrl(s.spiderCloudUrl);
+    const [ollama, oaKey, anKey, ocKey, cloudKey, spiderKey] = await Promise.all([
       detectOllama(ollamaUrl, 1500, fetchImpl),
       readApiKey(credentials, "openai"),
       readApiKey(credentials, "anthropic"),
       readApiKey(credentials, "openai-compatible"),
       readApiKey(credentials, "ollama-cloud"),
+      readApiKey(credentials, SPIDER_CREDENTIAL_ID),
     ]);
+    const spider = nativeFetch && spiderKey ? await listSpiderCloudModels(spiderUrl, spiderKey, fetchImpl) : null;
     const cloud = nativeFetch && cloudKey ? await detectOllamaCloud(cloudKey, fetchImpl, 4000, opts.ollamaCloudUrl) : null;
     const cloudModels = cloud?.models.length ? cloud.models.map((m) => m.name) : [OLLAMA_CLOUD_DEFAULT_MODEL];
     const isLoopback = /\/\/(localhost|127\.)/.test(ollamaUrl);
@@ -286,6 +303,23 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         detail: ollama.running
           ? `${ollama.models.length} model(s) at ${ollamaUrl}`
           : `Not reachable at ${ollamaUrl}.${isLoopback ? " On a phone, set your Mac's LAN IP (e.g. http://192.168.1.20:11434)." : ""} The Mac needs OLLAMA_HOST=0.0.0.0 and OLLAMA_ORIGINS set to this page's origin (CORS).`,
+      },
+      {
+        id: "spider-cloud",
+        label: "Spider Cloud",
+        available: nativeFetch,
+        signedIn: nativeFetch && !!spiderKey,
+        auth: ["api_key"],
+        authSource: nativeFetch && spiderKey ? "device token (this device)" : undefined,
+        endpoint: spiderUrl,
+        models: nativeFetch ? (spider?.models ?? [SPIDER_CLOUD_DEFAULT_MODEL]).map((m) => ({ id: m, label: `${m} · Spider Cloud`, paid: false })) : [],
+        detail: !nativeFetch
+          ? SPIDER_NO_CORS
+          : !spiderKey
+            ? "Paste your Spider Cloud device token (bhd_…) once. Works after Manny's Worker deploy."
+            : spider?.live
+              ? `${spider.models.length} model(s) at ${spiderUrl}`
+              : `Couldn't list models (${spider?.error ?? "?"}); offering the default list.`,
       },
       {
         id: "ollama-cloud",
@@ -414,7 +448,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       async setEndpoint(provider, url) {
         const u = url.trim();
         if (u && !/^https?:\/\//.test(u)) throw new Error("URL must start with http:// or https://");
-        await saveSettings(provider === "ollama" ? { ollamaUrl: u || undefined } : { openaiCompatibleUrl: u || undefined });
+        await saveSettings(provider === "ollama" ? { ollamaUrl: u || undefined } : provider === "spider-cloud" ? { spiderCloudUrl: u || undefined } : { openaiCompatibleUrl: u || undefined });
         return { ok: true };
       },
       async setExtractorPrompt(version) {

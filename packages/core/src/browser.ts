@@ -33,3 +33,4 @@ export * from "./providers/spec.js";
 export * from "./providers/anthropic-fetch.js";
 export * from "./providers/response-body.js";
 export * from "./providers/browser-factory.js";
+export * from "./providers/spider-cloud.js";

@@ -7,6 +7,8 @@
  *   openai-compatible  any /v1/chat/completions server (LM Studio, llama.cpp, OpenRouter, ...)
  *   openai             api.openai.com with the user's API key (CORS-enabled)
  *   anthropic          api.anthropic.com with the user's API key + direct-browser-access header
+ *   spider-cloud       Manny's Worker (https://api.strangeriver.org, OpenAI-compatible) + device token;
+ *                      native fetch only (no CORS for browsers)
  * Every network path takes `spec.fetchImpl` (iOS: BHStream / CapacitorHttp fetch); default is global
  * fetch. `spec.streaming` says whether that fetch streams bodies: false keeps every backend on its
  * buffered stream:false path even when the caller asks for tokens.
@@ -17,8 +19,9 @@ import { MockBackend, OpenAICompatibleBackend, type ModelBackend } from "../back
 import { AnthropicFetchBackend } from "./anthropic-fetch.js";
 import { DEFAULT_OLLAMA_URL, OLLAMA_CLOUD_DEFAULT_MODEL, OLLAMA_CLOUD_URL, OllamaBackend } from "./ollama.js";
 import type { BackendSpec, ProviderKind } from "./spec.js";
+import { SpiderCloudBackend } from "./spider-cloud.js";
 
-export const BROWSER_PROVIDER_KINDS: ProviderKind[] = ["mock", "ollama", "ollama-cloud", "openai-compatible", "openai", "anthropic"];
+export const BROWSER_PROVIDER_KINDS: ProviderKind[] = ["mock", "ollama", "ollama-cloud", "openai-compatible", "openai", "anthropic", "spider-cloud"];
 export const BROWSER_DEFAULT_MODELS: Partial<Record<ProviderKind, string>> = { openai: "gpt-4o-mini", anthropic: "claude-sonnet-4-5" };
 
 export function createBrowserBackend(spec: BackendSpec & { fetchImpl?: typeof fetch; streaming?: boolean; mockTokenDelayMs?: number }): ModelBackend {
@@ -38,6 +41,8 @@ export function createBrowserBackend(spec: BackendSpec & { fetchImpl?: typeof fe
     case "anthropic":
       if (!spec.apiKey) throw new Error("add an Anthropic API key first (Claude sign-in needs the native app)");
       return new AnthropicFetchBackend({ apiKey: spec.apiKey, model: spec.model ?? BROWSER_DEFAULT_MODELS.anthropic!, baseUrl: spec.baseUrl, temperature: spec.temperature, maxTokens: spec.maxTokens, fetchImpl: spec.fetchImpl, streaming: spec.streaming });
+    case "spider-cloud":
+      return new SpiderCloudBackend({ token: spec.apiKey, baseUrl: spec.baseUrl, model: spec.model, temperature: spec.temperature, seed: spec.seed, maxTokens: spec.maxTokens, fetchImpl: spec.fetchImpl, streaming: spec.streaming });
     default:
       throw new Error(`provider "${spec.provider}" is not available in the browser build; have ${BROWSER_PROVIDER_KINDS.join(", ")}`);
   }

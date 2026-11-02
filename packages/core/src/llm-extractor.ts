@@ -32,8 +32,14 @@ export interface LlmExtractorOptions {
   model?: string;
   /** default https://ollama.com */
   baseUrl?: string;
-  /** Bearer key (the sidecar fills it from OLLAMA_API_KEY) */
+  /** Bearer key (the sidecar fills it from OLLAMA_API_KEY; Spider Cloud: the bhd_ device token) */
   apiKey?: string;
+  /**
+   * wire format. "ollama" (default): POST <base>/api/chat. "openai": POST <base>/v1/chat/completions
+   * (Spider Cloud Worker), same prompt / parsing / cap; its cache keys get an "oa:" prefix so Ollama-path
+   * keys (and every cached replay) are unchanged.
+   */
+  api?: "ollama" | "openai";
   /** call after every N-th user turn (default 6) */
   everyN?: number;
   /** explicit 1-based user turns to call at (overrides everyN) */
@@ -165,14 +171,27 @@ export function requestBody(p: ExtractorPrompt, numPredict = 768): Record<string
   };
 }
 
+/** the same request on the OpenAI chat-completions wire (Spider Cloud Worker maps response_format / max_tokens) */
+export function openaiRequestBody(p: ExtractorPrompt, numPredict = 768): Record<string, unknown> {
+  const gptOss = /^gpt-oss/.test(p.model);
+  return {
+    model: p.model, stream: false, messages: p.messages,
+    ...(gptOss ? {} : { response_format: { type: "json_object" } }),
+    temperature: 0, seed: 1, max_tokens: Math.max(gptOss ? 512 : 64, numPredict),
+  };
+}
+/** cache key for a prompt on a given wire format (Ollama: promptKey unchanged) */
+export const extractorCacheKey = (p: ExtractorPrompt, api: "ollama" | "openai" = "ollama") => (api === "openai" ? `oa:${promptKey(p)}` : promptKey(p));
+
 export interface ExtractedInterest { label: string; confidence: number; turns: number[] }
 
 /** Parse an Ollama /api/chat response body (string) into interests; tolerant of prose around the JSON. */
 export function parseExtractorResponse(raw: string): ExtractedInterest[] {
   let content = raw;
   try {
-    const body = JSON.parse(raw) as { message?: { content?: string } };
+    const body = JSON.parse(raw) as { message?: { content?: string }; choices?: Array<{ message?: { content?: string } }> };
     if (body && typeof body === "object" && body.message) content = body.message.content ?? "";
+    else if (body && typeof body === "object" && Array.isArray(body.choices)) content = body.choices[0]?.message?.content ?? "";
   } catch { /* raw content */ }
   const tryParse = (s: string) => { try { return JSON.parse(s) as { interests?: unknown }; } catch { return null; } };
   let j = tryParse(content);
@@ -287,12 +306,15 @@ export class LlmInterestExtractor implements TopicTagger {
 
   private async extract(signal?: AbortSignal): Promise<ExtractedInterest[]> {
     const p = this.promptFor(this.user);
-    const key = promptKey(p);
+    const api = this.o.api ?? "ollama";
+    const key = extractorCacheKey(p, api);
     this.outcome.attempted++;
     const hit = await this.o.cache?.get(key);
     if (hit !== undefined) { this.calls.cached++; this.outcome.ok++; return parseExtractorResponse(hit); }
     if (this.o.offline) { this.calls.refused++; this.outcome.offline++; return []; }
-    const url = `${normalizeOllamaBaseUrl(this.o.baseUrl ?? "https://ollama.com")}/api/chat`;
+    const url = api === "openai"
+      ? `${(this.o.baseUrl ?? "").replace(/\/+$/, "").replace(/\/v1$/, "")}/v1/chat/completions`
+      : `${normalizeOllamaBaseUrl(this.o.baseUrl ?? "https://ollama.com")}/api/chat`;
     const local = isLocalOllamaUrl(url);
     if (local && !this.o.allowLocalModels && !isCloudModelTag(this.model)) {
       this.calls.refused++;
@@ -315,8 +337,8 @@ export class LlmInterestExtractor implements TopicTagger {
         this.calls.network++;
         const res = await f(url, {
           method: "POST",
-          headers: { "content-type": "application/json", ...(this.o.apiKey && !local ? { authorization: `Bearer ${this.o.apiKey}` } : {}) },
-          body: JSON.stringify(requestBody(p, this.o.numPredict)),
+          headers: { "content-type": "application/json", ...(this.o.apiKey && (!local || api === "openai") ? { authorization: `Bearer ${this.o.apiKey}` } : {}) },
+          body: JSON.stringify(api === "openai" ? openaiRequestBody(p, this.o.numPredict) : requestBody(p, this.o.numPredict)),
           signal: signal ?? timeoutSignal(this.o.timeoutMs ?? 90_000),
         });
         status = res.status;
@@ -327,8 +349,14 @@ export class LlmInterestExtractor implements TopicTagger {
         this.outcome.ok++;
         return parseExtractorResponse(raw);
       } catch (e) {
+        const se = e as { status?: number; capped?: boolean };
+        if (!status && typeof se?.status === "number") {
+          status = se.status; // spiderFetch throws a non-2xx Worker response as SpiderCloudError (no Response seen)
+          this.calls.http[String(status)] = (this.calls.http[String(status)] ?? 0) + 1;
+        }
         if (!status) this.calls.http.error = (this.calls.http.error ?? 0) + 1;
         this.calls.lastError = e instanceof Error ? e.message : String(e);
+        if (se?.capped) { this.calls.failed++; this.outcome.capped++; return []; } // Worker daily cap
         if (status < 500 || attempt >= retries) { this.calls.failed++; this.outcome.failed++; return []; }
         this.calls.retried++;
         await new Promise((r) => setTimeout(r, (this.o.retryDelayMs ?? 500) * 2 ** attempt));

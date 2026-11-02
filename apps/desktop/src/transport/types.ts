@@ -58,7 +58,7 @@ export type Info = {
   /** topic tagger the NEXT session uses, e.g. "llm-extract gemma4:cloud via Ollama Cloud (prompt v2)" */
   tagger?: string;
 };
-export type ProviderId = "mock" | "ollama" | "ollama-cloud" | "openai-compatible" | "openai" | "claude-code" | "anthropic";
+export type ProviderId = "mock" | "ollama" | "ollama-cloud" | "openai-compatible" | "openai" | "claude-code" | "anthropic" | "spider-cloud";
 export type ProviderStatus = {
   id: ProviderId;
   label: string;
@@ -78,13 +78,13 @@ export type AuthEvent =
   | { type: "device_code"; userCode: string; verificationUri: string }
   | { type: "progress"; message: string };
 export type AuthPrompt = { id: string; type: "text" | "secret" | "select" | "manual_code"; message: string; placeholder?: string; options?: { id: string; label: string; description?: string }[] };
-export type KeyProvider = "openai" | "anthropic" | "openai-compatible" | "ollama-cloud";
+export type KeyProvider = "openai" | "anthropic" | "openai-compatible" | "ollama-cloud" | "spider";
 export interface ProvidersBridge {
   status(): Promise<{ providers: ProviderStatus[]; current: Info }>;
   select(provider: ProviderId, model?: string | null): Promise<Info>;
   setApiKey(provider: KeyProvider, key: string): Promise<{ ok: boolean }>;
   /** optional: set a provider's server URL (in-process transport; Electron stores ollamaUrl) */
-  setEndpoint?(provider: "ollama" | "openai-compatible", url: string): Promise<{ ok: boolean }>;
+  setEndpoint?(provider: "ollama" | "openai-compatible" | "spider-cloud", url: string): Promise<{ ok: boolean }>;
   /** settings rollback flag for the llm-extract prompt ("v2" default, "v1" rollback); next session on */
   setExtractorPrompt?(version: "v1" | "v2"): Promise<Info>;
   logout(provider: KeyProvider): Promise<{ ok: boolean }>;

@@ -8,6 +8,7 @@ import { ClaudeCodeBackend } from "./claude-code.js";
 import { DEFAULT_OLLAMA_URL, OLLAMA_CLOUD_DEFAULT_MODEL, OLLAMA_CLOUD_URL, OllamaBackend } from "./ollama.js";
 import { DEFAULT_PI_MODELS, PiAiBackend, createPiModels } from "./pi-ai.js";
 import { PROVIDER_KINDS, type BackendSpec } from "./spec.js";
+import { SpiderCloudBackend } from "./spider-cloud.js";
 export * from "./spec.js";
 
 export async function createBackend(spec: BackendSpec): Promise<ModelBackend> {
@@ -25,6 +26,8 @@ export async function createBackend(spec: BackendSpec): Promise<ModelBackend> {
       const models = spec.piModels ?? (await createPiModels(spec.credentials));
       return new PiAiBackend({ models, provider: spec.provider, model: spec.model ?? DEFAULT_PI_MODELS[spec.provider], temperature: spec.temperature, maxTokens: spec.maxTokens });
     }
+    case "spider-cloud":
+      return new SpiderCloudBackend({ token: spec.apiKey, baseUrl: spec.baseUrl, model: spec.model, temperature: spec.temperature, seed: spec.seed, maxTokens: spec.maxTokens });
     case "claude-code":
       return new ClaudeCodeBackend({ model: spec.model ?? "sonnet", bin: spec.claudeBin });
     default:

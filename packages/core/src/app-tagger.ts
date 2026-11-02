@@ -15,6 +15,7 @@ import type { TopicTaggerSpec } from "./tagger.js";
 import {
   DEFAULT_EXTRACTOR_PROMPT_VERSION, isCloudModelTag, type ExtractorCache, type ExtractorPromptVersion, type LlmExtractorOptions,
 } from "./llm-extractor.js";
+import { normalizeSpiderUrl, spiderFetch } from "./providers/spider-cloud.js";
 
 /** the extractor model the Researcher scored */
 export const APP_EXTRACTOR_MODEL = "gemma4:cloud";
@@ -64,6 +65,11 @@ export interface AppTaggerInput {
   counter?: CallCounter;
   cache?: ExtractorCache;
   fetchImpl?: typeof fetch;
+  /** Spider Cloud device token (bhd_...) and Worker origin; the extractor then goes through the Worker */
+  spiderToken?: string | null;
+  spiderUrl?: string;
+  /** false in a plain browser: the Worker sends no CORS for the app (default true) */
+  canReachSpider?: boolean;
   /** extractor cadence (default 6 = every 6th user turn, as in the sim) */
   everyN?: number;
 }
@@ -88,6 +94,15 @@ export function appTaggerSpec(i: AppTaggerInput): AppTaggerChoice {
     ...(i.cache ? { cache: i.cache } : {}),
     ...(i.fetchImpl ? { fetchImpl: i.fetchImpl } : {}),
   };
+  if (i.provider === "spider-cloud") {
+    if (i.spiderToken && i.canReachSpider !== false) {
+      return {
+        spec: { kind: "llm-extract", ...common, api: "openai", baseUrl: normalizeSpiderUrl(i.spiderUrl), apiKey: i.spiderToken, fetchImpl: spiderFetch(i.fetchImpl) },
+        reason: `llm-extract ${APP_EXTRACTOR_MODEL} via Spider Cloud (prompt ${common.promptVersion})`,
+      };
+    }
+    return { spec: idf, fallback: "no_key", reason: i.spiderToken ? "Spider Cloud needs the native app (no CORS): keyphrase-idf" : "no Spider Cloud device token: keyphrase-idf" };
+  }
   if (CLOUD.includes(i.provider) && i.ollamaCloudKey && i.canReachOllamaCloud !== false) {
     return {
       spec: { kind: "llm-extract", ...common, provider: "ollama-cloud", apiKey: i.ollamaCloudKey, ...(i.ollamaCloudUrl ? { baseUrl: i.ollamaCloudUrl } : {}) },

@@ -20,6 +20,7 @@ import { createBackend, type ProviderKind } from "./factory.js";
 import { DEFAULT_OLLAMA_URL, OLLAMA_CLOUD_DEFAULT_MODEL, detectOllama, detectOllamaCloud } from "./ollama.js";
 import { readApiKey, type CredentialStoreLike } from "../platform/credentials.js";
 import { DEFAULT_PI_MODELS, createPiModels, type PiModels } from "./pi-ai.js";
+import { SPIDER_CLOUD_DEFAULT_MODEL, SPIDER_CREDENTIAL_ID, listSpiderCloudModels, normalizeSpiderUrl } from "./spider-cloud.js";
 
 export interface ProviderChoice {
   provider: ProviderKind;
@@ -29,8 +30,10 @@ export interface HubSettings extends ProviderChoice {
   ollamaUrl?: string;
   /** llm-extract prompt rollback flag (absent = DEFAULT_EXTRACTOR_PROMPT_VERSION, v2) */
   extractorPromptVersion?: "v1" | "v2";
+  /** Spider Cloud Worker origin (advanced; default SPIDER_CLOUD_URL) */
+  spiderCloudUrl?: string;
 }
-export type HubKeyProvider = "openai" | "anthropic" | "ollama-cloud";
+export type HubKeyProvider = "openai" | "anthropic" | "ollama-cloud" | "spider";
 export interface ModelOption {
   id: string;
   label: string;
@@ -96,12 +99,13 @@ export class ProviderHub {
 
   async status(): Promise<ProviderStatus[]> {
     const s = this.settings();
-    const [ollama, claude, openai, anthropic, ollamaCloud] = await Promise.all([
+    const [ollama, claude, openai, anthropic, ollamaCloud, spider] = await Promise.all([
       detectOllama(s.ollamaUrl ?? DEFAULT_OLLAMA_URL, 1200, this.cfg.fetchImpl),
       detectClaudeCode(this.cfg.claudeBin),
       this.piStatus("openai"),
       this.piStatus("anthropic"),
       this.ollamaCloudStatus(),
+      this.spiderStatus(),
     ]);
     return [
       { id: "mock", label: "Mock (offline)", available: true, signedIn: true, auth: ["none"], models: [{ id: "mock", label: "Template Director", paid: false }], detail: "No model, no network. Good for trying the Director." },
@@ -115,6 +119,7 @@ export class ProviderHub {
         models: ollama.models.map((m) => ({ id: m.name, label: `${m.name}${m.parameterSize ? ` · ${m.parameterSize}` : ""}${m.cloud ? " · cloud" : ""}`, paid: m.cloud })),
         detail: ollama.running ? `${ollama.models.length} model(s) at ${ollama.baseUrl}` : `Not running at ${ollama.baseUrl}. Start the Ollama app, then refresh.`,
       },
+      spider,
       ollamaCloud,
       openai,
       {
@@ -147,6 +152,28 @@ export class ProviderHub {
         : d?.running
           ? `${d.models.length} model(s) on ollama.com`
           : `Couldn't list models (${d?.error ?? "?"}); ${OLLAMA_CLOUD_DEFAULT_MODEL} is offered anyway.`,
+    };
+  }
+
+  private async spiderStatus(): Promise<ProviderStatus> {
+    const base = normalizeSpiderUrl(this.settings().spiderCloudUrl);
+    const token = await readApiKey(this.credentials as unknown as CredentialStoreLike, SPIDER_CREDENTIAL_ID);
+    const d = token ? await listSpiderCloudModels(base, token, this.cfg.fetchImpl) : null;
+    const names = d?.models ?? [SPIDER_CLOUD_DEFAULT_MODEL];
+    return {
+      id: "spider-cloud",
+      label: "Spider Cloud",
+      available: true,
+      signedIn: !!token,
+      auth: ["api_key"],
+      authSource: token ? "device token" : undefined,
+      endpoint: base,
+      models: names.map((m) => ({ id: m, label: `${m} · Spider Cloud`, paid: false })),
+      detail: !token
+        ? "Paste your Spider Cloud device token (bhd_…) once. Works after Manny's Worker deploy."
+        : d?.live
+          ? `${names.length} model(s) at ${base}`
+          : `Couldn't list models (${d?.error ?? "?"}); offering the default list.`,
     };
   }
 
@@ -186,7 +213,7 @@ export class ProviderHub {
     await this.credentials.modify(id, async () => ({ type: "api_key", key: k }) as never);
   }
   async logout(id: HubKeyProvider): Promise<void> {
-    if (id === "ollama-cloud") return void (await this.credentials.delete(id));
+    if (id === "ollama-cloud" || id === "spider") return void (await this.credentials.delete(id));
     const models = await this.piModels();
     await models.logout(id).catch(() => this.credentials.delete(id));
   }
@@ -210,6 +237,11 @@ export class ProviderHub {
       const apiKey = await readApiKey(this.credentials as unknown as CredentialStoreLike, "ollama-cloud");
       if (!apiKey) throw new Error("add an Ollama API key first (ollama.com -> Settings -> Keys)");
       return createBackend({ provider, model: model ?? OLLAMA_CLOUD_DEFAULT_MODEL, apiKey, baseUrl: this.cfg.ollamaCloudUrl, ...extra });
+    }
+    if (provider === "spider-cloud") {
+      const apiKey = await readApiKey(this.credentials as unknown as CredentialStoreLike, SPIDER_CREDENTIAL_ID);
+      if (!apiKey) throw new Error("add a Spider Cloud device token first (Settings -> Spider Cloud, bhd_...)");
+      return createBackend({ provider, model: model ?? SPIDER_CLOUD_DEFAULT_MODEL, apiKey, baseUrl: normalizeSpiderUrl(s.spiderCloudUrl), ...extra });
     }
     if (provider === "claude-code") return createBackend({ provider, model, claudeBin: this.cfg.claudeBin });
     return createBackend({ provider: "mock", seed: extra.seed });
