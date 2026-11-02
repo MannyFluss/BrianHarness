@@ -21,6 +21,7 @@ import {
   LocalStorageKV,
   MemoryKV,
   StudyController,
+  scheduleExportFile,
   createBrowserBackend,
   zipFiles,
   detectOllama,
@@ -215,6 +216,8 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
 
   let host: HarnessHost | null = null;
   const study = new StudyController(opts.secretKV ?? safeLocalKV("brianharness/"), settingsKV);
+  // launch: discard a schedule sealed under an older study protocol (practice build 1438); sessions + upload queue untouched
+  void study.ensureProtocol().then((r) => { if (r.reset) console.warn("[brianharness] study schedule from an older protocol discarded; Start study seals a new one"); }).catch(() => {});
   const getHost = async () => {
     if (host) return host;
     const { storage } = await ready;
@@ -426,6 +429,13 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       },
       hash: () => study.hash(),
       unseal: (confirm: string) => study.unseal(confirm),
+      /** dev/debug: save the unsealed schedule (exact Keychain string; sha256(file) = scheduleHash) */
+      async exportSchedule(confirm: string): Promise<ExportResult> {
+        const f = scheduleExportFile(await study.unseal(confirm));
+        if (opts.bhExport) return shareViaBHExport(opts.bhExport, [f]);
+        const ok = (opts.download ?? downloadZip)([f], `brianharness-schedule-${stamp()}.zip`);
+        return { ok, files: 1, via: ok ? "download" : "none" };
+      },
     },
     providers: {
       async status() {

@@ -43,7 +43,7 @@ export interface HarnessSessionOptions {
    */
   adaptation?: Adaptation;
   /** blinded study session: logged in session_start; plans / state notes are sealed in the log */
-  study?: { id: string; index: number; total: number; scheduleHash: string };
+  study?: { id: string; index: number; total: number; scheduleHash: string; protocol?: number; reissueOf?: string };
   /** the app wanted llm-extract but could not build one (no key / mock or local model): logged as the fallback reason */
   taggerFallback?: "no_key" | "mock_or_local";
   /** called once per session per reason when the extractor is unavailable (Electron / sidecar: stderr) */
@@ -155,7 +155,7 @@ export class HarnessSession {
     for (const s of this.sources) await s.start?.();
     this.checkExtractorWarning(); // started without an extractor (no key / mock or local model)
     const st = this.opts.study;
-    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash } } : {}) });
+    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash, ...(st.protocol !== undefined ? { protocol: st.protocol } : {}) }, ...(st.reissueOf ? { reissueOf: st.reissueOf } : {}) } : {}) });
     return this.directorTurn(opts);
   }
 
@@ -299,7 +299,7 @@ export class HarnessSession {
       t: nowIso(),
       turn: this.turn,
       text,
-      features,
+      features: this.loggedFeatures(features),
       engagement: score,
       baseline,
       mentionedTopics: mentioned,
@@ -312,6 +312,15 @@ export class HarnessSession {
     this.log({ type: "interest_update", t: nowIso(), turn: this.turn, topTopics: this.map.topTopics(5).map(([t, m]) => [t, m]), hypothesis, top1 });
     if (!this.baseline) this.opts.store?.saveMap(this.map);
     return { frame: this.frame, hypothesis };
+  }
+
+  /** an answered (1..5) session-scope rating was logged: one of the two study-validity conditions */
+  sessionRated = false;
+
+  /** user_turn features as logged: + the extractor's logging-only features (never in frame.features / engagement) */
+  private loggedFeatures(features: FeatureMap): FeatureMap {
+    const x = (this.tagger as TopicTagger & { logFeatures?: () => Record<string, number> }).logFeatures?.();
+    return x && Object.keys(x).length ? { ...features, ...x } : features;
   }
 
   async end(): Promise<void> {
@@ -329,6 +338,7 @@ export class HarnessSession {
       top3Ids: g.map((x) => x.topic),
       tagger: tg.kind,
       ...(tg.promptVersion ? { extractorPromptVersion: tg.promptVersion, model: tg.model } : {}),
+      ...(this.opts.study?.protocol !== undefined ? { protocol: this.opts.study.protocol } : {}),
       ...outcome,
     });
     this.log({ type: "session_end", t: nowIso(), turns: this.turn, ...outcome });
@@ -356,6 +366,7 @@ export class HarnessSession {
       if (typeof r.hooked === "string" && r.hooked.trim()) rec.hooked = r.hooked.trim().slice(0, 2000);
       if (this.opts.study) rec.blindGuess = r.blindGuess === "adaptive" || r.blindGuess === "baseline" || r.blindGuess === "no-idea" ? r.blindGuess : null;
     }
+    if (rec.scope === "session" && rec.value !== null) this.sessionRated = true;
     this.log(rec);
     return rec;
   }

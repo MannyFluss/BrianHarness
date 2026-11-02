@@ -49,6 +49,8 @@ const fileKV = {
   keys: async () => [],
 };
 const study = new StudyController(credentialSecretStore({ read: (id) => hub.credentials.read(id), modify: (id, fn) => hub.credentials.modify(id, fn) }), fileKV);
+// launch: discard a schedule sealed under an older study protocol (practice builds); session logs untouched
+study.ensureProtocol().then((r) => { if (r.reset) console.error("[brianharness] study schedule from an older protocol discarded; Start study seals a new one"); }).catch(() => {});
 // dev/debug only: hash and unseal (never in a packaged build unless BH_STUDY_DEBUG=1)
 const studyDebug = !app.isPackaged || process.env.BH_STUDY_DEBUG === "1";
 // Topic tagger, chosen per new session (core appTaggerSpec): llm-extract (prompt v2 by default, rank lead,

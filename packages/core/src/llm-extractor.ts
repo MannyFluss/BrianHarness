@@ -282,8 +282,25 @@ export class LlmInterestExtractor implements TopicTagger {
       const w = 0.7 * it.confidence * support * (this.o.observeScale ?? 1);
       out.push({ id, label: it.label, weight: it.confidence, observeWeight: Math.round(w * 1000) / 1000 });
     }
-    if (answer.length) { this.latest = answer; this.latestCites = cites; } // an empty / failed reply keeps the previous answer
+    if (answer.length) { // an empty / failed reply keeps the previous answer
+      this.latest = answer; this.latestCites = cites;
+      const top = interests.find((it) => slug(it.label));
+      this.latestTop = { confidence: top?.confidence ?? 0, turns: cites[0]!.length, n: answer.length };
+    }
     return out;
+  }
+
+  /** top label of the latest non-empty answer (carried forward); logging only */
+  private latestTop: { confidence: number; turns: number; n: number } | null = null;
+  /**
+   * Logging-only features for user_turn (Phase D): `extractor.enthusiasm` = confidence (0..1) of the top-ranked
+   * label of the most recent successful, non-empty extractor answer (carried forward), `extractor.top1_turns` =
+   * how many user turns that label cites, `extractor.n_labels` = labels in that answer. {} before the first
+   * answer. Read-only: nothing here feeds tagging, ranking, engagement or the interest map.
+   */
+  logFeatures(): Record<string, number> {
+    const t = this.latestTop;
+    return t ? { "extractor.enthusiasm": t.confidence, "extractor.top1_turns": t.turns, "extractor.n_labels": t.n } : {};
   }
 
   /** final-guess ranking prior from the latest non-empty answer (null before one, or with rank "none") */

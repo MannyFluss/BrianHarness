@@ -10,7 +10,7 @@ import type { HarnessStorage } from "./platform/storage.js";
 import { systemClock, type Clock } from "./platform/env.js";
 import { isFillerOnly, sessionTitle } from "./title.js";
 import type { RatingRecord, TypingEvent } from "./types.js";
-import type { StudyAssignment, StudyStatus } from "./study.js";
+import type { StudyAssignment, StudySessionInfo, StudyStatus } from "./study.js";
 import { sessionExportName, type ExportFile } from "./zip.js";
 import { randomId } from "./platform/env.js";
 import type { TopicTagger, TopicTaggerSpec } from "./tagger.js";
@@ -49,7 +49,7 @@ export class HarnessHost {
       seed?: () => number;
       clock?: Clock;
       /** Phase D blinded study (StudyController); absent = every session adaptive, no study fields */
-      study?: { assign(sessionId: string, lastTurns: (id: string) => number): Promise<StudyAssignment | null>; status?(): Promise<StudyStatus> };
+      study?: { assign(sessionId: string, last: (id: string) => number | StudySessionInfo): Promise<StudyAssignment | null>; status?(): Promise<StudyStatus> };
       /** called after a session ended (new chat, app exit): e.g. iOS BHExport.saveToDocuments */
       onSessionEnd?: (sessionId: string) => void | Promise<void>;
     },
@@ -80,13 +80,13 @@ export class HarnessHost {
     const sessionId = this.cfg.storage?.newSessionId() ?? `mem-${randomId(6)}`;
     let study: StudyAssignment | null = null;
     try {
-      study = (await this.cfg.study?.assign(sessionId, (id) => this.userTurns(id))) ?? null;
+      study = (await this.cfg.study?.assign(sessionId, (id) => this.sessionInfo(id))) ?? null;
     } catch (err) {
       console.warn("[brianharness] study assignment failed; this session runs adaptive, unlogged:", (err as Error).message);
     }
     this.session = new HarnessSession({
       sessionId,
-      ...(study ? { adaptation: study.adaptation, study: { id: study.study, index: study.index, total: study.total, scheduleHash: study.scheduleHash } } : {}),
+      ...(study ? { adaptation: study.adaptation, study: { id: study.study, index: study.index, total: study.total, scheduleHash: study.scheduleHash, protocol: study.protocol, ...(study.reissueOf ? { reissueOf: study.reissueOf } : {}) } } : {}),
       userId: this.cfg.userId,
       backend: await this.cfg.backend(),
       store: this.cfg.storage,
@@ -121,12 +121,17 @@ export class HarnessHost {
     return { director: out.director, hud, engagement: out.user.frame.engagement, title: sessionTitle(t) };
   }
 
-  private userTurns(id: string): number {
-    if (this.session?.id === id) return this.session.turn;
+  /** validity of a (previous) study session: user turns + an answered session rating (from memory or its log) */
+  private sessionInfo(id: string): StudySessionInfo {
+    if (this.session?.id === id) return { userTurns: this.session.turn, sessionRated: this.session.sessionRated };
     try {
-      return this.cfg.storage?.readSession(id).filter((e) => e.type === "user_turn").length ?? 0;
+      const ev = this.cfg.storage?.readSession(id) ?? [];
+      return {
+        userTurns: ev.filter((e) => e.type === "user_turn").length,
+        sessionRated: ev.some((e) => e.type === "rating" && (e as RatingRecord).scope === "session" && (e as RatingRecord).value !== null),
+      };
     } catch {
-      return 0;
+      return { userTurns: 0, sessionRated: false };
     }
   }
 
@@ -161,6 +166,13 @@ export class HarnessHost {
     const st = this.cfg.storage;
     if (!st) return [];
     const files = st.listSessions().map((id) => this.sessionFile(id)).filter((f): f is ExportFile => !!f);
+    // bh-session-<idx>-<startISO> is second-resolution: two sessions (e.g. a quick reissue) can share a name; never let one overwrite the other
+    const seen = new Map<string, number>();
+    for (const f of files) {
+      const k = seen.get(f.name) ?? 0;
+      seen.set(f.name, k + 1);
+      if (k) f.name = f.name.replace(/\.jsonl$/, `-${k + 1}.jsonl`);
+    }
     files.push({ name: `saves/${this.cfg.userId}.json`, content: JSON.stringify(st.loadMap(this.cfg.userId).toJSON(), null, 1) + "\n", mimeType: "application/json" });
     return files;
   }

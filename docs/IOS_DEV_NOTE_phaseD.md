@@ -90,3 +90,17 @@ sessions, never the mode), `director_turn` (plan/stateNote sealed in study sessi
 raw inter-key gaps in ms; never key identities), `rating` (`{scope, turn, value, shownAt, answeredAt,
 dismissed, reason?, hooked?, blindGuess?}`), `interest_update`, `final` (session top-1/top-3 labels),
 `session_end`. Desktop analysis: `npm run export-ratings -- <dir> -o ratings.csv`.
+
+**Researcher blocker fixes (Nov 2 2026, after build 1438).** Rebuild; nothing native changes.
+- **Build 1438 was practice.** On launch the app discards a study schedule sealed without `protocol` (or with
+  `protocol` < 2) plus the study progress, so tap "Start study" again: a new schedule and hash are sealed in
+  BHKeychain `study/phaseD/schedule` with `"protocol":2`. Session files in Documents and the pending-upload
+  queue are left alone. Study sessions log `study.protocol`; those without it are practice and are excluded.
+- **Index reissue.** A study session counts only with >= 8 replies and an answered end-of-session rating.
+  Otherwise the next session repeats its index (same mode) and logs `reissueOf: <previous sessionId>`.
+- **File names.** Study sessions save as `bh-session-<idx>-<startISO>.jsonl` (e.g. `bh-session-03-20261102T220612Z.jsonl`);
+  non-study sessions have no index (`bh-session-20261102T223724Z.jsonl`). The 1438 sample files in
+  `bh-phaseD-sample/` have no index because they are **non-study sessions** (no `study` in session_start, plan
+  logged): the study was not started (or the Keychain failed) when they were recorded.
+- `user_turn.features` gains `extractor.enthusiasm`, `extractor.top1_turns`, `extractor.n_labels` (logging only).
+- Field reference: `docs/PHASE_D_LOG_SCHEMA.md`. Leak check: `node tools/phaseD/check_blinding.mjs <dir>`.

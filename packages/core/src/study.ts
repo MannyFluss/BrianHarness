@@ -12,6 +12,7 @@
  */
 import { makeRng } from "./rng.js";
 import type { KeyValueStore } from "./platform/kv.js";
+import type { ExportFile } from "./zip.js";
 
 export type Adaptation = "adaptive" | "baseline";
 export const STUDY_ID = "phaseD";
@@ -19,6 +20,15 @@ export const STUDY_SESSIONS = 10;
 export const STUDY_SCHEDULE_KEY = "study/phaseD/schedule";
 export const STUDY_PROGRESS_KEY = "study/phaseD/progress";
 export const UNSEAL_PHRASE = "UNSEAL phaseD";
+/**
+ * Study protocol (freeze) version, stored in the sealed schedule as `protocol` and logged in session_start.study,
+ * study_start and final. 1 = practice builds (<= 1438 / 11c71d1, which wrote no `protocol` field): a schedule
+ * without it, or with a lower one, is discarded on launch together with the study progress (never the session
+ * files or the upload queue), so "Start study" seals a fresh one. Sessions without `protocol` are practice.
+ */
+export const STUDY_PROTOCOL_VERSION = 2;
+/** a study session counts only with >= this many user turns AND an answered session rating; else its index is reissued */
+export const STUDY_MIN_USER_TURNS = 8;
 
 export interface StudySchedule {
   study: typeof STUDY_ID;
@@ -26,6 +36,14 @@ export interface StudySchedule {
   seed: number;
   order: Adaptation[];
   createdAt: string;
+  /** STUDY_PROTOCOL_VERSION at sealing; absent in practice schedules (build 1438) */
+  protocol?: number;
+}
+/** what the host reports about the previous study session (validity check for index reissue) */
+export interface StudySessionInfo {
+  userTurns: number;
+  /** a session-scope rating with a value (1..5) was logged; a dismissed card does not count */
+  sessionRated: boolean;
 }
 /** what a session gets: the mode goes to the Director only; index + hash are logged */
 export interface StudyAssignment {
@@ -34,6 +52,9 @@ export interface StudyAssignment {
   total: number;
   scheduleHash: string;
   adaptation: Adaptation;
+  protocol: number;
+  /** the previous study session was invalid (< STUDY_MIN_USER_TURNS user turns or no session rating): same index (and mode) again */
+  reissueOf?: string;
 }
 export interface StudyStatus {
   enabled: boolean;
@@ -103,6 +124,8 @@ export async function sha256Hex(text: string): Promise<string> {
 export interface SecretStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
+  /** optional; without it a cleared key is stored as "" (= absent) */
+  remove?(key: string): Promise<void>;
 }
 
 function randomSeed(): number {
@@ -137,7 +160,25 @@ export class StudyController {
     return this.progressKV.set(STUDY_PROGRESS_KEY, JSON.stringify(p));
   }
   private async rawSchedule(): Promise<string | null> {
-    return this.secret.get(STUDY_SCHEDULE_KEY);
+    return (await this.secret.get(STUDY_SCHEDULE_KEY)) || null; // "" = cleared (SecretStore has no delete)
+  }
+
+  /**
+   * Discard a schedule sealed under an older protocol (or none = practice build): clears the schedule and the
+   * study progress so "Start study" generates a fresh one. Touches nothing else (session files, upload queue).
+   * Called on launch and before every study operation; a no-op when the protocol is current.
+   */
+  async ensureProtocol(): Promise<{ reset: boolean; from?: number | null }> {
+    const raw = await this.rawSchedule();
+    if (!raw) return { reset: false };
+    let protocol: number | null = null;
+    try { const p = (JSON.parse(raw) as StudySchedule).protocol; protocol = typeof p === "number" ? p : null; } catch { /* malformed: discard too */ }
+    if (protocol !== null && protocol >= STUDY_PROTOCOL_VERSION) return { reset: false };
+    if (this.secret.remove) await this.secret.remove(STUDY_SCHEDULE_KEY);
+    else await this.secret.set(STUDY_SCHEDULE_KEY, "");
+    if (await this.rawSchedule()) throw new Error("secure store did not clear the outdated study schedule");
+    await this.saveProgress({ enabled: false, next: 1 });
+    return { reset: true, from: protocol };
   }
   private async schedule(): Promise<{ raw: string; s: StudySchedule } | null> {
     const raw = await this.rawSchedule();
@@ -148,6 +189,7 @@ export class StudyController {
   }
 
   async status(): Promise<StudyStatus> {
+    try { await this.ensureProtocol(); } catch { /* reported below via scheduled/error */ }
     const p = await this.progress();
     try {
       return { enabled: p.enabled, next: p.next, total: STUDY_SESSIONS, scheduled: !!(await this.rawSchedule()) };
@@ -160,11 +202,12 @@ export class StudyController {
    * Turn the study on. Generates the schedule once (before session 1) and stores it in the secure
    * store, verified by read-back; an existing schedule is never regenerated. Returns its hash.
    */
-  async enable(): Promise<{ scheduleHash: string }> {
+  async enable(): Promise<{ scheduleHash: string; protocol: number; createdAt: string }> {
+    await this.ensureProtocol();
     let sch = await this.schedule();
     if (!sch) {
       const seed = (this.opts.randomSeed ?? randomSeed)() >>> 0;
-      const s: StudySchedule = { study: STUDY_ID, version: 1, seed, order: generateSchedule(seed), createdAt: (this.opts.now?.() ?? new Date()).toISOString() };
+      const s: StudySchedule = { study: STUDY_ID, version: 1, seed, order: generateSchedule(seed), createdAt: (this.opts.now?.() ?? new Date()).toISOString(), protocol: STUDY_PROTOCOL_VERSION };
       const raw = JSON.stringify(s);
       await this.secret.set(STUDY_SCHEDULE_KEY, raw);
       if ((await this.rawSchedule()) !== raw) throw new Error("secure store did not keep the study schedule (read-back mismatch)");
@@ -172,7 +215,7 @@ export class StudyController {
     }
     const p = await this.progress();
     await this.saveProgress({ ...p, enabled: true });
-    return { scheduleHash: await sha256Hex(sch.raw) };
+    return { scheduleHash: await sha256Hex(sch.raw), protocol: sch.s.protocol ?? STUDY_PROTOCOL_VERSION, createdAt: sch.s.createdAt };
   }
 
   async disable(): Promise<void> {
@@ -181,15 +224,23 @@ export class StudyController {
   }
 
   /**
-   * Assignment for a session that is starting. lastTurns(id) = user replies logged in the previous
-   * study session; a session abandoned with 0 replies gives its index (and mode) to the next one.
+   * Assignment for a session that is starting. last(id) = what the previous study session logged. If it was
+   * invalid (< STUDY_MIN_USER_TURNS user turns, or no answered session rating), this session gets the same
+   * index (and therefore the same mode) and logs reissueOf. A bare number = user turns only (old callers):
+   * then only a 0-reply session is reissued.
    * null = study off, finished, or the secure store failed (the session then runs adaptive, unlogged).
    */
-  async assign(sessionId: string, lastTurns: (sessionId: string) => number): Promise<StudyAssignment | null> {
+  async assign(sessionId: string, last: (sessionId: string) => number | StudySessionInfo): Promise<StudyAssignment | null> {
+    try { await this.ensureProtocol(); } catch { return null; }
     const p = await this.progress();
     if (!p.enabled) return null;
     let index = p.next;
-    if (p.last && lastTurns(p.last.sessionId) === 0) index = p.last.index;
+    let reissueOf: string | undefined;
+    if (p.last) {
+      const info = last(p.last.sessionId);
+      const invalid = typeof info === "number" ? info === 0 : info.userTurns < STUDY_MIN_USER_TURNS || !info.sessionRated;
+      if (invalid) { index = p.last.index; reissueOf = p.last.sessionId; }
+    }
     if (index > STUDY_SESSIONS) return null;
     let sch: Awaited<ReturnType<StudyController["schedule"]>>;
     try {
@@ -199,7 +250,7 @@ export class StudyController {
     }
     if (!sch) return null;
     await this.saveProgress({ enabled: true, next: index + 1, last: { sessionId, index } });
-    return { study: STUDY_ID, index, total: STUDY_SESSIONS, scheduleHash: await sha256Hex(sch.raw), adaptation: sch.s.order[index - 1]! };
+    return { study: STUDY_ID, index, total: STUDY_SESSIONS, scheduleHash: await sha256Hex(sch.raw), adaptation: sch.s.order[index - 1]!, protocol: sch.s.protocol ?? STUDY_PROTOCOL_VERSION, ...(reissueOf ? { reissueOf } : {}) };
   }
 
   /** sha256 of the stored schedule (safe to print: reveals nothing about the order). */
@@ -209,12 +260,21 @@ export class StudyController {
   }
 
   /** The sealed schedule, only with the exact confirmation phrase (after session 10). */
-  async unseal(confirm: string): Promise<StudySchedule & { scheduleHash: string }> {
+  /** raw = the exact secure-store string; scheduleHash = sha256 hex of raw (re-check: sha256(raw) === scheduleHash). */
+  async unseal(confirm: string): Promise<StudySchedule & { scheduleHash: string; raw: string }> {
     if (confirm !== UNSEAL_PHRASE) throw new Error(`unseal needs the confirmation phrase "${UNSEAL_PHRASE}"`);
     const sch = await this.schedule();
     if (!sch) throw new Error("no study schedule in the secure store");
-    return { ...sch.s, scheduleHash: await sha256Hex(sch.raw) };
+    return { ...sch.s, scheduleHash: await sha256Hex(sch.raw), raw: sch.raw };
   }
+}
+
+/**
+ * The unsealed schedule as a file: content = the exact secure-store string (no trailing newline, no
+ * re-serialisation), so sha256(file bytes) === scheduleHash. export-ratings --schedule accepts it directly.
+ */
+export function scheduleExportFile(u: { raw: string; scheduleHash: string }): ExportFile {
+  return { name: `phaseD-schedule-${u.scheduleHash.slice(0, 12)}.json`, content: u.raw, mimeType: "application/json" };
 }
 
 /** SecretStore over a CredentialStoreLike (Electron's encrypted credentials file). */

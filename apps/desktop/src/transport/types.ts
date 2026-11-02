@@ -130,6 +130,7 @@ export interface EegBridge {
     hash?(): Promise<string | null>;
     /** dev/debug only: reveals the schedule; needs the confirmation phrase "UNSEAL phaseD" */
     unseal?(confirm: string): Promise<unknown>;
+    exportSchedule?(confirm: string): Promise<ExportResult>;
   };
 }
 

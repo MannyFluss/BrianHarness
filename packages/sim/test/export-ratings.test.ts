@@ -33,7 +33,9 @@ test("export-ratings: one row per user turn, ratings joined, no mode column; --s
   const dir = mkdtempSync(join(tmpdir(), "bh-export-"));
   mkdirSync(join(dir, "sessions"));
   mkdirSync(join(dir, "saves"));
-  for (const f of host.exportFiles()) writeFileSync(join(dir, f.name), f.content);
+  const files = host.exportFiles();
+  assert.equal(new Set(files.map((f) => f.name)).size, files.length, "unique export names even when a reissue starts in the same second");
+  for (const f of files) writeFileSync(join(dir, f.name), f.content);
   const csv = ratingsCsv(readSessionLogs([dir]));
   const head = csv.split("\n")[0]!;
   assert.ok(!/\bmode\b|adaptation|adaptive|baseline,|\btext\b,/.test(head.replace(",baseline,", ",")), "no mode / text columns");
@@ -41,7 +43,10 @@ test("export-ratings: one row per user turn, ratings joined, no mode column; --s
   for (const c of ["typing.latencyToFirstKeyMs", "typing.latencyToSubmitMs", "typing.gapMedianMs", "typing.timingReliability", "turn_rating", "session_rating", "session_blindGuess"]) assert.ok(head.split(",").includes(c), c);
   const rows = parseCsv(csv.replace(/"[^"]*(""[^"]*)*"/g, "Q")); // quoted cells -> placeholder for the naive split
   assert.equal(rows.length, 4);
-  const s1 = rows.filter((r) => r.studyIndex === "1");
+  const s1 = rows.filter((r) => r.sessionId === rows[0]!.sessionId);
+  // session 1 had 3 user turns (< 8): invalid, so session 2 re-ran index 1 and says so
+  const s2 = rows.filter((r) => r.sessionId !== rows[0]!.sessionId);
+  assert.deepEqual([s2[0]!.studyIndex, s2[0]!.reissue_of, s2[0]!.study_protocol, s1[0]!.reissue_of, s1[0]!.study_protocol], ["1", rows[0]!.sessionId, "2", "", "2"]);
   assert.deepEqual(s1.map((r) => r.turn_rating), ["", "4", ""]);
   assert.equal(s1[2]!.turn_rating_dismissed, "true");
   assert.ok(s1.every((r) => r.session_rating === "5" && r.scheduleHash === scheduleHash));
@@ -60,6 +65,6 @@ test("export-ratings: one row per user turn, ratings joined, no mode column; --s
   const out = join(dir, "r.csv");
   execFileSync(process.execPath, ["--import", "tsx", join(import.meta.dirname, "../src/export-ratings.ts"), dir, "--schedule", sched, "-o", out]);
   const joined = parseCsv(ratingsCsv(readSessionLogs([dir]), { schedule: un, hooked: false }));
-  assert.deepEqual([...new Set(joined.map((r) => `${r.studyIndex}:${r.mode}`))], [`1:${un.order[0]}`, `2:${un.order[1]}`]);
+  assert.deepEqual([...new Set(joined.map((r) => `${r.studyIndex}:${r.mode}`))], [`1:${un.order[0]}`], "reissued session 2 joins index 1's mode");
   assert.throws(() => ratingsCsv(readSessionLogs([dir]), { schedule: { ...un, scheduleHash: "0".repeat(64) } }), /does not match/);
 });

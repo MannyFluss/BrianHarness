@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  HarnessHost, HarnessSession, InterestMap, MemoryKV, MemoryHarnessStorage, MockBackend, OPEN_TOPIC, StudyController, TOPICS, UNSEAL_PHRASE,
+  HarnessHost, HarnessSession, InterestMap, MemoryKV, MemoryHarnessStorage, MockBackend, OPEN_TOPIC, StudyController, STUDY_PROTOCOL_VERSION, TOPICS, UNSEAL_PHRASE,
   estimateEngagement, generateSchedule, keyGaps, sanitizeTypingEvents, sha256HexSync, summarizeTyping, zipFiles, type TypingEvent,
 } from "../src/index.js";
 
@@ -155,7 +155,8 @@ test("Phase D schedule: exactly 5/5, seeded; secure store only; sessions log ind
   const order = generateSchedule(4242);
   const r1 = await host.newSession(); // index 1, abandoned with 0 replies -> index reused
   const r1b = await host.newSession();
-  await host.reply({ text: "hi I like chess", events: typed(Date.now(), 4) });
+  for (let i = 0; i < 8; i++) await host.reply({ text: `hi I like chess ${i}`, events: typed(Date.now(), 4) });
+  await host.rate({ scope: "session", value: 4, shownAt: 1, answeredAt: 2, blindGuess: "no-idea" }); // valid: >= 8 turns + rating
   const r2 = await host.newSession();
   const starts = [r1.sessionId, r1b.sessionId, r2.sessionId].map((id) => storage.readSession(id).find((e) => e.type === "session_start"));
   assert.deepEqual(starts.map((e) => e && e.type === "session_start" && e.study?.index), [1, 1, 2]);
@@ -195,4 +196,68 @@ test("export zip: valid archive (python zipfile), UTF-8 names and content round-
   writeFileSync(join(dir, "x.zip"), z);
   const out = execFileSync("python3", ["-c", "import zipfile,sys,json; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(json.dumps({n: z.read(n).decode() for n in z.namelist()}))", join(dir, "x.zip")]).toString();
   assert.deepEqual(JSON.parse(out), { "sessions/a.jsonl": files[0]!.content, "saves/u.json": "{}\n" });
+});
+
+test("study reissue: < 8 user turns or no answered session rating -> same index (same mode), reissueOf logged; protocol in session_start + final; plan never logged", async () => {
+  const secret = new MemoryKV();
+  const study = new StudyController(secret, new MemoryKV(), { randomSeed: () => 99 });
+  const { scheduleHash } = await study.enable();
+  const storage = new MemoryHarnessStorage();
+  const host = new HarnessHost({ userId: "u", storage, backend: async () => new MockBackend(1), study, seed: () => 5 });
+  const reply = async (n: number) => { for (let i = 0; i < n; i++) await host.reply({ text: `tell you about my garden plot ${i}`, events: typed(Date.now(), 3) }); };
+  const ids: string[] = [];
+  ids.push((await host.newSession()).sessionId); await reply(7); await host.rate({ scope: "session", value: 4, shownAt: 1, answeredAt: 2 }); // 7 turns: invalid
+  ids.push((await host.newSession()).sessionId); await reply(8); await host.rate({ scope: "session", value: null, shownAt: 1, dismissed: true }); // dismissed rating: invalid
+  ids.push((await host.newSession()).sessionId); await reply(8); // no rating at all: invalid
+  ids.push((await host.newSession()).sessionId); await reply(8); await host.rate({ scope: "session", value: 2, shownAt: 1, answeredAt: 2 }); // valid
+  ids.push((await host.newSession()).sessionId); // index 2
+  await host.newSession(); // ends the last one
+  const starts = ids.map((id) => storage.readSession(id).find((e) => e.type === "session_start") as unknown as { study: { index: number; protocol: number; scheduleHash: string }; reissueOf?: string });
+  assert.deepEqual(starts.map((s) => s.study.index), [1, 1, 1, 1, 2]);
+  assert.deepEqual(starts.map((s) => s.reissueOf ?? null), [null, ids[0], ids[1], ids[2], null]);
+  assert.ok(starts.every((s) => s.study.protocol === STUDY_PROTOCOL_VERSION && s.study.scheduleHash === scheduleHash));
+  const finals = ids.slice(0, 4).map((id) => storage.readSession(id).find((e) => e.type === "final") as unknown as { protocol?: number });
+  assert.ok(finals.every((f) => f.protocol === STUDY_PROTOCOL_VERSION));
+  const all = ids.map((id) => storage.readSession(id).map((e) => JSON.stringify(e)).join("\n")).join("\n");
+  // director_turn.plan.mode (explore/exploit/relax pacing, NOT the study arm) is omitted with the whole plan in study sessions
+  assert.ok(!/"plan"|"mode"|"stateNote"|"adaptation"|"order"|"seed"/.test(all), "no plan / mode / schedule in study logs");
+  assert.ok(storage.readSession(ids[0]!).filter((e) => e.type === "director_turn").every((e) => (e as { sealed?: boolean }).sealed === true));
+  // non-study sessions still log plan.mode (pacing) for sidecar/1 and replays
+  const plain = new MemoryHarnessStorage();
+  const h2 = new HarnessHost({ userId: "u", storage: plain, backend: async () => new MockBackend(1), seed: () => 5 });
+  const p = await h2.newSession();
+  const dt = plain.readSession(p.sessionId).find((e) => e.type === "director_turn") as unknown as { plan: { mode: string } };
+  assert.ok(["explore", "exploit", "relax"].includes(dt.plan.mode));
+});
+
+test("study protocol: a missing / older protocol discards the schedule + progress (fresh hash on Start study); the current one is kept; unseal returns raw", async () => {
+  const secret = new MemoryKV(), settings = new MemoryKV();
+  let seed = 1;
+  const study = new StudyController(secret, settings, { randomSeed: () => seed++ });
+  // a practice schedule from build 1438 (no protocol), mid-study
+  const practice = JSON.stringify({ study: "phaseD", version: 1, seed: 7, order: generateSchedule(7), createdAt: "2026-11-02T21:00:00.000Z" });
+  await secret.set("study/phaseD/schedule", practice);
+  await settings.set("study/phaseD/progress", JSON.stringify({ enabled: true, next: 4, last: { sessionId: "s3", index: 3 } }));
+  const oldHash = sha256HexSync(practice);
+  assert.deepEqual(await study.ensureProtocol(), { reset: true, from: null });
+  assert.equal(await study.hash(), null);
+  assert.deepEqual(await study.status(), { enabled: false, next: 1, total: 10, scheduled: false });
+  const a = await study.enable();
+  assert.notEqual(a.scheduleHash, oldHash);
+  assert.equal(a.protocol, STUDY_PROTOCOL_VERSION);
+  // current protocol: kept across launches
+  assert.deepEqual(await study.ensureProtocol(), { reset: false });
+  assert.equal((await study.enable()).scheduleHash, a.scheduleHash);
+  // an older numbered protocol is discarded too
+  const older = JSON.stringify({ study: "phaseD", version: 1, seed: 8, order: generateSchedule(8), createdAt: "2026-11-02T21:00:00.000Z", protocol: 1 });
+  await secret.set("study/phaseD/schedule", older);
+  assert.deepEqual(await study.ensureProtocol(), { reset: true, from: 1 });
+  const b = await study.enable();
+  assert.notEqual(b.scheduleHash, a.scheduleHash);
+  // unseal: raw is the exact stored string; hash = sha256 hex of it; key order study,version,seed,order,createdAt,protocol
+  const un = await study.unseal(UNSEAL_PHRASE);
+  assert.equal(un.raw, await secret.get("study/phaseD/schedule"));
+  assert.equal(sha256HexSync(un.raw), un.scheduleHash);
+  assert.equal(un.raw, JSON.stringify({ study: un.study, version: un.version, seed: un.seed, order: un.order, createdAt: un.createdAt, protocol: un.protocol }));
+  assert.equal(new Date(un.createdAt).toISOString(), un.createdAt);
 });

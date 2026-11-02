@@ -221,5 +221,7 @@ test("Phase D study on iOS: schedule only in BHKeychain study/phaseD/schedule; l
   assert.ok(evs[0].study?.scheduleHash && evs[0].study.index === 1);
   assert.ok(evs.some((e) => e.type === "rating" && e.blindGuess === "no-idea"));
   assert.match(String(await t.study!.hash!()), /^[0-9a-f]{64}$/);
-  assert.equal((await t.study!.status()).next, 3);
+  // session 1 had 2 user turns (< 8): invalid, so session 2 re-ran index 1 (reissueOf) and next is 2
+  assert.equal((await t.study!.status()).next, 2);
+  assert.equal(evs[0].study.protocol, 2);
 });

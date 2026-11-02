@@ -395,7 +395,9 @@ median, timing reliability and the flags.
 - `StudyController` (core `study.ts`): on "Start study" a seeded 5/5 order is generated once and stored
   ONLY in the secure store (iOS: BHKeychain key `study/phaseD/schedule`; Electron: the safeStorage-encrypted
   credentials file; web test build: localStorage, not secure). Progress (enabled, next index) is in settings.
-  A session with 0 replies gives its index back.
+  A study session with < 8 user turns or no answered session rating is invalid: the next session reuses its index
+  (same mode) and logs `reissueOf`. A schedule from an older study protocol (build 1438 = practice) is discarded on
+  launch (STUDY_PROTOCOL_VERSION 2); see docs/PHASE_D_LOG_SCHEMA.md.
 - Baseline = interest ledger + adaptation off (fixed seeded topic rotation, same opener and open-question
   cadence; the map is a shadow clone that is never saved). Adaptive stays the default everywhere else
   (sim, sidecar, non-study sessions).

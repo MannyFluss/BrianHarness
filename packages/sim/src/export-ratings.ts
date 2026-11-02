@@ -13,6 +13,7 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 type Ev = Record<string, unknown> & { type?: string };
 export interface SessionLog { file: string; events: Ev[] }
@@ -20,8 +21,10 @@ export interface UnsealedSchedule { order: string[]; scheduleHash?: string }
 
 const META = ["sessionId", "studyIndex", "scheduleHash", "turn", "userTurn", "t", "engagement", "baseline", "text.words", "text.chars"] as const;
 const RATING = ["turn_rating", "turn_rating_dismissed", "turn_rating_reason", "turn_rating_shownAt", "turn_rating_answeredAt", "session_rating", "session_rating_dismissed", "session_hooked", "session_blindGuess"] as const;
+/** study_protocol: STUDY_PROTOCOL_VERSION (session_start.study.protocol, also in final); empty = practice build (1438) -> exclude.
+ * reissue_of: the invalid previous session this one re-runs (same index). */
 /** interest labels: running top-1 after this turn (interest_update.top1) + the session's {type:'final'} record */
-const LABELS = ["top1_running", "final_top1", "final_top3", "extractor_prompt_version", "extractor_model", "effective_tagger", "extractor_fallback", "extractor_fallback_reason", "extractor_calls_attempted", "extractor_calls_ok", "extractor_calls_failed", "extractor_calls_capped"] as const;
+const LABELS = ["top1_running", "final_top1", "final_top3", "extractor_prompt_version", "extractor_model", "effective_tagger", "extractor_fallback", "extractor_fallback_reason", "extractor_calls_attempted", "extractor_calls_ok", "extractor_calls_failed", "extractor_calls_capped", "study_protocol", "reissue_of"] as const;
 
 export function readSessionLogs(paths: string[]): SessionLog[] {
   const files: string[] = [];
@@ -44,7 +47,7 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
   const featureKeys = new Set<string>();
   const hashes = new Set<string>();
   for (const { events } of logs) {
-    const start = events.find((e) => e.type === "session_start") as (Ev & { sessionId?: string; study?: { index?: number; scheduleHash?: string } }) | undefined;
+    const start = events.find((e) => e.type === "session_start") as (Ev & { sessionId?: string; study?: { index?: number; scheduleHash?: string; protocol?: number }; reissueOf?: string }) | undefined;
     if (!start) continue;
     const study = start.study;
     if (study?.scheduleHash) hashes.add(study.scheduleHash);
@@ -56,7 +59,7 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
     for (const iu of events.filter((e) => e.type === "interest_update")) if ("top1" in iu) top1At.set(iu.turn as number, iu.top1);
     for (const u of events.filter((e) => e.type === "user_turn")) {
       const features = (u.features ?? {}) as Record<string, number>;
-      for (const k of Object.keys(features)) if (k.startsWith("typing.") || k.startsWith("text.")) featureKeys.add(k);
+      for (const k of Object.keys(features)) if (k.startsWith("typing.") || k.startsWith("text.") || k.startsWith("extractor.")) featureKeys.add(k);
       // rating.turn is the 1-based user reply number (= hud.turn after that reply) = user_turn.turn + 1
       const userTurn = (u.turn as number) + 1;
       const tr = lastOf(ratings.filter((r) => r.scope === "turn" && r.turn === userTurn));
@@ -91,6 +94,8 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
         extractor_calls_ok: fin?.extractorCalls?.ok,
         extractor_calls_failed: fin?.extractorCalls?.failed,
         extractor_calls_capped: fin?.extractorCalls?.capped,
+        study_protocol: study?.protocol ?? (fin as { protocol?: number } | undefined)?.protocol,
+        reissue_of: start.reissueOf,
       });
     }
   }
@@ -103,6 +108,18 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
     for (const r of rows) if (typeof r.studyIndex === "number") r.mode = sh.order[r.studyIndex - 1];
   }
   return [cols.join(","), ...rows.map((r) => cols.map((c) => csvCell(r[c])).join(","))].join("\n") + "\n";
+}
+
+/**
+ * --schedule file: either the raw schedule export (exact Keychain string; its sha256 IS the scheduleHash) or an
+ * unseal() result JSON carrying scheduleHash (+ raw, which is then re-hashed and must agree).
+ */
+export function readScheduleFile(path: string): UnsealedSchedule {
+  const text = readFileSync(path, "utf8");
+  const o = JSON.parse(text) as UnsealedSchedule & { raw?: string };
+  const sha = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
+  if (typeof o.raw === "string" && o.scheduleHash && sha(o.raw) !== o.scheduleHash) throw new Error("--schedule: sha256(raw) does not match scheduleHash");
+  return o.scheduleHash ? o : { ...o, scheduleHash: sha(text) };
 }
 
 function main(argv: string[]) {
@@ -118,7 +135,7 @@ function main(argv: string[]) {
   }
   if (!inputs.length) throw new Error("give session JSONL files or directories");
   for (const p of inputs) if (!existsSync(p)) throw new Error(`not found: ${p}`);
-  const csv = ratingsCsv(readSessionLogs(inputs), { hooked, ...(schedule ? { schedule: JSON.parse(readFileSync(schedule, "utf8")) as UnsealedSchedule } : {}) });
+  const csv = ratingsCsv(readSessionLogs(inputs), { hooked, ...(schedule ? { schedule: readScheduleFile(schedule) } : {}) });
   if (out) writeFileSync(out, csv);
   else process.stdout.write(csv);
 }
