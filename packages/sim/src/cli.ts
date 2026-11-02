@@ -46,9 +46,9 @@ for (const p of personas) {
   }
 }
 console.log("\n# = hypothesis is the hidden passion, x = wrong guess, . = no hypothesis yet\n");
-console.log("persona     runs  found  avg turns-to-find  style-hit  wrong-final  no-hyp  lock-ins(>=6 wrong turns)");
+console.log("persona     runs  found  avg turns-to-find  style-hit  wrong-final  no-hyp  lock-ins(>=6 wrong turns)  final@1  final@3");
 for (const s of summarize(results)) {
-  console.log(`${s.persona.padEnd(10)}  ${String(s.runs).padEnd(4)}  ${(s.foundRate * 100).toFixed(0).padStart(4)}%  ${(s.meanTurnsToFind?.toFixed(1) ?? "-").padStart(17)}  ${(s.styleHitRate * 100).toFixed(0).padStart(8)}%  ${String(s.wrongFinal).padStart(11)}  ${String(s.noHypothesis).padStart(6)}  ${String(s.lockIns).padStart(6)}`);
+  console.log(`${s.persona.padEnd(10)}  ${String(s.runs).padEnd(4)}  ${(s.foundRate * 100).toFixed(0).padStart(4)}%  ${(s.meanTurnsToFind?.toFixed(1) ?? "-").padStart(17)}  ${(s.styleHitRate * 100).toFixed(0).padStart(8)}%  ${String(s.wrongFinal).padStart(11)}  ${String(s.noHypothesis).padStart(6)}  ${String(s.lockIns).padStart(6)}  ${(s.final1 * 100).toFixed(0).padStart(26)}%  ${(s.final3 * 100).toFixed(0).padStart(6)}%`);
 }
 mkdirSync(out, { recursive: true });
 const file = join(out, `report-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);

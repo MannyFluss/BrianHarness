@@ -28,6 +28,8 @@ export interface RunResult {
   meanEngagementOnPassion: number | null;
   meanEngagementElsewhere: number | null;
   sessionId: string;
+  /** session.finalGuesses(3) topics (anti-drift final answer, no LLM) */
+  finalGuesses: string[];
 }
 
 export async function runPersona(persona: Persona, opts: RunOptions = {}): Promise<RunResult> {
@@ -88,6 +90,7 @@ export async function runPersona(persona: Persona, opts: RunOptions = {}): Promi
     meanEngagementOnPassion: avg(onPassion),
     meanEngagementElsewhere: avg(elsewhere),
     sessionId: session.id,
+    finalGuesses: session.finalGuesses(3).map((g) => g.topic),
   };
 }
 
@@ -103,6 +106,10 @@ export interface Summary {
   noHypothesis: number;
   /** runs with a wrong hypothesis held for >= 6 consecutive turns at any point */
   lockIns: number;
+  /** finalGuesses()[0] is the passion */
+  final1: number;
+  /** passion is in finalGuesses(3) */
+  final3: number;
 }
 
 export function summarize(results: RunResult[]): Summary[] {
@@ -119,6 +126,8 @@ export function summarize(results: RunResult[]): Summary[] {
       wrongFinal: rs.filter((r) => r.finalHypothesis !== null && r.finalHypothesis !== r.passion).length,
       noHypothesis: rs.filter((r) => r.finalHypothesis === null).length,
       lockIns: rs.filter((r) => longestWrongStreak(r) >= 6).length,
+      final1: rs.filter((r) => r.finalGuesses[0] === r.passion).length / rs.length,
+      final3: rs.filter((r) => r.finalGuesses.includes(r.passion)).length / rs.length,
     };
   });
 }

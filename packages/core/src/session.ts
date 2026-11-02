@@ -14,6 +14,7 @@ import { TypingSignalSource, type SignalSource } from "./signals.js";
 import { buildStateNote } from "./state-note.js";
 import type { SessionStore } from "./store.js";
 import { detectTopics } from "./topics.js";
+import { finalGuesses, type FinalGuess, type FinalGuessOptions, type TurnSnapshot } from "./final-guesses.js";
 
 export interface HarnessSessionOptions {
   userId: string;
@@ -75,6 +76,8 @@ export class HarnessSession {
   wordCounts: number[] = [];
   /** per-user normalisation memory for the engagement estimator */
   readonly engagementCtx: Required<Omit<EngagementContext, "options">> = { eegLnHistory: [], typingHistory: [], eegPartHistory: [], typingAtEeg: [] };
+  /** per-turn hypothesis + live top-3, for the anti-drift final-guess API */
+  readonly snapshots: TurnSnapshot[] = [];
   private rng: Rng;
   private clock: () => number;
 
@@ -186,6 +189,7 @@ export class HarnessSession {
     for (const s of this.sources) s.clear(sentAt);
 
     const hypothesis = this.map.hypothesis();
+    this.snapshots.push({ turn: this.turn, hypothesis, top: this.map.topTopics(3) });
     this.log({
       type: "user_turn",
       t: nowIso(),
@@ -206,6 +210,11 @@ export class HarnessSession {
     for (const s of this.sources) await s.stop?.();
     this.log({ type: "session_end", t: nowIso(), turns: this.turn });
     this.opts.store?.saveMap(this.map);
+  }
+
+  /** Top-k final guesses at the user's interests (no LLM call; see final-guesses.ts). */
+  finalGuesses(k = 3, opts?: FinalGuessOptions): FinalGuess[] {
+    return finalGuesses(this.map, this.snapshots, k, opts);
   }
 
   hud(): HudState {

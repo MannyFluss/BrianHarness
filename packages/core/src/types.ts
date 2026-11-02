@@ -66,6 +66,10 @@ export interface InterestMapData {
   turns: number;
   topics: Record<string, ScoreCell>;
   styles: Record<string, ScoreCell>;
+  /** display labels for open-vocabulary topics (lexicon topics use TOPIC_LEXICON labels) */
+  labels?: Record<string, string>;
+  /** open-vocab topic -> broader lexicon topic it refines (e.g. "ham radio" -> "programming"?) */
+  parents?: Record<string, string>;
   updatedAt: string;
 }
 

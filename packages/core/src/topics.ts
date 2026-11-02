@@ -20,8 +20,11 @@ export const TOPIC_LEXICON: Record<string, { label: string; keywords: string[] }
 
 export const TOPICS = Object.keys(TOPIC_LEXICON);
 
+/** Labels for open-vocabulary topics discovered at runtime (filled by InterestMap / taggers). */
+export const DYNAMIC_TOPIC_LABELS = new Map<string, string>();
+
 export function topicLabel(topic: string): string {
-  return TOPIC_LEXICON[topic]?.label ?? topic;
+  return TOPIC_LEXICON[topic]?.label ?? DYNAMIC_TOPIC_LABELS.get(topic) ?? topic;
 }
 
 export function tokenize(text: string): string[] {

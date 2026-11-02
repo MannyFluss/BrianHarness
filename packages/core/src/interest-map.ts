@@ -6,7 +6,7 @@
  */
 import type { InterestMapData, QuestionStyle, ScoreCell } from "./types.js";
 import { QUESTION_STYLES } from "./types.js";
-import { TOPICS } from "./topics.js";
+import { DYNAMIC_TOPIC_LABELS, TOPICS, topicLabel } from "./topics.js";
 
 /** Unseen cells behave as if observed once at this value (optimistic-ish prior). */
 export const PRIOR_MEAN = 0.45;
@@ -16,6 +16,20 @@ export class InterestMap {
   data: InterestMapData;
   constructor(data: InterestMapData) {
     this.data = data;
+    for (const [t, l] of Object.entries(data.labels ?? {})) DYNAMIC_TOPIC_LABELS.set(t, l);
+  }
+  /** Register an open-vocab topic's label (and optional broader lexicon parent). */
+  defineTopic(topic: string, label: string, parent?: string) {
+    if (TOPICS.includes(topic)) return;
+    (this.data.labels ??= {})[topic] = label;
+    if (parent && parent !== topic) (this.data.parents ??= {})[topic] = parent;
+    DYNAMIC_TOPIC_LABELS.set(topic, label);
+  }
+  label(topic: string): string {
+    return this.data.labels?.[topic] ?? topicLabel(topic);
+  }
+  parent(topic: string): string | undefined {
+    return this.data.parents?.[topic];
   }
   static fresh(userId: string): InterestMap {
     return new InterestMap({ version: 1, userId, sessions: 0, turns: 0, topics: {}, styles: {}, updatedAt: new Date().toISOString() });
