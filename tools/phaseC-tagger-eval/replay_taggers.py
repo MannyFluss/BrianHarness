@@ -108,8 +108,14 @@ def main():
     if a.responses:
         turns = [int(x) for x in a.llm_turns.split(",")]
         for m in a.llm_models.split(","):
-            taggers["llm-extract %s + keyphrase-idf (track 2)" % m] = {"kind": "llm-extract", "model": m, "atTurns": turns, "responsesFile": os.path.abspath(a.responses)}
-            taggers["llm-extract %s alone (track 2)" % m] = {"kind": "llm-extract", "model": m, "atTurns": turns, "base": "none", "responsesFile": os.path.abspath(a.responses)}
+            b = {"kind": "llm-extract", "model": m, "atTurns": turns, "responsesFile": os.path.abspath(a.responses)}
+            # merge variants (core LlmExtractorOptions.rank / observeScale); "lead" is the core default
+            taggers["llm-extract %s alone, old merge (reference)" % m] = dict(b, base="none", rank="none")
+            taggers["llm-extract %s + keyphrase-idf, old merge (rank none)" % m] = dict(b, rank="none")
+            taggers["llm-extract %s + keyphrase-idf, evidence x3 (rank none)" % m] = dict(b, rank="none", observeScale=3)
+            taggers["llm-extract %s + keyphrase-idf, soft prior 0.5" % m] = dict(b, rank="soft", priorWeight=0.5)
+            taggers["llm-extract %s + keyphrase-idf, lead (DEFAULT)" % m] = dict(b, rank="lead")
+            taggers["llm-extract %s alone, lead" % m] = dict(b, base="none", rank="lead")
     direct = {}
     if a.responses:
         for l in open(a.responses):

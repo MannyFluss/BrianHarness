@@ -17,5 +17,7 @@
 | `phaseC_tagger_track2.{md,jsonl}` | 8aaf3f4 | real gemma4:cloud responses from the Mac (via the local Ollama app), scored with `python3 tools/llm-extractor-eval/score.py` |
 | `phaseC_tagger_idf_cc0_vs_wordfreq.{md,jsonl}` | 00901fb | license swap: keyphrase-idf with the bundled CC0 Common Voice table vs the dev-only wordfreq table (`--idf-freq-file`), all 144; NOTE the sim personas.json changed after track1, so compare within this file |
 | `phaseC_tagger_idf_cc0_leak_check.txt` | 00901fb | both leak checks re-run with the CC0 table: PASS |
+| `phaseC_tagger_track2_merge.{md,jsonl}` | this commit | llm-extract merge variants (old / evidence x3 / soft prior / lead=default) on the 24 matched sessions, cached answers only, + top-1 diagnosis; `python3 tools/llm-extractor-eval/score.py --tag track2_merge` |
+| `phaseC_tagger_track2_merge_leak_check.txt` | this commit | both leak checks after the merge change: PASS |
 
 The Researcher's own `sweep_results.json` (in eeg-harness-sim) is theirs and is not mirrored here.
