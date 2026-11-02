@@ -118,9 +118,10 @@ settings; for large logs prefer IndexedDB or a Filesystem-backed KV.
 - Interface: `CredentialStoreLike` (`get/set/delete/list/modify`, same shape pi-ai uses), `readApiKey()`.
 - Web test: `KVCredentialStore(new LocalStorageKV())`. **Test only**: localStorage is readable by any script
   on the origin, and the LAN PWA is plain http. The key dialog says so.
-- iOS: IOS Dev writes a Keychain adapter (e.g. a `@capacitor-community/secure-storage` / Keychain plugin,
-  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) implementing `CredentialStoreLike`, and passes
-  `credentials` + `credentialNote` to `createInProcessTransport`. Never ship localStorage keys.
+- iOS: the **BHKeychain** Capacitor plugin (Swift, service `com.manny.brianharness.credentials`). When it is
+  installed, `nativeTransportOptions()` selects `createKeychainCredentials()` (`transport/keychain.ts`):
+  `KVCredentialStore` over `keychainKV(plugin)`, same `credentials/<provider>` JSON records as the web build.
+  See "BHKeychain" below for the contract and the localStorage migration. Never ship localStorage keys.
 - Subscription sign-in (ChatGPT / Claude OAuth) is **not available in the web build**: pi-ai's flows start a
   local `node:http` callback server. On iOS that needs native handling: `ASWebAuthenticationSession` with a
   custom-scheme / universal-link redirect, PKCE in native code, tokens into the Keychain. Until then the
@@ -252,6 +253,83 @@ pi-ai is MIT. No LearnHarness (AGPL) code was copied for this work.
   Ollama Cloud, OpenAI-compatible, OpenAI, Anthropic, and the Ollama tagger) sends `stream: false`, reads the
   response only with `res.text()`, and parses it with `parseChatBody` (`providers/response-body.ts`).
   That accepts one JSON body, NDJSON, or SSE (`data:` lines, `[DONE]`, Anthropic events) arriving as one chunk,
-  so a server that ignores stream:false still works. Nothing relies on incremental tokens.
+  so a server that ignores stream:false still works. This buffered path is what runs when the BHStream plugin
+  is missing (see "Streaming" below).
 - OpenAI-compatible and Anthropic now default to a 120 s timeout (Ollama already had one), so a stuck native
   request surfaces as an error instead of hanging the UI.
+
+## Streaming (BHStream), typing indicator, latency telemetry
+
+### Who streams
+| Runtime | fetch | backends use | tokens reach the UI |
+|---|---|---|---|
+| iOS with BHStream | `nativeStreamFetch` over BHStream | `stream: true` | incrementally |
+| iOS without BHStream | CapacitorHttp (buffered) | `stream: false` | whole reply as one delta |
+| browser / PWA | page fetch (streams natively) | `stream: true` | incrementally |
+| Electron | Node fetch in main, IPC `harness:token` events | `stream: true` | incrementally |
+| sim / sidecar | n/a (no `onToken`) | `stream: false` | unchanged |
+
+- `GenerateRequest.onToken` is the only switch: without it every backend uses its buffered `stream:false`
+  path (the sim never passes it). With it, Ollama / Ollama Cloud read NDJSON, OpenAI-compatible / OpenAI and
+  Anthropic read SSE through `readChatStream` / `createChatStreamParser` (`providers/response-body.ts`): body
+  reader + `TextDecoder({stream:true})`, partial lines buffered, so a chunk may split a line, a `data:` prefix,
+  or a UTF-8 sequence. A missing `response.body` falls back to `text()`. Backends built with `streaming: false`
+  (the in-process transport sets it when the fetch buffers) keep `stream:false` even with `onToken`.
+- Backends that can't stream (pi-ai subscription providers, Claude Code) ignore `onToken`; `HarnessSession` then
+  sends the whole text as one delta, so the UI flow is identical.
+- The mock streams word by word with an 18 ms delay (`MockBackend(seed, { tokenDelayMs })`, same text as the
+  buffered path), so the UI can be exercised offline: `npm run test:web-stream` (dist-web, headless Chrome).
+- Transport API: `newSession(onToken?)`, `reply(payload, onToken?)`. Electron: the preload adds a request id;
+  main forwards deltas as `harness:token {rid, delta}`. The final `director.text` replaces the streamed text
+  (backends trim it).
+
+### Typing indicator
+`App.tsx` runs every turn through `runStreamedTurn` (`chat-flow.ts`): the user bubble and indicator are committed
+with `flushSync` and a frame is painted (`nextPaint`) **before** the transport is called, so no tagger, core or
+network work can delay it, on every backend. The first delta replaces the indicator with the streaming message
+(blinking caret); stream end marks it complete.
+
+### Reply-latency telemetry (completeAt, not first token)
+- The renderer stamps each Director message twice: `firstTokenAt` (first token rendered) and `completeAt`
+  (the commit that shows it complete = stream end). The next `reply()` sends `shownAt = completeAt` and
+  `firstTokenAt`.
+- `HarnessSession.markShown(completeAt, firstTokenAt)`. The typing window and every typing feature
+  (`typing.replyLatencyMs`, `typing.totalMs`, ...) start at **completeAt**, exactly as before streaming existed
+  (then the message appeared all at once). That keeps sim (no streaming) and desktop/iOS numbers comparable;
+  reading while tokens arrive is not counted as reply latency.
+- Turn log: `user_turn.prompt = { firstTokenAt?, completeAt }` (epoch ms, renderer clock);
+  `director_turn.firstTokenMs` + `streamed: true` when the backend streamed (`genMs` stays request -> whole reply).
+  The sim logs `prompt.completeAt` only.
+
+### BHStream contract (Swift plugin, IOS Dev)
+```
+start({ url, method, headers, body? }) -> { id }
+cancel({ id })
+addListener("bhstream", ev):  per id, in order
+  { id, type: "head", status, headers }
+  0..n { id, type: "chunk", data?: string, b64?: string }
+  { id, type: "end" }  |  { id, type: "error", message }
+```
+- TS side: `createNativeStreamFetch(plugin)` (`transport/native-stream.ts`) returns a real `Response` (resolved on
+  `head`) whose body is a `ReadableStream`. The listener is added **before** `start()`; events that arrive before
+  `start()` resolves are buffered and replayed by id; chunks before `head` are queued; other ids are ignored.
+  `AbortSignal` calls `cancel({id})` (before head: rejects with AbortError; after: errors the body). `error`
+  before head rejects like fetch (TypeError); after head it errors the body. `end` without `head` is an error.
+- **Bytes:** prefer `b64` (base64 of the raw bytes, any split). `data` must be a valid string; if Swift decodes
+  each URLSession chunk on its own, a multibyte character split across chunks turns into U+FFFD before JS sees it
+  and cannot be repaired. Either send `b64`, or carry incomplete trailing UTF-8 bytes into the next chunk before
+  decoding. (JS also holds a trailing lone high surrogate in `data` until the next chunk.)
+- Feature detection via `window.Capacitor` (no `@capacitor/core` import): `isPluginAvailable("BHStream")`, else
+  `Capacitor.Plugins.BHStream`. Missing -> the buffered CapacitorHttp path. A plugin that rejects `start()` with
+  `UNIMPLEMENTED` makes that and later requests fall back to the buffered fetch.
+
+### BHKeychain contract (Swift plugin, IOS Dev)
+```
+get({ key }) -> { value: string | null }   set({ key, value })   remove({ key })   keys() -> { keys: string[] }
+```
+- Keys are `credentials/<provider>` (e.g. `credentials/openai`), values the JSON records `KVCredentialStore` writes.
+  `keys()` should return all keys under the service (JS filters by prefix).
+- One-time migration (`migrateCredentials`), run before the first credential access each launch: for each key in
+  the old localStorage store (`brianharness/credentials/*`), write it to the Keychain, read it back, and only then
+  delete the local copy. A failed write keeps the local copy (reads fall back to it; the next launch retries).
+  If the Keychain already has that provider, the Keychain value wins and the local copy is dropped. Idempotent.

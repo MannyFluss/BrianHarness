@@ -63,8 +63,11 @@ function info() {
   return { backend: backend?.id ?? "…", paid: !!backend?.paid, provider: s.provider, model: s.model ?? null, dataDir, userId, platform: process.platform, appName: BRAND.name };
 }
 
-ipcMain.handle("harness:new", () => host.newSession());
-ipcMain.handle("harness:reply", (_e, payload) => host.reply(payload ?? {}));
+// Token streaming: when the renderer passes a request id (rid), deltas go back as "harness:token".
+const tokenSink = (e, rid) =>
+  typeof rid === "string" && rid ? { onToken: (delta) => !e.sender.isDestroyed() && e.sender.send("harness:token", { rid, delta }) } : {};
+ipcMain.handle("harness:new", (e, p) => host.newSession(tokenSink(e, p?.rid)));
+ipcMain.handle("harness:reply", (e, payload) => host.reply(payload ?? {}, tokenSink(e, payload?.rid)));
 ipcMain.handle("harness:hud", () => host.hud());
 ipcMain.handle("harness:sessions", () => host.sessions());
 ipcMain.handle("harness:info", async () => {

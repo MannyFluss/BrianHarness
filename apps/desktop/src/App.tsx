@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { nextPaint, runStreamedTurn } from "./chat-flow";
 import { bridge, type Hud as HudState, type Info, type SessionItem } from "./bridge";
 import { Composer } from "./components/Composer";
 import { Hud } from "./components/Hud";
@@ -12,10 +14,16 @@ import { useLayoutMode, useVisualViewportHeight } from "./layout";
 let nextId = 0;
 const mid = () => `m${++nextId}`;
 
+/** Final text replaces the streamed one (backends trim); adds the message if nothing streamed. */
+const completeReply = (m: ChatMsg[], replyId: string, text: string): ChatMsg[] =>
+  m.some((x) => x.id === replyId) ? m.map((x) => (x.id === replyId ? { ...x, text, streaming: false } : x)) : [...m, { id: replyId, role: "assistant", text }];
+
 export function App() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(true);
+  /** typing indicator: on from the instant of send until the first token arrives */
+  const [pending, setPending] = useState(true);
   const [hud, setHud] = useState<HudState | null>(null);
   const [stateNote, setStateNote] = useState("");
   const [sessions, setSessions] = useState<SessionItem[]>([]);
@@ -37,7 +45,11 @@ export function App() {
   const [tick, setTick] = useState(0);
   const [title, setTitle] = useState("New chat");
   const pickerRef = useRef<(() => void) | null>(null);
+  // Reply-latency clock: completeAt of the Director's last message (fully rendered, stream end);
+  // firstTokenAt is logged alongside. Engagement features use completeAt (see IOS_PORTING.md).
   const shownAt = useRef(Date.now());
+  const firstTokenAt = useRef<number | undefined>(undefined);
+  const stampedId = useRef<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const tel = useTypingTelemetry();
   const draftRef = useRef(draft);
@@ -45,17 +57,42 @@ export function App() {
 
   const refreshSessions = useCallback(async () => setSessions(await bridge().sessions()), []);
 
+  /** One streamed Director turn: indicator first, then tokens, then the final text. */
+  const streamTurn = useCallback(async <R extends { director: { text: string } }>(showPending: () => void, call: (onToken: (d: string) => void) => Promise<R>) => {
+    const replyId = mid();
+    const { result } = await runStreamedTurn({
+      showPending: () =>
+        flushSync(() => {
+          showPending();
+          setBusy(true);
+          setPending(true);
+        }),
+      paint: () => nextPaint(window),
+      call,
+      onFirstToken: (text, at) => {
+        setPending(false);
+        setMessages((m) => [...m, { id: replyId, role: "assistant", text, streaming: true, firstTokenAt: at }]);
+      },
+      onText: (text) => setMessages((m) => m.map((x) => (x.id === replyId ? { ...x, text } : x))),
+    });
+    return { result, replyId };
+  }, []);
+
   const startNew = useCallback(async () => {
-    setBusy(true);
-    setMessages([]);
-    const r = await bridge().newSession();
-    setMessages([{ id: mid(), role: "assistant", text: r.director.text }]);
-    setTitle(r.title ?? "New chat");
-    setHud(r.hud);
-    setStateNote(r.director.stateNote);
-    setBusy(false);
+    try {
+      const { result: r, replyId } = await streamTurn(() => setMessages([]), (onToken) => bridge().newSession(onToken));
+      setMessages((m) => completeReply(m, replyId, r.director.text));
+      setTitle(r.title ?? "New chat");
+      setHud(r.hud);
+      setStateNote(r.director.stateNote);
+    } catch (err) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `⚠ ${(err as Error).message}` }]);
+    } finally {
+      setPending(false);
+      setBusy(false);
+    }
     void refreshSessions();
-  }, [refreshSessions]);
+  }, [refreshSessions, streamTurn]);
 
   const booted = useRef(false);
   useEffect(() => {
@@ -65,18 +102,23 @@ export function App() {
     void startNew();
   }, [startNew]);
 
-  // The moment the Director's message is on screen starts the reply-latency clock.
+  // The commit that shows the Director's message COMPLETE (stream end) starts the reply-latency
+  // clock (completeAt), once per message; its first-token time is kept for the turn log.
   useLayoutEffect(() => {
     const last = messages[messages.length - 1];
-    if (last?.role === "assistant") shownAt.current = Date.now();
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+    if (last?.role === "assistant" && !last.streaming && stampedId.current !== last.id) {
+      stampedId.current = last.id;
+      shownAt.current = Date.now();
+      firstTokenAt.current = last.firstTokenAt;
+    }
+    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: last?.streaming ? "auto" : "smooth" });
   }, [messages]);
 
   useEffect(() => {
-    if (!busy) return;
+    if (!pending) return;
     const t = setInterval(() => setTick((x) => x + 1), 80);
     return () => clearInterval(t);
-  }, [busy]);
+  }, [pending]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -93,22 +135,28 @@ export function App() {
     const events = tel.take(text.length);
     const sentAt = Date.now();
     const userMsg: ChatMsg = { id: mid(), role: "user", text };
-    setMessages((m) => [...m, userMsg]);
-    setDraft("");
-    setBusy(true);
+    const prompt = { shownAt: shownAt.current, firstTokenAt: firstTokenAt.current };
     try {
-      const r = await bridge().reply({ text, events, sentAt, shownAt: shownAt.current });
-      setMessages((m) => [...m.map((x) => (x.id === userMsg.id ? { ...x, engagement: r.engagement } : x)), { id: mid(), role: "assistant", text: r.director.text }]);
+      // indicator + user bubble are committed and painted BEFORE the transport is called
+      const { result: r, replyId } = await streamTurn(
+        () => {
+          setMessages((m) => [...m, userMsg]);
+          setDraft("");
+        },
+        (onToken) => bridge().reply({ text, events, sentAt, ...prompt }, onToken),
+      );
+      setMessages((m) => completeReply(m.map((x) => (x.id === userMsg.id ? { ...x, engagement: r.engagement } : x)), replyId, r.director.text));
       setHud(r.hud);
       setStateNote(r.director.stateNote);
       if (r.title) setTitle(r.title);
     } catch (err) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `⚠ ${(err as Error).message}` }]);
+      setMessages((m) => [...m.map((x) => (x.streaming ? { ...x, streaming: false } : x)), { id: mid(), role: "assistant", text: `⚠ ${(err as Error).message}` }]);
     } finally {
+      setPending(false);
       setBusy(false);
       void refreshSessions();
     }
-  }, [tel, refreshSessions]);
+  }, [tel, refreshSessions, streamTurn]);
 
   // Test/screenshot hook: types through the same telemetry path a human would.
   useEffect(() => {
@@ -142,7 +190,7 @@ export function App() {
             <div ref={scroller} className="flex-1 overflow-y-auto overscroll-contain">
               <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-6 px-4 pb-40 pt-6 md:px-6 md:pt-8">
                 {messages.map((m) => <Message key={m.id} msg={m} />)}
-                {busy && <Thinking tick={tick} />}
+                {pending && <Thinking tick={tick} />}
               </div>
             </div>
             <div className="eeg-composer-dock pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background/90 to-transparent pt-10">

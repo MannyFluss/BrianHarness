@@ -7,7 +7,9 @@
  *   openai-compatible  any /v1/chat/completions server (LM Studio, llama.cpp, OpenRouter, ...)
  *   openai             api.openai.com with the user's API key (CORS-enabled)
  *   anthropic          api.anthropic.com with the user's API key + direct-browser-access header
- * Every network path takes `spec.fetchImpl` (iOS: CapacitorHttp-backed fetch); default is global fetch.
+ * Every network path takes `spec.fetchImpl` (iOS: BHStream / CapacitorHttp fetch); default is global
+ * fetch. `spec.streaming` says whether that fetch streams bodies: false keeps every backend on its
+ * buffered stream:false path even when the caller asks for tokens.
  * Not here (need native code): ChatGPT / Claude subscription sign-in (OAuth local callback
  * servers in pi-ai) and Claude Code (spawns a CLI). See docs/IOS_PORTING.md.
  */
@@ -19,23 +21,23 @@ import type { BackendSpec, ProviderKind } from "./spec.js";
 export const BROWSER_PROVIDER_KINDS: ProviderKind[] = ["mock", "ollama", "ollama-cloud", "openai-compatible", "openai", "anthropic"];
 export const BROWSER_DEFAULT_MODELS: Partial<Record<ProviderKind, string>> = { openai: "gpt-4o-mini", anthropic: "claude-sonnet-4-5" };
 
-export function createBrowserBackend(spec: BackendSpec & { fetchImpl?: typeof fetch }): ModelBackend {
+export function createBrowserBackend(spec: BackendSpec & { fetchImpl?: typeof fetch; streaming?: boolean; mockTokenDelayMs?: number }): ModelBackend {
   switch (spec.provider) {
     case "mock":
-      return new MockBackend(spec.seed ?? 42);
+      return new MockBackend(spec.seed ?? 42, { tokenDelayMs: spec.mockTokenDelayMs });
     case "ollama":
-      return new OllamaBackend({ model: spec.model ?? "llama3.2", baseUrl: spec.baseUrl ?? DEFAULT_OLLAMA_URL, temperature: spec.temperature, seed: spec.seed, fetchImpl: spec.fetchImpl });
+      return new OllamaBackend({ model: spec.model ?? "llama3.2", baseUrl: spec.baseUrl ?? DEFAULT_OLLAMA_URL, temperature: spec.temperature, seed: spec.seed, fetchImpl: spec.fetchImpl, streaming: spec.streaming });
     case "ollama-cloud":
-      return new OllamaBackend({ model: spec.model ?? OLLAMA_CLOUD_DEFAULT_MODEL, baseUrl: spec.baseUrl ?? OLLAMA_CLOUD_URL, apiKey: spec.apiKey, cloudProvider: true, temperature: spec.temperature, seed: spec.seed, fetchImpl: spec.fetchImpl });
+      return new OllamaBackend({ model: spec.model ?? OLLAMA_CLOUD_DEFAULT_MODEL, baseUrl: spec.baseUrl ?? OLLAMA_CLOUD_URL, apiKey: spec.apiKey, cloudProvider: true, temperature: spec.temperature, seed: spec.seed, fetchImpl: spec.fetchImpl, streaming: spec.streaming });
     case "openai-compatible":
       if (!spec.baseUrl) throw new Error("set the server URL first (e.g. http://192.168.1.20:1234/v1)");
-      return new OpenAICompatibleBackend({ baseUrl: spec.baseUrl, apiKey: spec.apiKey, model: spec.model ?? "local-model", temperature: spec.temperature, seed: spec.seed, maxTokens: spec.maxTokens, fetchImpl: spec.fetchImpl });
+      return new OpenAICompatibleBackend({ baseUrl: spec.baseUrl, apiKey: spec.apiKey, model: spec.model ?? "local-model", temperature: spec.temperature, seed: spec.seed, maxTokens: spec.maxTokens, fetchImpl: spec.fetchImpl, streaming: spec.streaming });
     case "openai":
       if (!spec.apiKey) throw new Error("add an OpenAI API key first (ChatGPT sign-in needs the native app)");
-      return new OpenAICompatibleBackend({ baseUrl: spec.baseUrl ?? "https://api.openai.com/v1", apiKey: spec.apiKey, model: spec.model ?? BROWSER_DEFAULT_MODELS.openai!, temperature: spec.temperature, maxTokens: spec.maxTokens, paid: true, fetchImpl: spec.fetchImpl });
+      return new OpenAICompatibleBackend({ baseUrl: spec.baseUrl ?? "https://api.openai.com/v1", apiKey: spec.apiKey, model: spec.model ?? BROWSER_DEFAULT_MODELS.openai!, temperature: spec.temperature, maxTokens: spec.maxTokens, paid: true, fetchImpl: spec.fetchImpl, streaming: spec.streaming });
     case "anthropic":
       if (!spec.apiKey) throw new Error("add an Anthropic API key first (Claude sign-in needs the native app)");
-      return new AnthropicFetchBackend({ apiKey: spec.apiKey, model: spec.model ?? BROWSER_DEFAULT_MODELS.anthropic!, baseUrl: spec.baseUrl, temperature: spec.temperature, maxTokens: spec.maxTokens, fetchImpl: spec.fetchImpl });
+      return new AnthropicFetchBackend({ apiKey: spec.apiKey, model: spec.model ?? BROWSER_DEFAULT_MODELS.anthropic!, baseUrl: spec.baseUrl, temperature: spec.temperature, maxTokens: spec.maxTokens, fetchImpl: spec.fetchImpl, streaming: spec.streaming });
     default:
       throw new Error(`provider "${spec.provider}" is not available in the browser build; have ${BROWSER_PROVIDER_KINDS.join(", ")}`);
   }

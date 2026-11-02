@@ -1,7 +1,18 @@
 // Capacitor detection for the web entry. In the native iOS app (Capacitor 8, CapacitorHttp enabled
 // globally) window.fetch is a native request: no WebView CORS, so Ollama Cloud can be enabled.
+// IOS Dev's Swift plugins upgrade that when present (feature-detected via window.Capacitor, no
+// @capacitor/core dependency):
+//   BHStream    real streaming fetch (nativeStreamFetch) -> backends use stream:true, tokens stream
+//   BHKeychain  API keys in the iOS Keychain (one-time migration out of localStorage)
+// Missing plugin -> the previous behaviour (CapacitorHttp buffered fetch, stream:false; localStorage).
 // In a plain browser / PWA there is no Capacitor object and nothing changes.
-import type { InProcessOptions } from "./in-process";
+import { KVCredentialStore, type CredentialStoreLike } from "@brianharness/core/browser";
+import { safeLocalKV, type InProcessOptions } from "./in-process";
+import { capacitorPlugin, createNativeStreamFetch, type BHStreamPlugin } from "./native-stream";
+import { createKeychainCredentials, type BHKeychainPlugin, type MigrationReport } from "./keychain";
+
+export { createNativeStreamFetch, type BHStreamPlugin, type BHStreamEvent } from "./native-stream";
+export { createKeychainCredentials, migrateCredentials, keychainKV, type BHKeychainPlugin } from "./keychain";
 
 type CapWindow = { Capacitor?: { isNativePlatform?: () => boolean }; fetch: typeof fetch };
 
@@ -13,12 +24,59 @@ export function isNativeCapacitor(win: unknown = globalThis): boolean {
   }
 }
 
+const unimplemented = (err: unknown) => {
+  const e = err as { code?: string; message?: string };
+  return e?.code === "UNIMPLEMENTED" || e?.code === "UNAVAILABLE" || /not implemented|unimplemented|plugin is not available/i.test(e?.message ?? "");
+};
+
 /**
- * Options for createInProcessTransport from the current window. Native: nativeFetch on, and a
- * late-bound fetchImpl (always calls the CURRENT window.fetch, i.e. CapacitorHttp's patch).
+ * Streaming fetch over BHStream; if the plugin turns out unimplemented at call time, that request
+ * falls back to the buffered fetch (the parsers accept SSE/NDJSON from a buffered body too).
  */
-export function nativeTransportOptions(win: unknown = globalThis): Pick<InProcessOptions, "nativeFetch" | "fetchImpl"> {
+export function nativeStreamFetch(plugin: BHStreamPlugin, fallback: typeof fetch): typeof fetch {
+  const streamFetch = createNativeStreamFetch(plugin);
+  let broken = false;
+  return async (input, init) => {
+    if (broken) return fallback(input, init);
+    try {
+      return await streamFetch(input, init);
+    } catch (err) {
+      if (!unimplemented(err)) throw err;
+      broken = true;
+      return fallback(input, init);
+    }
+  };
+}
+
+export const KEYCHAIN_NOTE = "Stored in the iOS Keychain on this device (BHKeychain).";
+
+/**
+ * Options for createInProcessTransport from the current window. Native: nativeFetch on and a
+ * late-bound fetchImpl (always calls the CURRENT window.fetch, i.e. CapacitorHttp's patch), or
+ * BHStream's streaming fetch when installed (streaming: true). BHKeychain, when installed, holds
+ * the API keys; existing localStorage keys are migrated on first use.
+ */
+export function nativeTransportOptions(
+  win: unknown = globalThis,
+  hooks: { onMigration?: (r: MigrationReport) => void; /** old store to migrate (default: localStorage "brianharness/") */ legacyCredentials?: CredentialStoreLike } = {},
+): Pick<InProcessOptions, "nativeFetch" | "fetchImpl" | "streaming" | "credentials" | "credentialNote"> {
   if (!isNativeCapacitor(win)) return {};
   const w = win as CapWindow;
-  return { nativeFetch: true, fetchImpl: (input, init) => w.fetch(input, init) };
+  const buffered: typeof fetch = (input, init) => w.fetch(input, init);
+  const out: ReturnType<typeof nativeTransportOptions> = { nativeFetch: true, fetchImpl: buffered, streaming: false };
+  const stream = capacitorPlugin<BHStreamPlugin>(win, "BHStream");
+  if (stream) {
+    out.fetchImpl = nativeStreamFetch(stream, buffered);
+    out.streaming = true;
+  }
+  const keychain = capacitorPlugin<BHKeychainPlugin>(win, "BHKeychain");
+  if (keychain) {
+    const legacy = hooks.legacyCredentials ?? new KVCredentialStore(safeLocalKV("brianharness/")); // the web build's store
+    out.credentials = createKeychainCredentials(keychain, legacy, (r) => {
+      if (r.failed.length) console.warn("[brianharness] keychain migration kept local copies for:", r.failed.map((f) => `${f.providerId} (${f.error})`).join(", "));
+      hooks.onMigration?.(r);
+    });
+    out.credentialNote = KEYCHAIN_NOTE;
+  }
+  return out;
 }

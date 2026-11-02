@@ -4,7 +4,7 @@
  * (KV storage), so both shells drive the exact same core logic.
  */
 import type { ModelBackend } from "./backends.js";
-import type { DirectorTurnResult, HudState } from "./session.js";
+import type { DirectorTurnResult, HudState, TurnOptions } from "./session.js";
 import { HarnessSession } from "./session.js";
 import type { HarnessStorage } from "./platform/storage.js";
 import { systemClock, type Clock } from "./platform/env.js";
@@ -44,7 +44,7 @@ export class HarnessHost {
     this.clock = cfg.clock ?? systemClock;
   }
 
-  async newSession(): Promise<{ sessionId: string; director: DirectorTurnResult; hud: HudState; title: string }> {
+  async newSession(opts: TurnOptions = {}): Promise<{ sessionId: string; director: DirectorTurnResult; hud: HudState; title: string }> {
     if (this.session) await this.session.end();
     this.session = new HarnessSession({
       userId: this.cfg.userId,
@@ -54,16 +54,20 @@ export class HarnessHost {
       seed: this.cfg.seed ? this.cfg.seed() : this.clock() % 100000,
       tagger: this.cfg.tagger,
     });
-    const d = await this.session.start();
+    const d = await this.session.start(opts);
     return { sessionId: this.session.id, director: d, hud: this.session.hud(), title: "New chat" };
   }
 
-  async reply(p: { text: string; events?: TypingEvent[]; sentAt?: number; shownAt?: number }): Promise<HostReply> {
+  /**
+   * p.shownAt = when the previous Director message was FULLY displayed (completeAt, stream end);
+   * p.firstTokenAt = when its first token was displayed. opts.onToken streams the next reply.
+   */
+  async reply(p: { text: string; events?: TypingEvent[]; sentAt?: number; shownAt?: number; firstTokenAt?: number }, opts: TurnOptions = {}): Promise<HostReply> {
     if (!this.session) await this.newSession();
     const s = this.session!;
-    if (typeof p.shownAt === "number") s.markShown(p.shownAt);
+    if (typeof p.shownAt === "number") s.markShown(p.shownAt, typeof p.firstTokenAt === "number" ? p.firstTokenAt : undefined);
     const text = String(p.text);
-    const out = await s.reply(text, Array.isArray(p.events) ? p.events : [], typeof p.sentAt === "number" ? p.sentAt : this.clock());
+    const out = await s.reply(text, Array.isArray(p.events) ? p.events : [], typeof p.sentAt === "number" ? p.sentAt : this.clock(), opts);
     const hud = s.hud();
     const t = this.titles.get(s.id) ?? { firstUserText: text, topicLabel: null, turns: 0 };
     if (isFillerOnly(t.firstUserText)) t.firstUserText = text; // "hi" then "I restore watches" -> title from the 2nd

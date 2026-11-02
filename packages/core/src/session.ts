@@ -42,6 +42,14 @@ export interface DirectorTurnResult {
   plan: DirectorPlan;
   stateNote: string;
   genMs: number;
+  /** ms from request start to the first streamed delta (undefined: not streamed) */
+  firstTokenMs?: number;
+}
+
+/** Per-turn options: onToken receives the Director's reply incrementally. */
+export interface TurnOptions {
+  onToken?: (delta: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface UserTurnResult {
@@ -74,7 +82,10 @@ export class HarnessSession {
   plans: DirectorPlan[] = [];
   transcript: ChatMessage[] = [];
   turn = 0;
+  /** Director message fully displayed (stream end); the reply-latency clock starts here */
   promptShownAt = 0;
+  /** Director message's first token displayed (telemetry only; features use promptShownAt) */
+  promptFirstTokenAt: number | undefined = undefined;
   /** word counts of this user's replies so far (for the relative-length feature) */
   wordCounts: number[] = [];
   /** per-user normalisation memory for the engagement estimator */
@@ -109,19 +120,24 @@ export class HarnessSession {
     this.opts.store?.append(this.id, e);
   }
 
-  async start(): Promise<DirectorTurnResult> {
+  async start(opts: TurnOptions = {}): Promise<DirectorTurnResult> {
     this.map.data.sessions += 1;
     for (const s of this.sources) await s.start?.();
     this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`) });
-    return this.directorTurn();
+    return this.directorTurn(opts);
   }
 
-  /** The renderer calls this when the Director's message actually became visible. */
-  markShown(t = this.clock()) {
-    this.promptShownAt = t;
+  /**
+   * The renderer calls this when the Director's message was FULLY displayed (stream end:
+   * completeAt). firstTokenAt (first token on screen) is logged only; features use completeAt so
+   * streamed (desktop/iOS) and unstreamed (sim) latencies stay comparable.
+   */
+  markShown(completeAt = this.clock(), firstTokenAt?: number) {
+    this.promptShownAt = completeAt;
+    this.promptFirstTokenAt = typeof firstTokenAt === "number" && firstTokenAt <= completeAt ? firstTokenAt : undefined;
   }
 
-  private async directorTurn(): Promise<DirectorTurnResult> {
+  private async directorTurn(opts: TurnOptions = {}): Promise<DirectorTurnResult> {
     const plan = planTurn(this.turn, this.map, this.frame, this.plans, this.rng, this.opts.policy);
     const stateNote = buildStateNote(this.frame, this.map, plan);
     const messages: ChatMessage[] = [
@@ -130,21 +146,42 @@ export class HarnessSession {
       { role: "system", content: stateNote },
     ];
     const t0 = systemClock();
-    const { text } = await this.backend.generate({ messages, plan, stateNote });
+    let firstTokenMs: number | undefined;
+    let firstTokenClock: number | undefined;
+    const user = opts.onToken;
+    const onToken = user
+      ? (d: string) => {
+          if (!d) return;
+          if (firstTokenMs === undefined) {
+            firstTokenMs = systemClock() - t0;
+            firstTokenClock = this.clock();
+          }
+          try {
+            user(d);
+          } catch {
+            /* UI callback errors never break the turn */
+          }
+        }
+      : undefined;
+    const { text } = await this.backend.generate({ messages, plan, stateNote, onToken, signal: opts.signal });
+    const streamed = firstTokenMs !== undefined;
+    if (user && !streamed && text) onToken!(text); // non-streaming backend: one delta with the whole text
     const genMs = systemClock() - t0;
     this.plans.push(plan);
     this.transcript.push({ role: "assistant", content: text });
-    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, plan, stateNote, text, backend: this.backend.id, genMs });
+    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, plan, stateNote, text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}) });
+    // server-side defaults; the renderer overrides both via markShown() with what it displayed
     this.promptShownAt = this.clock();
-    return { text, plan, stateNote, genMs };
+    this.promptFirstTokenAt = streamed ? firstTokenClock : undefined;
+    return { text, plan, stateNote, genMs, ...(streamed ? { firstTokenMs } : {}) };
   }
 
   /** Process the user's reply and its telemetry, then produce the Director's next turn. */
-  async reply(text: string, events: TypingEvent[] = [], sentAt = this.clock()): Promise<{ user: UserTurnResult; director: DirectorTurnResult }> {
+  async reply(text: string, events: TypingEvent[] = [], sentAt = this.clock(), opts: TurnOptions = {}): Promise<{ user: UserTurnResult; director: DirectorTurnResult }> {
     const tags = await this.tagger.tag(text);
     const user = this.observeUser(text, events, sentAt, tags);
     this.turn += 1;
-    const director = await this.directorTurn();
+    const director = await this.directorTurn(opts);
     return { user, director };
   }
 
@@ -230,6 +267,7 @@ export class HarnessSession {
       engagement: score,
       baseline,
       mentionedTopics: mentioned,
+      prompt: { ...(this.promptFirstTokenAt !== undefined ? { firstTokenAt: this.promptFirstTokenAt } : {}), completeAt: this.promptShownAt },
       ...(this.opts.logRawEvents ? { rawEvents: events } : {}),
     });
     this.log({ type: "interest_update", t: nowIso(), turn: this.turn, topTopics: this.map.topTopics(5).map(([t, m]) => [t, m]), hypothesis });

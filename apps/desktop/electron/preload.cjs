@@ -5,9 +5,25 @@ const on = (ch) => (cb) => {
   ipcRenderer.on(ch, h);
   return () => ipcRenderer.removeListener(ch, h);
 };
+// Streaming: main sends "harness:token" {rid, delta} while a turn generates; rid ties deltas to
+// the call that asked for them.
+let nextRid = 0;
+const withTokens = async (ch, payload, onToken) => {
+  if (typeof onToken !== "function") return ipcRenderer.invoke(ch, payload);
+  const rid = `r${Date.now().toString(36)}-${++nextRid}`;
+  const h = (_e, v) => {
+    if (v && v.rid === rid && typeof v.delta === "string") onToken(v.delta);
+  };
+  ipcRenderer.on("harness:token", h);
+  try {
+    return await ipcRenderer.invoke(ch, { ...payload, rid });
+  } finally {
+    ipcRenderer.removeListener("harness:token", h);
+  }
+};
 contextBridge.exposeInMainWorld("eeg", {
-  newSession: () => ipcRenderer.invoke("harness:new"),
-  reply: (payload) => ipcRenderer.invoke("harness:reply", payload),
+  newSession: (onToken) => withTokens("harness:new", {}, onToken),
+  reply: (payload, onToken) => withTokens("harness:reply", payload ?? {}, onToken),
   hud: () => ipcRenderer.invoke("harness:hud"),
   sessions: () => ipcRenderer.invoke("harness:sessions"),
   info: () => ipcRenderer.invoke("harness:info"),

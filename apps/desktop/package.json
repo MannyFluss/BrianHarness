@@ -16,7 +16,8 @@
     "dev:web": "vite --mode web",
     "preview:web": "vite preview --mode web --host 0.0.0.0",
     "serve:lan": "vite preview --mode web --host 0.0.0.0 --port ${PORT:-8090} --strictPort",
-    "test:web-csp": "node scripts/csp-smoke.mjs"
+    "test:web-csp": "node scripts/csp-smoke.mjs",
+    "test:web-stream": "node scripts/stream-smoke.mjs"
   },
   "dependencies": {
     "@brianharness/core": "0.1.0"

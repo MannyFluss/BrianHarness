@@ -3,7 +3,7 @@
  * is the default and is fully offline; real providers are opt-in and require BOTH
  * EEG_BACKEND=openai and an API key, so a stray OPENAI_API_KEY never causes spend.
  */
-import { readChatResponse } from "./providers/response-body.js";
+import { readChatResponse, readChatStream, type TokenCallback } from "./providers/response-body.js";
 import type { ChatMessage, DirectorPlan } from "./types.js";
 import { OPEN_TOPIC } from "./director.js";
 import { TOPIC_LEXICON, topicLabel } from "./topics.js";
@@ -17,6 +17,12 @@ export interface GenerateRequest {
   plan: DirectorPlan;
   stateNote: string;
   signal?: AbortSignal;
+  /**
+   * Incremental text deltas. A backend that can stream (and whose fetch streams) calls this per
+   * delta; others may ignore it (HarnessSession then emits the whole text once). Without onToken
+   * every backend uses its buffered stream:false path, so the sim is unchanged.
+   */
+  onToken?: TokenCallback;
 }
 export interface GenerateResult {
   text: string;
@@ -41,10 +47,26 @@ export class MockBackend implements ModelBackend {
   readonly id = "mock";
   readonly paid = false;
   private rng: Rng;
-  constructor(seed = 42) {
+  /** ms between streamed words when the caller passes onToken (UI demo / tests); 0 = no delay */
+  readonly tokenDelayMs: number;
+  constructor(seed = 42, opts: { tokenDelayMs?: number } = {}) {
     this.rng = makeRng(seed);
+    this.tokenDelayMs = opts.tokenDelayMs ?? 18;
   }
   async generate(req: GenerateRequest): Promise<GenerateResult> {
+    const out = this.compose(req);
+    if (req.onToken) {
+      // stream word by word (same RNG draws as the buffered path, so text is identical)
+      const parts = out.text.match(/\S+\s*/g) ?? [out.text];
+      for (const p of parts) {
+        if (req.signal?.aborted) throw req.signal.reason ?? new Error("aborted");
+        if (this.tokenDelayMs > 0) await new Promise((r) => setTimeout(r, this.tokenDelayMs));
+        req.onToken(p);
+      }
+    }
+    return out;
+  }
+  private compose(req: GenerateRequest): GenerateResult {
     const { plan } = req;
     const lastUser = [...req.messages].reverse().find((m) => m.role === "user")?.content ?? "";
     const words = lastUser.split(/\s+/).filter(Boolean).length;
@@ -85,12 +107,27 @@ export class MockBackend implements ModelBackend {
 export class OpenAICompatibleBackend implements ModelBackend {
   readonly id: string;
   readonly paid: boolean;
-  constructor(private cfg: { apiKey?: string; baseUrl: string; model: string; maxTokens?: number; temperature?: number; seed?: number; paid?: boolean; fetchImpl?: typeof fetch; timeoutMs?: number }) {
+  constructor(
+    private cfg: {
+      apiKey?: string;
+      baseUrl: string;
+      model: string;
+      maxTokens?: number;
+      temperature?: number;
+      seed?: number;
+      paid?: boolean;
+      fetchImpl?: typeof fetch;
+      timeoutMs?: number;
+      /** fetchImpl streams bodies (default true). false = always stream:false (CapacitorHttp). */
+      streaming?: boolean;
+    },
+  ) {
     this.id = `openai-compatible:${cfg.model}`;
     this.paid = cfg.paid ?? !isLocalUrl(cfg.baseUrl);
   }
   async generate(req: GenerateRequest): Promise<GenerateResult> {
     const f = this.cfg.fetchImpl ?? fetch; // called unbound: a stored window.fetch must not get cfg as `this`
+    const stream = !!req.onToken && this.cfg.streaming !== false;
     const res = await f(`${this.cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.cfg.apiKey ? { authorization: `Bearer ${this.cfg.apiKey}` } : {}) },
@@ -99,12 +136,12 @@ export class OpenAICompatibleBackend implements ModelBackend {
         messages: req.messages,
         max_tokens: this.cfg.maxTokens ?? 200,
         temperature: this.cfg.temperature ?? 0.8,
-        stream: false, // CapacitorHttp buffers responses anyway; never rely on SSE
+        stream, // SSE only when the fetch really streams (not CapacitorHttp's buffered fetch)
         ...(this.cfg.seed !== undefined ? { seed: this.cfg.seed } : {}),
       }),
       signal: req.signal ?? timeoutSignal(this.cfg.timeoutMs ?? 120_000), // never hang the UI
     });
-    return readChatResponse(res, "model backend");
+    return stream ? readChatStream(res, "model backend", req.onToken!) : readChatResponse(res, "model backend");
   }
 }
 

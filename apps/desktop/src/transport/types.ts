@@ -6,7 +6,9 @@
 export type InputSource = "hardware-key" | "soft-keyboard" | "autocorrect" | "predictive" | "composition" | "dictation" | "paste" | "drop" | "programmatic" | "unknown";
 export type TypingEvent = { t: number; kind: "insert" | "delete" | "paste" | "nav" | "submit" | "focus" | "blur"; len: number; source?: InputSource; chars?: number };
 export type Plan = { turn: number; mode: "explore" | "exploit" | "relax"; topic: string; altTopic?: string; style: string; reason: string };
-export type DirectorTurn = { text: string; plan: Plan; stateNote: string; genMs: number };
+export type DirectorTurn = { text: string; plan: Plan; stateNote: string; genMs: number; firstTokenMs?: number };
+/** Incremental Director text (a delta to append). Non-streaming backends send the whole text once. */
+export type TokenHandler = (delta: string) => void;
 export type Hud = {
   sessionId: string;
   userId: string;
@@ -57,8 +59,15 @@ export interface ProvidersBridge {
 }
 
 export interface EegBridge {
-  newSession(): Promise<{ sessionId: string; director: DirectorTurn; hud: Hud; title: string }>;
-  reply(p: { text: string; events: TypingEvent[]; sentAt: number; shownAt: number }): Promise<{ director: DirectorTurn; hud: Hud; engagement: number; title: string }>;
+  newSession(onToken?: TokenHandler): Promise<{ sessionId: string; director: DirectorTurn; hud: Hud; title: string }>;
+  /**
+   * shownAt = previous Director message FULLY displayed (completeAt; starts the reply-latency
+   * clock); firstTokenAt = its first token displayed (logged only). onToken streams the reply.
+   */
+  reply(
+    p: { text: string; events: TypingEvent[]; sentAt: number; shownAt: number; firstTokenAt?: number },
+    onToken?: TokenHandler,
+  ): Promise<{ director: DirectorTurn; hud: Hud; engagement: number; title: string }>;
   hud(): Promise<Hud | null>;
   sessions(): Promise<SessionItem[]>;
   info(): Promise<Info>;

@@ -2,7 +2,7 @@
 // Same EegBridge contract the Electron preload exposes, so the React UI is identical.
 //   storage      IndexedDB (falls back to memory if unavailable, e.g. some private modes)
 //   settings     localStorage
-//   credentials  localStorage via KVCredentialStore  <- web TEST build only; iOS swaps in a Keychain KV
+//   credentials  localStorage via KVCredentialStore  <- web TEST build only; iOS: BHKeychain (native.ts)
 // Providers: mock (default, offline), Ollama at a configurable URL (LAN IP), any OpenAI-compatible
 // server, OpenAI / Anthropic with an API key straight from the browser, and Ollama Cloud
 // (https://ollama.com + API key) ONLY when a native fetchImpl is passed: ollama.com has no CORS, so
@@ -56,6 +56,14 @@ export interface InProcessOptions {
    * Gates Ollama Cloud, whose API sends no CORS headers.
    */
   nativeFetch?: boolean;
+  /**
+   * fetchImpl streams response bodies, so backends may use stream:true and token callbacks
+   * reach the UI incrementally. false = buffered stream:false (CapacitorHttp without BHStream).
+   * Default: true for the page's own fetch, false when a custom fetchImpl is passed.
+   */
+  streaming?: boolean;
+  /** mock backend's per-word delay when streaming to the UI (ms) */
+  mockTokenDelayMs?: number;
   /** Ollama Cloud base URL (tests point this at a fake server). Default https://ollama.com */
   ollamaCloudUrl?: string;
 }
@@ -70,7 +78,7 @@ function guessPlatform() {
   return "web";
 }
 
-function safeLocalKV(ns: string): KeyValueStore {
+export function safeLocalKV(ns: string): KeyValueStore {
   try {
     return new LocalStorageKV(ns);
   } catch {
@@ -87,6 +95,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   // unbound wrapper so a passed-in window.fetch is never invoked with another `this`
   const fetchImpl: typeof fetch = opts.fetchImpl ?? ((input, init) => fetch(input, init));
   const nativeFetch = opts.nativeFetch ?? !!opts.fetchImpl;
+  const streaming = opts.streaming ?? !opts.fetchImpl;
 
   const ready: Promise<{ storage: HarnessStorage }> = (async () => {
     let kv = opts.storageKV;
@@ -126,15 +135,15 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         model = (d.models.find((m) => !m.cloud) ?? d.models[0])?.name;
         if (!model) throw new Error(`No Ollama models reachable at ${baseUrl}`);
       }
-      return createBrowserBackend({ provider: "ollama", baseUrl, model, fetchImpl });
+      return createBrowserBackend({ provider: "ollama", baseUrl, model, fetchImpl, streaming });
     }
     if (p === "ollama-cloud") {
       if (!nativeFetch) throw new Error(OLLAMA_CLOUD_NO_CORS);
-      return createBrowserBackend({ provider: p, model: s.model ?? OLLAMA_CLOUD_DEFAULT_MODEL, baseUrl: opts.ollamaCloudUrl, apiKey: await readApiKey(credentials, p), fetchImpl });
+      return createBrowserBackend({ provider: p, model: s.model ?? OLLAMA_CLOUD_DEFAULT_MODEL, baseUrl: opts.ollamaCloudUrl, apiKey: await readApiKey(credentials, p), fetchImpl, streaming });
     }
-    if (p === "openai-compatible") return createBrowserBackend({ provider: p, baseUrl: s.openaiCompatibleUrl, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl });
-    if (p === "openai" || p === "anthropic") return createBrowserBackend({ provider: p, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl });
-    return createBrowserBackend({ provider: "mock", seed: 42 });
+    if (p === "openai-compatible") return createBrowserBackend({ provider: p, baseUrl: s.openaiCompatibleUrl, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl, streaming });
+    if (p === "openai" || p === "anthropic") return createBrowserBackend({ provider: p, model: s.model, apiKey: await readApiKey(credentials, p), fetchImpl, streaming });
+    return createBrowserBackend({ provider: "mock", seed: 42, mockTokenDelayMs: opts.mockTokenDelayMs });
   };
   const ensureBackend = async () => {
     if (backend) return backend;
@@ -142,7 +151,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       backend = await build(await loadSettings());
     } catch (err) {
       console.warn("[brianharness] backend unavailable, using mock:", (err as Error).message);
-      backend = createBrowserBackend({ provider: "mock", seed: 42 });
+      backend = createBrowserBackend({ provider: "mock", seed: 42, mockTokenDelayMs: opts.mockTokenDelayMs });
     }
     return backend;
   };
@@ -246,11 +255,11 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
     kind: "in-process",
     platform,
     credentialNote: opts.credentialNote ?? "Stored in this browser's localStorage, unencrypted. Web test build only: use a throwaway key. The iOS app keeps keys in the Keychain.",
-    async newSession() {
-      return (await getHost()).newSession();
+    async newSession(onToken) {
+      return (await getHost()).newSession({ onToken });
     },
-    async reply(p) {
-      return (await getHost()).reply(p);
+    async reply(p, onToken) {
+      return (await getHost()).reply(p, { onToken });
     },
     async hud() {
       return (await getHost()).hud();

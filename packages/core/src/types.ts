@@ -87,7 +87,20 @@ export interface InterestMapData {
 /** Lines written to sessions/<sessionId>.jsonl */
 export type LogEvent =
   | { type: "session_start"; t: string; sessionId: string; userId: string; backend: string; sources: string[] }
-  | { type: "director_turn"; t: string; turn: number; plan: DirectorPlan; stateNote: string; text: string; backend: string; genMs: number }
+  | {
+      type: "director_turn";
+      t: string;
+      turn: number;
+      plan: DirectorPlan;
+      stateNote: string;
+      text: string;
+      backend: string;
+      /** request start -> generate() resolved (whole reply) */
+      genMs: number;
+      /** request start -> first streamed delta (absent when the backend did not stream) */
+      firstTokenMs?: number;
+      streamed?: boolean;
+    }
   | {
       type: "user_turn";
       t: string;
@@ -97,6 +110,12 @@ export type LogEvent =
       engagement: number;
       baseline: number;
       mentionedTopics: string[];
+      /**
+       * When the Director's previous message reached the screen (epoch ms, renderer clock):
+       * firstTokenAt = first streamed token rendered, completeAt = whole message rendered.
+       * The reply-latency window (and every typing feature) starts at completeAt.
+       */
+      prompt?: { firstTokenAt?: number; completeAt: number };
       rawEvents?: TypingEvent[];
     }
   | { type: "interest_update"; t: string; turn: number; topTopics: Array<[string, number]>; hypothesis: string | null }

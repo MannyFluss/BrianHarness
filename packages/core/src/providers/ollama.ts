@@ -12,7 +12,7 @@
  */
 import { timeoutSignal } from "../platform/env.js";
 import type { GenerateRequest, GenerateResult, ModelBackend } from "../backends.js";
-import { parseChatBody } from "./response-body.js";
+import { parseChatBody, readChatStream, type TokenCallback } from "./response-body.js";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const OLLAMA_CLOUD_URL = "https://ollama.com";
@@ -95,6 +95,8 @@ export class OllamaBackend implements ModelBackend {
       apiKey?: string;
       /** explicit "ollama-cloud" provider: id prefix ollama-cloud:, paid=false (free tier; key required) */
       cloudProvider?: boolean;
+      /** fetchImpl streams bodies (default true). false = always stream:false (CapacitorHttp). */
+      streaming?: boolean;
     },
   ) {
     if (cfg.cloudProvider && !cfg.apiKey) throw new Error("add an Ollama API key first (ollama.com -> Settings -> Keys)");
@@ -102,10 +104,11 @@ export class OllamaBackend implements ModelBackend {
     this.paid = cfg.cloudProvider ? false : isOllamaCloudModel(cfg.model);
   }
   async generate(req: GenerateRequest): Promise<GenerateResult> {
-    return { text: await this.chat(req.messages, { signal: req.signal }) };
+    const onToken = req.onToken && this.cfg.streaming !== false ? req.onToken : undefined;
+    return { text: await this.chat(req.messages, { signal: req.signal, onToken }) };
   }
   /** Raw chat call (also used by the adapter's topic tagger with json=true). */
-  async chat(messages: Array<{ role: string; content: string }>, opts: { json?: boolean; signal?: AbortSignal; temperature?: number } = {}): Promise<string> {
+  async chat(messages: Array<{ role: string; content: string }>, opts: { json?: boolean; signal?: AbortSignal; temperature?: number; onToken?: TokenCallback } = {}): Promise<string> {
     const base = normalizeOllamaBaseUrl(this.cfg.baseUrl);
     const f = this.cfg.fetchImpl ?? fetch;
     let lastErr: Error | null = null;
@@ -116,12 +119,13 @@ export class OllamaBackend implements ModelBackend {
         body: JSON.stringify({
           model: this.cfg.model,
           messages,
-          stream: false,
+          stream: !!opts.onToken, // NDJSON only when the fetch really streams
           ...(opts.json ? { format: "json" } : {}),
           options: { temperature: opts.temperature ?? this.cfg.temperature ?? 0.8, seed: this.cfg.seed ?? 42 },
         }),
         signal: opts.signal ?? timeoutSignal(this.cfg.timeoutMs ?? 120_000),
       });
+      if (res.ok && opts.onToken) return (await readChatStream(res, "ollama", opts.onToken)).text;
       const raw = await res.text(); // text() only: CapacitorHttp may not expose a body stream
       if (res.ok) return parseChatBody(raw).text;
       lastErr = new Error(`ollama ${res.status}: ${raw.slice(0, 200)}`);
