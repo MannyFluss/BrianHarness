@@ -45,6 +45,12 @@ export interface LlmExtractorOptions {
   /** "keyphrase-idf" (default) or "none": what tags turns without a call */
   base?: "keyphrase-idf" | "none";
   baseOptions?: KeyphraseIdfOptions;
+  /**
+   * system prompt version (default "v1" = the prompt the cached track-2 and gate answers were made with, so
+   * they replay at 0 calls). "v2" adds rank-by-enthusiasm + no routines/chores/logistics; unscored until new
+   * calls are made (different prompt = different cache key).
+   */
+  promptVersion?: ExtractorPromptVersion;
   /** max candidate interests used per call (default 4) */
   maxLabels?: number;
   /**
@@ -98,15 +104,40 @@ export const EXTRACTOR_SYSTEM_PROMPT = [
   "with 0-5 items, most likely first. confidence = how sure you are this is a real, personal interest.",
 ].join(" ");
 
+/**
+ * v2 (promptVersion "v2"): v1 plus ranking by enthusiasm and an explicit exclusion of routines / chores /
+ * logistics (a weekly meal-prep routine is not an interest unless the user is enthusiastic about it).
+ * Still example-free (no hobby is named; leak tests cover both versions). Different text = different cache
+ * keys, so v2 answers need new calls; the cached track-2 / gate answers replay only under v1.
+ */
+export const EXTRACTOR_SYSTEM_PROMPT_V2 = [
+  "You read one side of a casual chat: only the USER's messages, numbered by turn.",
+  "List the user's specific personal interests, hobbies or passions that the messages give evidence for,",
+  "including ones the user only hints at through names, places, tools or jargon.",
+  "Use the most specific accurate name for each interest, 1-5 words, in plain English, as a person would",
+  "name their hobby. Do not list generic categories alone, jobs, chores, moods, or things the user said they dislike.",
+  "Merge mentions of the same interest into one item.",
+  "Rank by enthusiasm and genuine interest: first what the user is most excited about, describes in detail or",
+  "with insider vocabulary, or brings up unprompted; things mentioned flatly, briefly or only because they were asked go last or are left out.",
+  "Routines, chores, errands, work tasks and logistics (preparing the week's meals, commuting, cleaning, paying bills,",
+  "getting places) are NOT interests unless the user is clearly enthusiastic about the activity itself.",
+  'Reply with JSON only: {"interests":[{"label":"<interest>","confidence":<0..1>,"turns":[<turn numbers>]}]}',
+  "with 0-5 items, most enthusiastic first. confidence = how sure you are this is a real, personal interest the user cares about.",
+].join(" ");
+export type ExtractorPromptVersion = "v1" | "v2";
+export const EXTRACTOR_PROMPTS: Record<ExtractorPromptVersion, string> = { v1: EXTRACTOR_SYSTEM_PROMPT, v2: EXTRACTOR_SYSTEM_PROMPT_V2 };
+
 export interface ExtractorPrompt {
   model: string;
   messages: Array<{ role: "system" | "user"; content: string }>;
 }
 
-export function buildExtractorPrompt(userMessages: string[], model = "gemma4:cloud", contextTurns = 12): ExtractorPrompt {
+export function buildExtractorPrompt(userMessages: string[], model = "gemma4:cloud", contextTurns = 12, version: ExtractorPromptVersion = "v1"): ExtractorPrompt {
+  const system = EXTRACTOR_PROMPTS[version];
+  if (!system) throw new Error(`unknown extractor promptVersion ${String(version)}`);
   const from = Math.max(0, userMessages.length - contextTurns);
   const lines = userMessages.slice(from).map((m, i) => `[turn ${from + i + 1}] ${m.replace(/\s+/g, " ").trim().slice(0, 1200)}`);
-  return { model, messages: [{ role: "system", content: EXTRACTOR_SYSTEM_PROMPT }, { role: "user", content: lines.join("\n") }] };
+  return { model, messages: [{ role: "system", content: system }, { role: "user", content: lines.join("\n") }] };
 }
 
 /** 64-bit FNV-1a over UTF-16 code units, hex. Deterministic, sync, no crypto API needed. */
@@ -191,7 +222,7 @@ export class LlmInterestExtractor implements TopicTagger {
 
   /** the prompt that WOULD be sent after this many user messages (for preparing offline runs) */
   promptFor(userMessages: string[]): ExtractorPrompt {
-    return buildExtractorPrompt(userMessages, this.model, this.o.contextTurns);
+    return buildExtractorPrompt(userMessages, this.model, this.o.contextTurns, this.o.promptVersion ?? "v1");
   }
 
   async tag(text: string, signal?: AbortSignal): Promise<TopicTag[]> {

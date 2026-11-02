@@ -39,7 +39,7 @@ One session at a time; after `end` you can `start` again.
 | `allowPaid` | must be `true` **and** the process started with `--allow-paid` for paid backends (`*:cloud` Ollama models, remote APIs, subscriptions). Local Ollama / mock never need it. |
 | `eegWeight` | base EEG blend weight (default 0.25) |
 | `engagement` | `EegBlendOptions`: `{weight, zScore, minHistory, qualityWeighting, agreementWeighting, refWindowSec, flatBoost, typingSdLow, typingSdHigh, maxWeight}` |
-| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"keyphrase-only"}` (leak-free) \| `{"kind":"keyphrase-idf"}` (leak-free, IDF) \| `{"kind":"llm-extract","model":"gemma4:cloud","everyN":6,"cacheDir":"...","maxCalls":50,"rank":"lead"}` (paid; `rank` `lead`\|`lead-eeg`\|`soft`\|`none`) \| `{"kind":"keyphrase-generic"}` \| `{"kind":"lexicon-generic"}` \| `{"kind":"keyphrase","lexicon":"full\|generic\|broad\|none"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
+| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"keyphrase-only"}` (leak-free) \| `{"kind":"keyphrase-idf"}` (leak-free, IDF) \| `{"kind":"llm-extract","model":"gemma4:cloud","everyN":6,"cacheDir":"...","maxCalls":50,"rank":"lead"}` (paid; `rank` `lead`\|`lead-eeg`\|`soft`\|`none`; `promptVersion` `v1` (default) \| `v2`) \| `{"kind":"keyphrase-generic"}` \| `{"kind":"lexicon-generic"}` \| `{"kind":"keyphrase","lexicon":"full\|generic\|broad\|none"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
 | `userId`, `sessionId`, `dataDir` | ids; `dataDir` writes the session JSONL + interest-map save file there |
 | `charsPerSec` | speed for synthesized typing (default 5) |
 
@@ -207,3 +207,13 @@ Final labels are unique. A label shown once is not shown again (case and punctua
 keyphrase clusters `kp:alright` and `kp:alright-2` no longer both appear as "alright".
 Interest-map evidence is unchanged by `rank` (`observeScale` multiplies the extractor tags' evidence weight).
 Taggers without an extractor have no prior, so their ranking is unchanged. Sweep: `docs/sweeps/phaseC_tagger_track2_merge.md`.
+
+### Extractor prompt versions
+
+`promptVersion` picks the extractor system prompt; it is part of the cache key (`promptKey` hashes model + messages).
+- `v1` (default): the prompt every cached answer was made with, so all cached replays (Track 2, gate) still hit.
+- `v2`: ranks interests by the enthusiasm the user shows (not by how often a word appears) and excludes routines,
+  chores, errands, work tasks and logistics (meal prep, commuting, cleaning, paying bills). Still no examples, so it names no passion; both
+  leak checks cover both versions.
+- v2 is **unscored**: no v2 answers are cached, and scoring it needs new extractor calls (none were made). Offline, a
+  v2 extractor refuses instead of falling back to a v1 answer.

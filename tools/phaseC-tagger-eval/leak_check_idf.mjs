@@ -6,7 +6,9 @@ import path from "node:path";
 const HE = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const SIM = process.env.SIM_ROOT ?? "/workspace/eeg-harness-sim";
 const core = await import(`${HE}/packages/core/dist/index.js`);
-const { IDF_STOPWORDS, IDF_EVALUATIVE, idfCandidates, createTagger, EXTRACTOR_SYSTEM_PROMPT, buildExtractorPrompt, SPECIFIC_TOPICS, zipfOf } = core;
+const { IDF_STOPWORDS, IDF_EVALUATIVE, idfCandidates, createTagger, EXTRACTOR_PROMPTS, buildExtractorPrompt, SPECIFIC_TOPICS, zipfOf } = core;
+// every extractor prompt version (v1, v2) is checked
+const EXTRACTOR_SYSTEM_PROMPT = Object.values(EXTRACTOR_PROMPTS).join("\n");
 // keyphrase-idf drops both lists (stopwords + evaluative adjectives/intensifiers)
 const STOP = { has: (w) => IDF_STOPWORDS.has(w) || IDF_EVALUATIVE.has(w) };
 const files = process.argv.slice(2).length ? process.argv.slice(2) : ["personas_c.json", "personas.json"];

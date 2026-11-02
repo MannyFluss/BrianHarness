@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   HarnessSession, MockBackend, SPECIFIC_TOPICS, createTagger, idfCandidates, IDF_STOPWORDS, IDF_EVALUATIVE, zipfOf, defaultFreqTable, parseZipf10, idf,
-  LlmInterestExtractor, EXTRACTOR_SYSTEM_PROMPT, buildExtractorPrompt, promptKey, requestBody, parseExtractorResponse,
+  LlmInterestExtractor, EXTRACTOR_SYSTEM_PROMPT, EXTRACTOR_SYSTEM_PROMPT_V2, buildExtractorPrompt, promptKey, requestBody, parseExtractorResponse,
   KeyphraseIdfTagger, isLocalOllamaUrl, isCloudModelTag, eegReorder, finalGuesses, InterestMap, LEAD_EEG_Z,
 } from "../src/index.ts";
 
@@ -161,9 +161,26 @@ test("llm-extract: gpt-oss gets num_predict >= 512 and no json format; parser is
 });
 
 test("llm-extract: the system prompt names no persona passion (no examples that could leak)", () => {
-  const sp = EXTRACTOR_SYSTEM_PROMPT.toLowerCase();
+  for (const sp of [EXTRACTOR_SYSTEM_PROMPT.toLowerCase(), EXTRACTOR_SYSTEM_PROMPT_V2.toLowerCase()])
   for (const w of PERSONA_WORDS) assert.ok(!new RegExp(`(^|[^a-z])${w}([^a-z]|$)`).test(sp), `prompt mentions "${w}"`);
-  for (const l of curatedLabels) assert.ok(!sp.includes(l), `prompt mentions curated "${l}"`);
+  for (const l of curatedLabels) for (const sp of [EXTRACTOR_SYSTEM_PROMPT, EXTRACTOR_SYSTEM_PROMPT_V2]) assert.ok(!sp.toLowerCase().includes(l), `prompt mentions curated "${l}"`);
+});
+
+test("llm-extract promptVersion: v1 default (cached keys unchanged), v2 selectable with its own cache key", async () => {
+  const msgs = ["hello", "I prep my meals on sunday"];
+  const v1 = buildExtractorPrompt(msgs), v2 = buildExtractorPrompt(msgs, "gemma4:cloud", 12, "v2");
+  assert.equal(v1.messages[0]!.content, EXTRACTOR_SYSTEM_PROMPT);
+  assert.equal(v2.messages[0]!.content, EXTRACTOR_SYSTEM_PROMPT_V2);
+  assert.notEqual(promptKey(v1), promptKey(v2));
+  assert.match(EXTRACTOR_SYSTEM_PROMPT_V2, /enthusias/); assert.match(EXTRACTOR_SYSTEM_PROMPT_V2, /chores/);
+  assert.equal(promptKey(new LlmInterestExtractor({}).promptFor(msgs)), promptKey(v1));
+  assert.equal(promptKey(new LlmInterestExtractor({ promptVersion: "v2" }).promptFor(msgs)), promptKey(v2));
+  // a v2 extractor offline with only v1 answers cached: refused, never fetched
+  const store = new Map([[promptKey(buildExtractorPrompt(["x"])), "{}"]]);
+  let fetched = 0;
+  const tg = new LlmInterestExtractor({ promptVersion: "v2", everyN: 1, base: "none", offline: true, cache: { get: (k) => store.get(k), set: () => {} }, fetchImpl: (async () => { fetched++; return new Response("{}"); }) as unknown as typeof fetch });
+  await tg.tag("x");
+  assert.deepEqual([tg.calls.cached, tg.calls.refused, fetched], [0, 1, 0]);
 });
 
 // ---------- llm-extract merge: the extractor's latest answer leads the final guesses ----------
