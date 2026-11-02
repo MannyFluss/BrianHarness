@@ -20,14 +20,39 @@ export function useLayoutMode(): LayoutMode {
   return mode;
 }
 
-/** Track the visual viewport so the composer stays above the iOS soft keyboard (sets --app-h). */
+/**
+ * Pin the app to the *visual* viewport so the header stays put and the composer stays above the iOS soft
+ * keyboard. With Capacitor's default keyboard handling (and Safari) the layout viewport does not shrink: iOS
+ * scrolls the page up by visualViewport.offsetTop instead, which slid the header under the status bar.
+ * .eeg-app is position:fixed at top = --app-top (offsetTop), height = --app-h (visual height), and the
+ * document itself never scrolls (any scroll iOS applies is undone). Works with Keyboard resize "native"/"body"
+ * too (offsetTop stays 0, height follows the shrunken webview).
+ */
+export function viewportVars(vv: { height: number; offsetTop: number }): { "--app-h": string; "--app-top": string } {
+  return { "--app-h": `${Math.round(vv.height)}px`, "--app-top": `${Math.max(0, Math.round(vv.offsetTop))}px` };
+}
+
 export function useVisualViewportHeight() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const set = () => document.documentElement.style.setProperty("--app-h", `${Math.round(vv.height)}px`);
+    const root = document.documentElement;
+    const set = () => {
+      for (const [k, v] of Object.entries(viewportVars(vv))) root.style.setProperty(k, v);
+    };
+    // the layout viewport must not scroll under the fixed app (iOS does it when focusing the composer)
+    const unscroll = () => {
+      if (window.scrollY !== 0 && vv.offsetTop === 0) window.scrollTo(0, 0);
+      set();
+    };
     set();
     vv.addEventListener("resize", set);
-    return () => vv.removeEventListener("resize", set);
+    vv.addEventListener("scroll", set);
+    window.addEventListener("scroll", unscroll, { passive: true });
+    return () => {
+      vv.removeEventListener("resize", set);
+      vv.removeEventListener("scroll", set);
+      window.removeEventListener("scroll", unscroll);
+    };
   }, []);
 }

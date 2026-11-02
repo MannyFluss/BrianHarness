@@ -47,16 +47,17 @@ test("user_turn.features extractor.enthusiasm / top1_turns / n_labels: absent be
   assert.deepEqual(a.turns.map((t) => t.engagement), b.turns.map((t) => t.engagement));
 });
 
-test("study session files are bh-session-<idx>-<startISO>.jsonl (index only); non-study bh-session-<startISO>.jsonl", async () => {
-  assert.equal(sessionExportName({ t: "2026-11-02T22:37:24.806Z", study: { index: 3 } }, "x"), "bh-session-03-20261102T223724Z.jsonl");
-  assert.equal(sessionExportName({ t: "2026-11-02T22:37:24.806Z" }, "x"), "bh-session-20261102T223724Z.jsonl");
+test("study session files are bh-session-<idx>-<startISO>-<tag>.jsonl (index only); non-study bh-session-<startISO>-<tag>.jsonl", async () => {
+  const sid = "2026-11-02T22-37-24-806Z-q7xw";
+  assert.equal(sessionExportName({ t: "2026-11-02T22:37:24.806Z", study: { index: 3 } }, sid), "bh-session-03-20261102T223724Z-6Zq7xw.jsonl");
+  assert.equal(sessionExportName({ t: "2026-11-02T22:37:24.806Z" }, sid), "bh-session-20261102T223724Z-6Zq7xw.jsonl");
   const storage = new MemoryHarnessStorage();
   const study = new StudyController(new MemoryKV(), new MemoryKV(), { randomSeed: () => 5 });
   await study.enable();
   const host = new HarnessHost({ userId: "u", storage, backend: async () => new MockBackend(1), study, seed: () => 5 });
   const r = await host.newSession();
   const f = host.sessionFile(r.sessionId)!;
-  assert.match(f.name, /^sessions\/bh-session-01-\d{8}T\d{6}Z\.jsonl$/);
+  assert.match(f.name, /^sessions\/bh-session-01-\d{8}T\d{6}Z-[A-Za-z0-9]{6}\.jsonl$/);
   assert.ok(!/adaptive|baseline/.test(f.name));
 });
 

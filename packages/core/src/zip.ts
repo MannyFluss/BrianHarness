@@ -125,12 +125,20 @@ export const compactIso = (iso: string) => {
 };
 
 /**
- * Stable, unique per-session export name: bh-session-<studyIdx>-<startISO-compact>.jsonl in a
- * study session, bh-session-<startISO-compact>.jsonl otherwise. Stable because
- * saveToDocuments overwrites same-name files: re-saving a session replaces its own file only.
+ * 6-char per-session tag for file names: the last 6 alphanumerics of the sessionId. Session ids are
+ * "<startISO with ms>-<random>" (e.g. 2026-11-02T22-52-09-849Z-ogfj -> "9Zogfj"), so the first 6 would only repeat
+ * the year; the tail carries the milliseconds + random suffix and differs between sessions started in the same second.
+ */
+export const sessionTag = (sessionId: string) => (sessionId.replace(/[^A-Za-z0-9]/g, "").slice(-6) || "000000");
+
+/**
+ * Unique, stable per-session export name on every platform (the web side guarantees uniqueness; native
+ * saveToDocuments may overwrite same-name files, which then only ever replaces the session's own file):
+ *   study:     bh-session-<idx 2-digit>-<startISO-compact>-<tag>.jsonl   (index only, never the mode)
+ *   otherwise: bh-session-<startISO-compact>-<tag>.jsonl
  */
 export function sessionExportName(start: { t?: string; study?: { index?: number } } | undefined, sessionId: string): string {
-  const when = start?.t ? compactIso(start.t) : plainFileName(sessionId, "session");
+  const when = start?.t ? compactIso(start.t) : "unknown";
   const idx = start?.study?.index;
-  return plainFileName(`bh-session-${typeof idx === "number" ? `${String(idx).padStart(2, "0")}-` : ""}${when}.jsonl`);
+  return plainFileName(`bh-session-${typeof idx === "number" ? `${String(idx).padStart(2, "0")}-` : ""}${when}-${sessionTag(sessionId)}.jsonl`);
 }

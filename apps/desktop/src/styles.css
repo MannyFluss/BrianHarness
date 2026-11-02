@@ -83,7 +83,10 @@ body { background: var(--color-background); color: var(--color-foreground); font
 html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
 button, a, textarea { touch-action: manipulation; }
 /* full height that follows the iOS soft keyboard (useVisualViewportHeight sets --app-h) */
-.eeg-app { height: var(--app-h, 100dvh); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+/* fixed to the visual viewport (--app-top/--app-h from useVisualViewportHeight): the header can't scroll under the
+   status bar when the keyboard opens, and the document never scrolls */
+html, body { height: 100%; overflow: hidden; }
+.eeg-app { position: fixed; left: 0; right: 0; top: var(--app-top, 0px); height: var(--app-h, 100dvh); padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 /* bars clear the status bar / notch in the iOS shell and standalone PWA */
 .eeg-safe-top { box-sizing: content-box; padding-top: env(safe-area-inset-top); }
 .eeg-composer-dock { padding-bottom: max(1.25rem, env(safe-area-inset-bottom)); }

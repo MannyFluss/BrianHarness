@@ -198,8 +198,15 @@ Screenshots (web target, headless Chromium, mock backend):
 
 - phone (< 768px): sidebar = slide-over drawer with backdrop (closed by default, closes on New chat); HUD =
   bottom sheet (max 72dvh, handle, backdrop); composer pinned at the bottom with
-  `env(safe-area-inset-bottom)`; bars pad `env(safe-area-inset-top)`; `--app-h` follows `visualViewport`
-  so the composer stays above the soft keyboard.
+  `env(safe-area-inset-bottom)`; bars pad `env(safe-area-inset-top)`. `.eeg-app` is `position: fixed` to the
+  *visual* viewport (`--app-top` = `visualViewport.offsetTop`, `--app-h` = its height) and html/body never
+  scroll, so with the keyboard up the header stays fixed below the status bar and the composer sits just above
+  the keyboard (fix for build 1438, where the header slid under the status bar). Works with every Capacitor
+  Keyboard resize mode; recommended in IOS Dev's `capacitor.config.ts`:
+  `plugins: { Keyboard: { resize: "native", resizeOnFullScreen: true } }` (`@capacitor/keyboard`), and keep
+  `ios.contentInset: "never"` (the CSS pads the safe areas itself; `"automatic"` would double the top inset).
+  Screenshots: `docs/screenshot-iphone-keyboard.png` (390x844 with a 336px keyboard, page scrolled by iOS) and
+  `docs/screenshot-iphone-keyboard-native.png` (webview shrunk, resize "native").
 - tablet (768-1279px, iPad landscape) / desktop: 3 columns, collapsible sidebar and HUD (HUD 18rem, 20rem at >= 1280).
 - touch: `pointer: coarse` -> >= 44px targets (`.eeg-tap`, `.eeg-tap-row`, `.eeg-tap-chip`), 16px inputs (no
   focus zoom), `touch-action: manipulation`, no auto-focus of the composer (keyboard doesn't pop every turn).
@@ -439,7 +446,8 @@ do beyond rebuilding; the banner is in the shared web UI.
 
 - Sidebar "Export logs": iOS `BHExport.share` (all session JSONL + interest map); Electron native save
   dialog (one zip); web: zip download. Session end on iOS: `BHExport.saveToDocuments` with that session.
-- File names: `bh-session-<idx>-<startISO-compact>.jsonl` (study) / `bh-session-<startISO-compact>.jsonl`,
+- File names: `bh-session-<idx>-<startISO-compact>-<tag>.jsonl` (study) / `bh-session-<startISO-compact>-<tag>.jsonl`
+  (`<tag>` = last 6 alphanumerics of the sessionId: unique even for two sessions in the same second),
   sanitized + de-duplicated in JS (`plainFiles`).
 - Analysis CSV: `npm run export-ratings -- <files|dirs> [-o out.csv] [--schedule unsealed.json] [--no-hooked]`
   (`packages/sim/src/export-ratings.ts`): one row per user turn, typing features + the turn rating + the

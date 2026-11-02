@@ -7,11 +7,14 @@ plugins you already have; JS matches your simulator-verified contracts.
 ## Plugins JS uses
 
 - **BHExport.share({files:[{name, content, mimeType?}]})**: "Export logs" in the sidebar. Sends every
-  session JSONL (`bh-session-<idx>-<startISO>.jsonl`, `application/x-ndjson`) plus the interest map
+  session JSONL (`bh-session-<idx>-<startISO>-<tag>.jsonl`, `application/x-ndjson`) plus the interest map
   (`<user>.json`, `application/json`). `completed:false` is treated as a cancel (no error shown).
 - **BHExport.saveToDocuments({files:[{name, content}]})**: called automatically at every session end
   (New chat, coming back after 20+ min away) with that session's JSONL, ratings included. Names are
-  stable per session (`bh-session-03-20261102T220612Z.jsonl`), so a re-save overwrites only its own file.
+  unique and stable per session (`bh-session-03-20261102T220612Z-5Zab12.jsonl`; `<tag>` = last 6
+  alphanumerics of the sessionId), generated in JS, so a re-save overwrites only its own file and two sessions
+  started in the same second (e.g. a quick reissue of the same index) never collide. Native code: write the
+  name as given; no collision handling needed.
 - Names are sanitized in JS before every call (plain, non-empty, no leading dot, no `/` or `\`, unique
   within the call), so EINVAL should never happen; if it does it is our bug. EINVAL / EWRITE / EPRESENT /
   ESHARE are shown as friendly messages. A failing saveToDocuments only logs a warning.
@@ -98,9 +101,20 @@ dismissed, reason?, hooked?, blindGuess?}`), `interest_update`, `final` (session
   queue are left alone. Study sessions log `study.protocol`; those without it are practice and are excluded.
 - **Index reissue.** A study session counts only with >= 8 replies and an answered end-of-session rating.
   Otherwise the next session repeats its index (same mode) and logs `reissueOf: <previous sessionId>`.
-- **File names.** Study sessions save as `bh-session-<idx>-<startISO>.jsonl` (e.g. `bh-session-03-20261102T220612Z.jsonl`);
-  non-study sessions have no index (`bh-session-20261102T223724Z.jsonl`). The 1438 sample files in
+- **File names.** Study sessions save as `bh-session-<idx>-<startISO>-<tag>.jsonl` (e.g.
+  `bh-session-03-20261102T220612Z-5Zab12.jsonl`); non-study sessions have no index
+  (`bh-session-20261102T223724Z-6Zq7xw.jsonl`). The 1438 sample files in
   `bh-phaseD-sample/` have no index because they are **non-study sessions** (no `study` in session_start, plan
   logged): the study was not started (or the Keychain failed) when they were recorded.
 - `user_turn.features` gains `extractor.enthusiasm`, `extractor.top1_turns`, `extractor.n_labels` (logging only).
 - Field reference: `docs/PHASE_D_LOG_SCHEMA.md`. Leak check: `node tools/phaseD/check_blinding.mjs <dir>`.
+
+## Freeze build: keyboard header + unique file names
+
+- Keyboard up on iPhone: the header no longer slides under the status bar. `.eeg-app` is pinned to the visual
+  viewport (`position: fixed`, `top = visualViewport.offsetTop`, `height = visualViewport.height`), html/body
+  never scroll. Works with any Capacitor Keyboard resize mode; recommended in `capacitor.config.ts`:
+  `plugins: { Keyboard: { resize: "native", resizeOnFullScreen: true } }`, `ios.contentInset: "never"`.
+  Emulated check: `apps/desktop/scripts/keyboard-shots.mjs` -> `docs/screenshot-iphone-keyboard.png`,
+  `docs/screenshot-iphone-keyboard-native.png`. Please confirm on a device (focus the composer, type, scroll the chat).
+- Session file names now carry a 6-char session tag (above), so `saveToDocuments` collisions can't happen.

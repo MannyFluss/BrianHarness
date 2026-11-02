@@ -125,7 +125,7 @@ test("BHExport: share gets plain unique names + string content; dismiss is not a
   await chat(t, 1);
   assert.equal(fx.docs.size, 1);
   const [docName, docContent] = [...fx.docs][0]!;
-  assert.match(docName, /^bh-session-\d{8}T\d{6}Z\.jsonl$/);
+  assert.match(docName, /^bh-session-\d{8}T\d{6}Z-[A-Za-z0-9]{6}\.jsonl$/);
   assert.ok(parse(docContent).some((e) => e.type === "rating" && e.value === 3));
 
   const r = await t.exportLogs!();
@@ -169,9 +169,11 @@ test("BHExport names: sanitized, de-duplicated, stable per session; placeholder 
   assert.deepEqual(out, ["a.jsonl", "a-2.jsonl", "hidden", "file", "file-2", "y_z.txt", "A-3.JSONL"]);
   assert.doesNotThrow(() => checkNames(out.map((name) => ({ name, content: "" }))));
   const start = { t: "2026-11-02T22:06:12.345Z", study: { index: 3 } };
-  assert.equal(sessionExportName(start, "id"), "bh-session-03-20261102T220612Z.jsonl");
-  assert.equal(sessionExportName(start, "id"), sessionExportName(start, "id"), "stable: re-saving overwrites its own file");
-  assert.equal(sessionExportName({ t: start.t }, "id"), "bh-session-20261102T220612Z.jsonl");
+  const sid = "2026-11-02T22-06-12-345Z-ab12";
+  assert.equal(sessionExportName(start, sid), "bh-session-03-20261102T220612Z-5Zab12.jsonl");
+  assert.equal(sessionExportName(start, sid), sessionExportName(start, sid), "stable: re-saving overwrites its own file");
+  assert.equal(sessionExportName({ t: start.t }, sid), "bh-session-20261102T220612Z-5Zab12.jsonl");
+  assert.notEqual(sessionExportName(start, sid), sessionExportName(start, "2026-11-02T22-06-12-901Z-k3p0"), "same index + same second -> different names");
   assert.deepEqual(toExportFile({ name: "a.txt", text: "hi", mime: "text/plain" }), { name: "a.txt", content: "hi", mimeType: "text/plain" });
   assert.deepEqual(toExportFile({ name: "a.txt", content: "hi" }), { name: "a.txt", content: "hi" });
 });
@@ -215,7 +217,7 @@ test("Phase D study on iOS: schedule only in BHKeychain study/phaseD/schedule; l
   await t.rate!({ scope: "session", turn: 2, value: 4, shownAt: 1, answeredAt: 2, dismissed: false, blindGuess: "no-idea" });
   await chat(t, 1); // ends session 1 -> autosaved
   const [name, content] = [...fx.docs][0]!;
-  assert.match(name, /^bh-session-01-\d{8}T\d{6}Z\.jsonl$/);
+  assert.match(name, /^bh-session-01-\d{8}T\d{6}Z-[A-Za-z0-9]{6}\.jsonl$/);
   assert.doesNotMatch(content, /"adaptation"|:"(adaptive|baseline)"/, "mode never in the log (blindGuess no-idea only)");
   const evs = parse(content);
   assert.ok(evs[0].study?.scheduleHash && evs[0].study.index === 1);

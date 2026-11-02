@@ -1,8 +1,10 @@
 # Phase D session log schema
 
-One JSONL file per session (`bh-session-<idx>-<startISO>.jsonl` for study sessions, `<idx>` = 2-digit study
-index, never the mode; `bh-session-<startISO>.jsonl` otherwise; `<startISO>` = session_start.t as
-`YYYYMMDDTHHMMSSZ`). One JSON object per line, `\n`-terminated, in this order:
+One JSONL file per session (`bh-session-<idx>-<startISO>-<tag>.jsonl` for study sessions, `<idx>` = 2-digit
+study index, never the mode; `bh-session-<startISO>-<tag>.jsonl` otherwise; `<startISO>` = session_start.t as
+`YYYYMMDDTHHMMSSZ`; `<tag>` = the last 6 alphanumerics of `sessionId`, i.e. its milliseconds + random suffix,
+e.g. `2026-11-02T22-52-09-849Z-ogfj` -> `9Zogfj`; the first 6 would only repeat the year). Names are generated
+in JS for every platform, unique per session and stable (re-saving a session replaces only its own file). One JSON object per line, `\n`-terminated, in this order:
 
 ```
 session_start
@@ -66,9 +68,9 @@ gets the **same index** (so the same mode) and logs `reissueOf: <previous sessio
 `reissueOf` is a **top-level** `session_start` field, omitted when the session is not a reissue. A reissue never
 advances the index; the index never exceeds 10, and after 10 valid sessions the study is finished (`assign()`
 returns null: later sessions are ordinary non-study sessions). Dedupe on the last valid session per index.
-CSV column: `reissue_of`. Note: reissued files share `bh-session-<idx>-…`; the `<startISO>` part is second
-resolution, so two sessions of the same index started in the same second would get the same filename. `exportFiles()` suffixes the later one `-2.jsonl`; iOS saveToDocuments must
-do the same (never overwrite an existing file).
+CSV column: `reissue_of`. Reissued sessions share `bh-session-<idx>-…`, but the `<tag>` keeps their file names
+distinct even within the same second, so no file overwrites another (`exportFiles()` also suffixes `-2` as a
+last-resort guard). Native code needs no collision handling.
 
 ## Samples
 
