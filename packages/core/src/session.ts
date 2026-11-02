@@ -7,7 +7,7 @@
 import type { ChatMessage, DirectorPlan, FeatureMap, FrameState, LogEvent, TypingEvent } from "./types.js";
 import { DIRECTOR_SYSTEM_PROMPT, type ModelBackend } from "./backends.js";
 import { OPEN_TOPIC, planTurn, type DirectorPolicyOptions } from "./director.js";
-import { estimateEngagement, textFeatures } from "./engagement.js";
+import { estimateEngagement, eegQuality, textFeatures, type EegBlendOptions, type EngagementContext } from "./engagement.js";
 import { InterestMap } from "./interest-map.js";
 import { makeRng, type Rng } from "./rng.js";
 import { TypingSignalSource, type SignalSource } from "./signals.js";
@@ -26,6 +26,8 @@ export interface HarnessSessionOptions {
   clock?: () => number;
   seed?: number;
   policy?: DirectorPolicyOptions;
+  /** EEG blending: weight, per-user z-scoring, quality / agreement weighting */
+  engagement?: EegBlendOptions;
   /** store raw typing events in the JSONL (bigger logs, full replay) */
   logRawEvents?: boolean;
   sessionId?: string;
@@ -71,6 +73,8 @@ export class HarnessSession {
   promptShownAt = 0;
   /** word counts of this user's replies so far (for the relative-length feature) */
   wordCounts: number[] = [];
+  /** per-user normalisation memory for the engagement estimator */
+  readonly engagementCtx: Required<Omit<EngagementContext, "options">> = { eegLnHistory: [], typingHistory: [], eegPartHistory: [], typingAtEeg: [] };
   private rng: Rng;
   private clock: () => number;
 
@@ -141,7 +145,16 @@ export class HarnessSession {
     }
     this.wordCounts.push(words);
     for (const s of this.sources) Object.assign(features, s.summarize(window));
-    const { score } = estimateEngagement(features);
+    const { score, parts } = estimateEngagement(features, { ...this.engagementCtx, options: this.opts.engagement });
+    for (const [k, v] of Object.entries(parts)) if (k.startsWith("eeg") && k !== "eeg") features[`engagement.${k}`] = v;
+    if (parts.eeg !== undefined) features["engagement.eegPart"] = parts.eeg;
+    const ec = this.engagementCtx;
+    ec.typingHistory.push(parts.typingScore!);
+    if (features["eeg.engagementIndex"] !== undefined && eegQuality(features, this.opts.engagement?.refWindowSec).quality > 0) {
+      ec.eegLnHistory.push(Math.log(Math.max(1e-6, features["eeg.engagementIndex"]!)));
+      ec.eegPartHistory.push(parts.eeg!);
+      ec.typingAtEeg.push(parts.typingScore!);
+    }
     const baseline = this.frame ? this.frame.baseline + BASELINE_ALPHA * (score - this.frame.baseline) : score;
     const mentioned = detectTopics(text);
     const plan = this.plans[this.plans.length - 1];
