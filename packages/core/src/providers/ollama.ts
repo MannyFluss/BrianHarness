@@ -8,6 +8,20 @@ import type { GenerateRequest, GenerateResult, ModelBackend } from "../backends.
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 
+/**
+ * Accept either a base URL or a full endpoint: strips trailing slashes and a trailing
+ * /api/chat, /api/generate, /api/tags, /api, /v1/chat/completions or /v1 (repeatedly), so
+ * "http://h:11434/api/chat", "http://h:11434/v1/" and "http://h:11434" all give "http://h:11434".
+ */
+export function normalizeOllamaBaseUrl(url: string | undefined | null): string {
+  let u = (url ?? "").trim() || DEFAULT_OLLAMA_URL;
+  for (;;) {
+    const next = u.replace(/\/+$/, "").replace(/\/(api\/(chat|generate|tags)|api|v1\/chat\/completions|v1)$/i, "");
+    if (next === u) return u;
+    u = next;
+  }
+}
+
 export interface OllamaModelInfo {
   name: string;
   sizeBytes?: number;
@@ -26,7 +40,7 @@ export interface OllamaDetection {
 export const isOllamaCloudModel = (name: string) => /(:|-)cloud$/.test(name);
 
 export async function detectOllama(baseUrl = DEFAULT_OLLAMA_URL, timeoutMs = 1200, fetchImpl: typeof fetch = fetch): Promise<OllamaDetection> {
-  const base = baseUrl.replace(/\/$/, "");
+  const base = normalizeOllamaBaseUrl(baseUrl);
   try {
     const res = await fetchImpl(`${base}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return { running: false, baseUrl: base, models: [], error: `HTTP ${res.status}` };
@@ -53,7 +67,7 @@ export class OllamaBackend implements ModelBackend {
   }
   /** Raw chat call (also used by the adapter's topic tagger with json=true). */
   async chat(messages: Array<{ role: string; content: string }>, opts: { json?: boolean; signal?: AbortSignal; temperature?: number } = {}): Promise<string> {
-    const base = (this.cfg.baseUrl ?? DEFAULT_OLLAMA_URL).replace(/\/$/, "");
+    const base = normalizeOllamaBaseUrl(this.cfg.baseUrl);
     const f = this.cfg.fetchImpl ?? fetch;
     let lastErr: Error | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {

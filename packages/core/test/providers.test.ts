@@ -124,3 +124,29 @@ test("FileCredentialStore: 0600 file, encrypted when a cipher is given", async (
   await store.delete("openai");
   assert.equal(await store.read("openai"), undefined);
 });
+
+test("Ollama base URL normalization: .../api/chat, /api, /v1, trailing slashes all work", async () => {
+  const { normalizeOllamaBaseUrl, OllamaTagger, OllamaBackend } = await import("../src/index.js");
+  for (const u of ["http://h:11434", "http://h:11434/", "http://h:11434/api/chat", "http://h:11434/api/chat/", "http://h:11434/api", "http://h:11434/v1", "http://h:11434/v1/", "http://h:11434/v1/chat/completions", "http://h:11434//api/chat//"])
+    assert.equal(normalizeOllamaBaseUrl(u), "http://h:11434", u);
+  assert.equal(normalizeOllamaBaseUrl("https://proxy.example/ollama/api/chat"), "https://proxy.example/ollama");
+  assert.equal(normalizeOllamaBaseUrl(undefined), "http://127.0.0.1:11434");
+
+  const { server, url } = await fakeOllama(); // 404s anything but /api/tags and /api/chat
+  try {
+    const full = `${url}/api/chat`;
+    const d = await detectOllama(full);
+    assert.equal(d.running, true);
+    assert.equal(d.baseUrl, url);
+    const b = new OllamaBackend({ model: "llama3.2:3b", baseUrl: full });
+    const r = await b.generate({ messages: [{ role: "user", content: "hi" }], plan: { turn: 1, mode: "explore", topic: "games", style: "open", reason: "" }, stateNote: "" });
+    assert.match(r.text, /hello from fake ollama/);
+    const seen: string[] = [];
+    const spyFetch = (async (u: string, init: RequestInit) => { seen.push(String(u)); return fetch(u, init); }) as unknown as typeof fetch;
+    const tagger = new OllamaTagger({ model: "m", baseUrl: `${url}/v1/`, fetchImpl: spyFetch });
+    await tagger.tag("I did a ham radio contest");
+    assert.deepEqual(seen, [`${url}/api/chat`]);
+  } finally {
+    server.close();
+  }
+});

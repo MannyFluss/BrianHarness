@@ -10,6 +10,7 @@
  *    falls back to the lexicon on any error. Lexicon hits are always unioned in.
  */
 import { TOPIC_LEXICON, TOPICS, tokenize, topicHits } from "./topics.js";
+import { normalizeOllamaBaseUrl } from "./providers/ollama.js";
 
 export interface TopicTag {
   /** stable id (lexicon key, "x:<slug>" for specific topics, "kp:<phrase>" for keyphrases) */
@@ -160,7 +161,7 @@ export class OllamaTagger implements TopicTagger {
     const lex = lexiconTags(text);
     try {
       const f = this.cfg.fetchImpl ?? fetch;
-      const res = await f(`${(this.cfg.baseUrl ?? "http://127.0.0.1:11434").replace(/\/$/, "")}/api/chat`, {
+      const res = await f(`${normalizeOllamaBaseUrl(this.cfg.baseUrl)}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
