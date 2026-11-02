@@ -1,0 +1,31 @@
+lead-eeg (LEAD_EEG_Z=1.645, preset; min 4 EEG turns) on synthetic EEG, 50 reps; python mirror vs TS eegReorder mismatches: 0/384 (Track 2 rows only shown; the original 50-rep run also included the 8 held-out gate sessions, see phaseC_lead_eeg.md "Held-out exposure"; those rows are withheld)
+
+| set | sessions | top-1 lead | top-1 lead-eeg: eeg | yoked | shuffle | noise | eeg - yoked | top-1 moved (eeg / noise) | top-3 lead -> lead-eeg eeg | proto w=.25: eeg | yoked |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| track2 | 24 | 0.375 | 0.383 | 0.338 | 0.353 | 0.357 | +0.044 | 0.059 / 0.072 | 0.583 -> 0.582 | 0.275 | 0.138 |
+
+per session where lead-eeg ever changes #1 (mean over reps): lead -> eeg / yoked / noise
+  runs_b/full_w025/p01_dana__bh_yoked_d2__s11   1 -> 0.94 / 1.00 / 0.96  (moved: eeg 0.06, noise 0.04)
+  runs_b/full_w025/p02_marcus__bh_eeg_d1__s11   0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.06, noise 0.06)
+  runs_b/w05/p03_priya__bh_yoked_d2__s11        0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.04, noise 0.10)
+  runs_b/w05/p04_gloria__bh_eeg_d2__s22         0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.04, noise 0.04)
+  runs_b/full_w025/p05_kai__bh_eeg_d2__s22      0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.12, noise 0.12)
+  runs_b/w05/p06_tomas__bh_yoked_d2__s11        0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.06, noise 0.06)
+  runs_b/w05/p07_helen__bh_yoked_d2__s11        1 -> 1.00 / 0.94 / 0.88  (moved: eeg 0.00, noise 0.12)
+  runs_b/full_w025/p08_obi__bh_typing__s11      0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.06, noise 0.06)
+  runs_b/full_w025/p01_dana__bh_yoked_d2__s22   1 -> 0.94 / 0.86 / 0.94  (moved: eeg 0.06, noise 0.06)
+  runs_b/full_w025/p02_marcus__bh_eeg_d1__s22   0 -> 0.06 / 0.02 / 0.04  (moved: eeg 0.06, noise 0.04)
+  runs_b/w05/p03_priya__bh_yoked_d2__s22        0 -> 0.24 / 0.04 / 0.14  (moved: eeg 0.24, noise 0.14)
+  runs_b/w05/p04_gloria__bh_eeg_d2__s11         0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.04, noise 0.08)
+  runs_b/full_w025/p05_kai__bh_eeg_d2__s11      0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.06, noise 0.06)
+  runs_b/w05/p06_tomas__bh_yoked_d2__s22        0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.02, noise 0.10)
+  runs_b/w05/p07_helen__bh_yoked_d2__s22        1 -> 0.90 / 0.96 / 0.92  (moved: eeg 0.10, noise 0.08)
+  runs_b/full_w025/p08_obi__bh_typing__s22      0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.04, noise 0.04)
+  runs_b/full_w025/p01_dana__bh_eeg_d1__s11     1 -> 0.98 / 0.76 / 0.92  (moved: eeg 0.02, noise 0.08)
+  runs_b/full_w025/p02_marcus__bh_eeg_d2__s22   1 -> 1.00 / 0.82 / 0.94  (moved: eeg 0.00, noise 0.06)
+  runs_b/full_w025/p03_priya__bh_eeg_d2__s11    0 -> 0.18 / 0.06 / 0.06  (moved: eeg 0.22, noise 0.10)
+  runs_b/full_w025/p04_gloria__bh_typing__s22   0 -> 0.02 / 0.00 / 0.02  (moved: eeg 0.02, noise 0.04)
+  runs_b/w05/p05_kai__bh_eeg_d2__s11            1 -> 1.00 / 0.94 / 0.94  (moved: eeg 0.00, noise 0.06)
+  runs_b/full_w025/p06_tomas__bh_typing__s22    0 -> 0.00 / 0.00 / 0.00  (moved: eeg 0.02, noise 0.02)
+  runs_b/full_w025/p07_helen__bh_yoked_d2__s22  1 -> 0.94 / 0.80 / 0.92  (moved: eeg 0.06, noise 0.08)
+  runs_b/full_w025/p08_obi__bh_eeg_d2__s22      1 -> 0.98 / 0.92 / 0.90  (moved: eeg 0.02, noise 0.10)

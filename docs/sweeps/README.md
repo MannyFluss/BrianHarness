@@ -19,5 +19,9 @@
 | `phaseC_tagger_idf_cc0_leak_check.txt` | 00901fb | both leak checks re-run with the CC0 table: PASS |
 | `phaseC_tagger_track2_merge.{md,jsonl}` | this commit | llm-extract merge variants (old / evidence x3 / soft prior / lead=default) on the 24 matched sessions, cached answers only, + top-1 diagnosis; `python3 tools/llm-extractor-eval/score.py --tag track2_merge` |
 | `phaseC_tagger_track2_merge_leak_check.txt` | this commit | both leak checks after the merge change: PASS |
+| `phaseC_lead_eeg.md` | this commit | rank lead-eeg (opt-in, preset z 1.645): Track 2 logged EEG + synthetic EEG vs the prototype, rankLeadEeg design note, port review, held-out exposure disclosure |
+| `phaseC_lead_eeg_synth.txt` | this commit | `tools/phaseC-tagger-eval/lead_eeg_synth.py`, 50 reps, Track 2 rows only |
+| `phaseC_lead_eeg_parity.txt` | 1474a83 | rankLeadEeg vs rank_proto (blend) and the Researcher's port (pure): 0/338400 mismatches |
+| `phaseC_gate_unique_check.md` | 870fccd | uniqueLabels: 8/8 gate typing finals unchanged vs 9ba666a, unscored |
 
 The Researcher's own `sweep_results.json` (in eeg-harness-sim) is theirs and is not mirrored here.
