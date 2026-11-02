@@ -1,0 +1,29 @@
+# offline_sweep_v2.mjs --tagger keyphrase-only (leak-free: no curated hobby list, no broad lexicon; kp: phrases + kp: clusters). Run from /tmp, seeds=60.
+# NOTE: the script scores hits against the TS sim's BROAD passions (space, cooking, ...) by id; open-vocab kp: labels can't match those ids, so 'found' ~1% is a scorer limit, not proof of failure. top3/fin3 credit comes from broad topics the Director itself asked about.
+tagger=keyphrase-only engagement=new seeds=60 (driver-side normalisation OFF: the harness z-scores itself in 'new' mode)
+
+== eeg weight 0.25, profile consumer ==
+typing-only (no EEG source)                    informative: found   1% top3  39% fin3  34% | flat-chatty: found   0% top3  14% fin3  18% | flat-terse: found   0% top3  26% fin3  21%
+sham: noise (d=0, same artifacts)              informative: found   3% top3  42% fin3  36% | flat-chatty: found   0% top3  14% fin3  13% | flat-terse: found   0% top3  19% fin3  17%
+EEG d=0.5                                      informative: found   3% top3  42% fin3  34% | flat-chatty: found   1% top3  16% fin3  16% | flat-terse: found   0% top3  29% fin3  29%
+EEG d=1                                        informative: found   2% top3  43% fin3  34% | flat-chatty: found   1% top3  17% fin3  16% | flat-terse: found   0% top3  36% fin3  31%
+EEG d=2                                        informative: found   1% top3  42% fin3  37% | flat-chatty: found   0% top3  20% fin3  18% | flat-terse: found   0% top3  47% fin3  39%
+EEG d=3                                        informative: found   1% top3  44% fin3  40% | flat-chatty: found   1% top3  26% fin3  21% | flat-terse: found   1% top3  52% fin3  42%
+sham: yoked (replay of another session, d=2)   informative: found   1% top3  40% fin3  33% | flat-chatty: found   0% top3  17% fin3  15% | flat-terse: found   0% top3  21% fin3  20%
+
+== eeg weight 0.5, profile consumer ==
+typing-only (no EEG source)                    informative: found   1% top3  39% fin3  34% | flat-chatty: found   0% top3  14% fin3  18% | flat-terse: found   0% top3  26% fin3  21%
+sham: noise (d=0, same artifacts)              informative: found   1% top3  34% fin3  31% | flat-chatty: found   1% top3  14% fin3  11% | flat-terse: found   0% top3  22% fin3  19%
+EEG d=0.5                                      informative: found   1% top3  42% fin3  35% | flat-chatty: found   2% top3  15% fin3  14% | flat-terse: found   1% top3  27% fin3  24%
+EEG d=1                                        informative: found   1% top3  41% fin3  34% | flat-chatty: found   1% top3  23% fin3  21% | flat-terse: found   2% top3  35% fin3  30%
+EEG d=2                                        informative: found   1% top3  42% fin3  36% | flat-chatty: found   1% top3  29% fin3  23% | flat-terse: found   4% top3  44% fin3  36%
+EEG d=3                                        informative: found   2% top3  43% fin3  38% | flat-chatty: found   1% top3  31% fin3  26% | flat-terse: found   6% top3  49% fin3  43%
+sham: yoked (replay of another session, d=2)   informative: found   1% top3  41% fin3  33% | flat-chatty: found   0% top3  12% fin3  13% | flat-terse: found   2% top3  26% fin3  25%
+
+== headset profile at d=2, weight 0.25 ==
+EEG d=2 profile=clean                          informative: found   1% top3  43% fin3  37% | flat-chatty: found   1% top3  28% fin3  22% | flat-terse: found   0% top3  46% fin3  40%
+EEG d=2 profile=lab                            informative: found   2% top3  38% fin3  38% | flat-chatty: found   1% top3  26% fin3  22% | flat-terse: found   0% top3  52% fin3  46%
+EEG d=2 profile=consumer                       informative: found   1% top3  42% fin3  37% | flat-chatty: found   0% top3  20% fin3  18% | flat-terse: found   0% top3  47% fin3  39%
+EEG d=2 profile=rough                          informative: found   1% top3  43% fin3  34% | flat-chatty: found   0% top3  21% fin3  19% | flat-terse: found   0% top3  44% fin3  38%
+
+wrote /tmp/sweeps/keyphrase-only.json

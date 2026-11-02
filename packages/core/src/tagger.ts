@@ -28,9 +28,25 @@ export interface TopicTagger {
   tag(text: string, signal?: AbortSignal): Promise<TopicTag[]>;
 }
 
+/**
+ * Which curated vocabulary a tagger may use.
+ *   full     broad topics + every curated specific hobby (DEFAULT; note: the curated list contains the
+ *            8 Phase A sim persona passions verbatim, so with it a "correct" specific guess can be a
+ *            leaked label, not discovered vocabulary; see SIM_PERSONA_SPECIFICS)
+ *   generic  broad topics + curated specifics MINUS SIM_PERSONA_SPECIFICS
+ *   broad    broad topics only (space, cooking, ...), no curated specifics
+ *   none     nothing curated: every label comes from the user's own words (keyphrases)
+ */
+export type LexiconVariant = "full" | "generic" | "broad" | "none";
+
 export type TopicTaggerSpec =
-  | { kind: "lexicon" }
-  | { kind: "keyphrase"; minRepeats?: number }
+  | { kind: "lexicon"; variant?: LexiconVariant }
+  | { kind: "lexicon-generic" }
+  | { kind: "keyphrase"; minRepeats?: number; lexicon?: LexiconVariant }
+  /** leak-free open vocabulary: keyphrase with lexicon "none" */
+  | { kind: "keyphrase-only"; minRepeats?: number }
+  /** keyphrase with lexicon "generic" */
+  | { kind: "keyphrase-generic"; minRepeats?: number }
   | { kind: "ollama"; model: string; baseUrl?: string; timeoutMs?: number; fetchImpl?: typeof fetch };
 
 /** Specific (open-vocab) topics: id -> label, parent, phrases (lowercase, matched on word boundaries). */
@@ -99,11 +115,25 @@ function countPhrase(text: string, phrase: string): number {
   return (text.match(re) ?? []).length;
 }
 
-/** Broad lexicon + curated specific topics. Specific topics need 1 strong phrase (2+ words) or 2 hits. */
-export function lexiconTags(text: string): TopicTag[] {
+/**
+ * Curated specific topics that are, verbatim, the hidden passions of the 8 Phase A sim personas
+ * (eeg-harness-sim/personas.json p01..p08). Dropped by the "generic" lexicon variant.
+ */
+export const SIM_PERSONA_SPECIFICS: readonly string[] = [
+  "x:birding-big-year", "x:watch-restoration", "x:slime-molds", "x:ham-radio",
+  "x:nes-tetris", "x:urban-sketching", "x:byzantine-history", "x:beekeeping",
+];
+
+/**
+ * Broad lexicon + curated specific topics. Specific topics need 1 strong phrase (2+ words) or 2 hits.
+ * variant: see LexiconVariant ("full" = historical behaviour).
+ */
+export function lexiconTags(text: string, variant: LexiconVariant = "full"): TopicTag[] {
+  if (variant === "none") return [];
   let rest = text.toLowerCase();
   const specific: TopicTag[] = [];
-  for (const [id, t] of Object.entries(SPECIFIC_TOPICS)) {
+  const curated = variant === "broad" ? [] : Object.entries(SPECIFIC_TOPICS).filter(([id]) => variant === "full" || !SIM_PERSONA_SPECIFICS.includes(id));
+  for (const [id, t] of curated) {
     let hits = 0, strong = false;
     const matched: string[] = [];
     for (const p of t.phrases) {
@@ -128,21 +158,28 @@ export function lexiconTags(text: string): TopicTag[] {
 export const isSpecificTopic = (id: string) => /^(x|o|kp):/.test(id);
 
 export class LexiconTagger implements TopicTagger {
-  readonly kind = "lexicon";
+  readonly kind: string;
+  constructor(private variant: LexiconVariant = "full") {
+    this.kind = variant === "full" ? "lexicon" : `lexicon-${variant}`;
+  }
   async tag(text: string) {
-    return lexiconTags(text);
+    return lexiconTags(text, this.variant);
   }
 }
 
 /** Lexicon + recurring salient phrases for interests nobody listed. */
 export class KeyphraseTagger implements TopicTagger {
-  readonly kind = "keyphrase";
+  readonly kind: string;
   private seen = new Map<string, number>();
   /** phrase -> broad topic -> co-occurrence count; the phrase's parent is the argmax */
   private cooc = new Map<string, Map<string, number>>();
-  constructor(private minRepeats = 2) {}
+  /** lexicon "none": word -> word -> messages they shared (phrase clusters for the parent roll-up) */
+  private wordCooc = new Map<string, Map<string, number>>();
+  constructor(private minRepeats = 2, private lexicon: LexiconVariant = "full") {
+    this.kind = lexicon === "full" ? "keyphrase" : lexicon === "none" ? "keyphrase-only" : `keyphrase-${lexicon}`;
+  }
   async tag(text: string) {
-    const tags = lexiconTags(text);
+    const tags = lexiconTags(text, this.lexicon);
     if (tags.some((t) => t.id.startsWith("x:"))) return tags;
     const broad = tags.filter((t) => !t.id.includes(":")).map((t) => t.id);
     const toks = tokenize(text).map((w) => w.replace(/'s$/, ""));
@@ -151,6 +188,14 @@ export class KeyphraseTagger implements TopicTagger {
     for (let i = 0; i + 1 < toks.length; i++) {
       const a = toks[i]!, b = toks[i + 1]!;
       if (!isFillerWord(a) && !isFillerWord(b) && a.length > 2 && b.length > 2 && !/^\d+$/.test(a) && !/^\d+$/.test(b)) grams.add(`${a} ${b}`);
+    }
+    const uniq = [...new Set(words)];
+    if (this.lexicon === "none") {
+      for (const a of uniq) {
+        const m = this.wordCooc.get(a) ?? new Map<string, number>();
+        for (const b of uniq) if (b !== a) m.set(b, (m.get(b) ?? 0) + 1);
+        this.wordCooc.set(a, m);
+      }
     }
     for (const g of grams) {
       this.seen.set(g, (this.seen.get(g) ?? 0) + 1);
@@ -177,9 +222,31 @@ export class KeyphraseTagger implements TopicTagger {
       let parent: string | undefined;
       let top = 0;
       for (const [t, c] of this.cooc.get(best) ?? []) if (c > top) { top = c; parent = t; }
+      if (!parent && this.lexicon === "none") {
+        // No lexicon to roll up into: the parent is the phrase cluster, i.e. the recurring word in
+        // this message that has shared the most messages with the phrase's words (or the phrase
+        // itself when nothing clusters with it). Lets "ham radio", "radio contest", "radio" consolidate.
+        const cluster = this.clusterHead(best, uniq);
+        if (cluster && cluster !== best) {
+          const cid = `kp:${cluster}`;
+          if (!tags.some((t) => t.id === cid)) tags.push({ id: cid, label: cluster, weight: this.seen.get(cluster) ?? 1 });
+          parent = cid;
+        }
+      }
       tags.push({ id: `kp:${best.replace(/\s+/g, "-")}`, label: best, parent, weight: this.seen.get(best)! });
     }
     return tags;
+  }
+  private clusterHead(phrase: string, inMessage: string[]): string | undefined {
+    const parts = phrase.split(" ");
+    let best: string | undefined, bestScore = 0;
+    for (const w of inMessage) {
+      if ((this.seen.get(w) ?? 0) < this.minRepeats) continue;
+      // a word of the phrase itself counts with its own frequency; others by shared messages
+      const score = parts.includes(w) ? (this.seen.get(w) ?? 0) : Math.min(...parts.map((p) => this.wordCooc.get(p)?.get(w) ?? 0));
+      if (score >= this.minRepeats && (score > bestScore || (score === bestScore && best !== undefined && (this.seen.get(w) ?? 0) > (this.seen.get(best) ?? 0)))) { bestScore = score; best = w; }
+    }
+    return best;
   }
 }
 
@@ -238,9 +305,15 @@ export class OllamaTagger implements TopicTagger {
 export function createTagger(spec?: TopicTaggerSpec): TopicTagger {
   switch (spec?.kind ?? "lexicon") {
     case "lexicon":
-      return new LexiconTagger();
+      return new LexiconTagger((spec as { variant?: LexiconVariant } | undefined)?.variant);
+    case "lexicon-generic":
+      return new LexiconTagger("generic");
     case "keyphrase":
-      return new KeyphraseTagger((spec as { minRepeats?: number }).minRepeats);
+      return new KeyphraseTagger((spec as { minRepeats?: number }).minRepeats, (spec as { lexicon?: LexiconVariant }).lexicon);
+    case "keyphrase-only":
+      return new KeyphraseTagger((spec as { minRepeats?: number }).minRepeats, "none");
+    case "keyphrase-generic":
+      return new KeyphraseTagger((spec as { minRepeats?: number }).minRepeats, "generic");
     case "ollama":
       return new OllamaTagger(spec as { model: string; baseUrl?: string });
     default:

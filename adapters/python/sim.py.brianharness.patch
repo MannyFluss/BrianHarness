@@ -36,7 +36,7 @@
      log(cfg.turns, "director_final_guess", "; ".join(guesses), guess=guesses)
  
      rraw = llm.chat(cfg.persona_model, [{"role": "system", "content": psys}] + pconv +
-@@ -424,6 +437,12 @@
+@@ -424,6 +437,14 @@
      ap.add_argument("--mock", action="store_true", help="use built-in mock LLM (no network)")
      ap.add_argument("--smoke", action="store_true", help="1 persona x 2 conditions x 1 seed x 4 turns, into ./smoke/")
      ap.add_argument("--dry-estimate", action="store_true")
@@ -45,7 +45,9 @@
 +    ap.add_argument("--bh-provider", default=None, help="BrianHarness backend: mock|ollama|... (default: mock with --mock, else ollama)")
 +    ap.add_argument("--bh-allow-paid", action="store_true", help="let the BrianHarness Director use paid/cloud models (e.g. *:cloud)")
 +    ap.add_argument("--bh-eeg-weight", type=float, default=None)
-+    ap.add_argument("--bh-tagger", default="lexicon", choices=["lexicon", "keyphrase", "ollama"])
++    ap.add_argument("--bh-tagger", default="lexicon",
++                    choices=["lexicon", "lexicon-generic", "keyphrase", "keyphrase-generic", "keyphrase-only", "ollama"],
++                    help="keyphrase-only = leak-free (no curated hobby list); lexicon/keyphrase merge it (see SIDECAR.md)")
      cfg = ap.parse_args()
  
      if cfg.smoke:

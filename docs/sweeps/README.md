@@ -8,5 +8,7 @@
 | `offline_sweep_v2_keyphrase_before_db609a4.txt` | db609a4 | Researcher's `offline_sweep_v2.mjs --tagger keyphrase`, before the parent roll-up (identical to their `sweep_v2_keyphrase_new.out`) |
 | `offline_sweep_v2_keyphrase_after_rollup.txt` | ff69539 | same, after the keyphrase→parent roll-up |
 | `offline_sweep_v2_lexicon_after_rollup.txt` | ff69539 | lexicon regression check (±1 pt vs the Researcher's `sweep_v2_lexicon_new.out`) |
+| `offline_sweep_v2_keyphrase_only.txt` | the commit that adds `keyphrase-only` (see git log for this file) | leak-free tagger. Scorer matches broad ids only, so `found` ≈1% is a scorer limit (kp: labels never equal `space`/`cooking`). |
+| `offline_sweep_v2_keyphrase_generic.txt` | same commit | curated list minus the 8 persona passions; identical to `keyphrase` on the TS personas |
 
 The Researcher's own `sweep_results.json` (in eeg-harness-sim) is theirs and is not mirrored here.

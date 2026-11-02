@@ -35,7 +35,11 @@ export interface StartOptions {
   /** shortcut for engagement.weight */
   eegWeight?: number;
   engagement?: EegBlendOptions;
-  /** topic tagger: {"kind":"lexicon"} (default) | {"kind":"ollama","model":"...","baseUrl":"..."} | {"kind":"keyphrase"} */
+  /**
+   * topic tagger: {"kind":"lexicon"} (default) | {"kind":"keyphrase"} | {"kind":"keyphrase-only"} (leak-free:
+   * no curated hobby list) | {"kind":"keyphrase-generic"} | {"kind":"lexicon-generic"} |
+   * {"kind":"keyphrase","lexicon":"full|generic|broad|none"} | {"kind":"ollama","model":"...","baseUrl":"..."}
+   */
   tagger?: TopicTaggerSpec;
   /** write JSONL logs / interest-map save files here */
   dataDir?: string;
