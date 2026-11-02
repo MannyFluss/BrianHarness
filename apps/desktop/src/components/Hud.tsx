@@ -82,6 +82,7 @@ function HudBody({ hud, stateNote }: { hud: HudState | null; stateNote: string }
       {hud?.study ? (
         <Section title="Study">
           <div className="text-foreground" data-hud-study>Study session {hud.study.index}/{hud.study.total}</div>
+          {hud.extractorWarning && <div className="text-amber-300/80" data-hud-extractor-warning>{hud.extractorWarning}</div>}
           <div className="text-muted-foreground">Blinded: what the Director has learned and plans is hidden until the study is unsealed.</div>
         </Section>
       ) : (<>

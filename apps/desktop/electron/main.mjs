@@ -80,9 +80,10 @@ async function chooseTagger() {
     cache: { get: (k) => extractorCache.get(k), set: (k, v) => void extractorCache.set(k, v) },
   });
   taggerReason = c.reason;
-  return c.spec;
+  return { spec: c.spec, fallback: c.fallback };
 }
-const host = new HarnessHost({ userId, storage: store, backend: () => ensureBackend(), logRawEvents: true, seed: () => Date.now() % 100000, study, tagger: chooseTagger });
+const host = new HarnessHost({ userId, storage: store, backend: () => ensureBackend(), logRawEvents: true, seed: () => Date.now() % 100000, study, tagger: chooseTagger,
+  onExtractorWarning: (msg, { sessionId, reason }) => console.error(`[${BRAND.slug}] ${msg} [session ${sessionId}, ${reason}]`) });
 /** @type {BrowserWindow | null} */
 let mainWin = null;
 

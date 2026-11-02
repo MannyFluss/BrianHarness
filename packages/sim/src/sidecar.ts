@@ -179,7 +179,7 @@ export class Sidecar {
       case "reply":
         return this.reply(m);
       case "hud":
-        return { hud: this.need().hud(), ledger: this.ledger(), tagger: { kind: this.need().tagger.kind, ...("freqTable" in this.need().tagger ? { freq: (this.need().tagger as unknown as { freqTable: { name: string } }).freqTable.name } : {}), ...("calls" in this.need().tagger ? { calls: (this.need().tagger as unknown as { calls: unknown }).calls } : {}) } };
+        return { hud: this.need().hud(), ledger: this.ledger(), tagger: { kind: this.need().tagger.kind, ...("freqTable" in this.need().tagger ? { freq: (this.need().tagger as unknown as { freqTable: { name: string } }).freqTable.name } : {}), ...("calls" in this.need().tagger ? { calls: (this.need().tagger as unknown as { calls: unknown }).calls } : {}), ...this.need().extractorOutcome() } };
       case "final_guesses":
         return { guesses: this.need().finalGuesses(Number(m.k ?? 3)) };
       case "end": {
@@ -247,6 +247,7 @@ export class Sidecar {
       seed,
       engagement,
       tagger,
+      onExtractorWarning: (msg, reason) => process.stderr.write(`[sidecar] ${msg} [${reason}]\n`),
     });
     const d = await this.session.start();
     return { protocol: SIDECAR_PROTOCOL, sessionId: this.session.id, backend: backend.id, paid: backend.paid, director: { text: d.text, plan: d.plan } };

@@ -21,6 +21,8 @@ export type Hud = {
   topStyles: Array<[string, number, number]>;
   /** blinded study session: interest map / plan / hypothesis are withheld */
   study?: { index: number; total: number };
+  /** study sessions: "Interest AI unavailable this session (cap reached)" etc. (mode-free) */
+  extractorWarning?: string;
 };
 /** One absorption prompt as the UI saw it (evaluation only; see core RatingRecord). */
 export type RatingInput = {

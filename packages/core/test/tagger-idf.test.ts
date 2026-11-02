@@ -356,10 +356,85 @@ test("session end logs {type:'final'} (top1/top3 + extractor prompt version/mode
     assert.equal(fin.top1, "sourdough baking");
     assert.equal((fin.top3 as string[])[0], "sourdough baking");
     assert.equal(fin.extractorPromptVersion, "v2"); assert.equal(fin.model, "gemma4:cloud"); assert.equal(fin.tagger, "llm-extract");
-    assert.deepEqual(Object.keys(fin).sort(), ["extractorPromptVersion", "model", "t", "tagger", "top1", "top3", "top3Ids", "turns", "type"]);
+    assert.deepEqual(Object.keys(fin).sort(), ["effectiveTagger", "extractorCalls", "extractorPromptVersion", "fallback", "model", "t", "tagger", "top1", "top3", "top3Ids", "turns", "type"]);
+    assert.deepEqual(fin.extractorCalls, { attempted: 1, ok: 1, failed: 0, capped: 0 }); assert.equal(fin.effectiveTagger, "llm-extract"); assert.equal(fin.fallback, false);
     assert.ok(!/adapt|baseline/i.test(JSON.stringify(fin)), "final carries no mode");
     const iu = lines.filter((l) => l.type === "interest_update");
     assert.equal(iu.length, 2); assert.equal(iu[1]!.top1, "sourdough baking");
     assert.equal(lines.findIndex((l) => l.type === "final") + 1, lines.findIndex((l) => l.type === "session_end"));
   }
+});
+
+// ---------- the extractor's real per-session outcome: effectiveTagger / fallback / reason ----------
+const ANSWER = JSON.stringify({ message: { content: JSON.stringify({ interests: [{ label: "sourdough baking", confidence: 0.9, turns: [1] }] }) } });
+const STUDY = { id: "st", index: 1, total: 4, scheduleHash: "h" };
+async function outcomeSession(tagger: unknown, opts: Record<string, unknown> = {}, replies = 4) {
+  const store = new MemoryHarnessStorage();
+  const warnings: string[] = [];
+  const s = new HarnessSession({ userId: "u", backend: new MockBackend(1), store, seed: 3, tagger: tagger as never,
+    onExtractorWarning: (m: string, r: string) => warnings.push(`${r}|${m}`), ...opts });
+  await s.start();
+  const huds = [s.hud()];
+  for (let i = 0; i < replies; i++) { await s.reply(`my starter bubbled over again ${i}`); huds.push(s.hud()); }
+  await s.end();
+  const lines = store.readSession(s.id) as unknown as Array<Record<string, unknown>>;
+  return { fin: lines.find((l) => l.type === "final")!, end: lines.find((l) => l.type === "session_end")!, warnings, huds };
+}
+const fetch500 = (async () => new Response("boom", { status: 400 })) as unknown as typeof fetch;
+const fetchOk = (async () => new Response(ANSWER, { status: 200 })) as unknown as typeof fetch;
+
+test("extractor outcome: ok / cap_reached / call_failed / offline / not_due / no_key / mock_or_local, in final + session_end", async () => {
+  const cases: Array<[string, unknown, Record<string, unknown>, number, Record<string, unknown>]> = [
+    ["ok", new LlmInterestExtractor({ everyN: 2, fetchImpl: fetchOk }), {}, 4, { effectiveTagger: "llm-extract", fallback: false, extractorCalls: { attempted: 2, ok: 2, failed: 0, capped: 0 } }],
+    ["partial", new LlmInterestExtractor({ everyN: 2, fetchImpl: fetchOk, reserveCall: (() => { let n = 0; return () => n++ < 1; })() }), {}, 4, { effectiveTagger: "llm-extract", fallback: false, extractorCalls: { attempted: 2, ok: 1, failed: 0, capped: 1 } }],
+    ["cap", new LlmInterestExtractor({ everyN: 2, fetchImpl: fetchOk, reserveCall: () => false }), {}, 4, { effectiveTagger: "keyphrase-idf", fallback: true, fallbackReason: "cap_reached", extractorCalls: { attempted: 2, ok: 0, failed: 0, capped: 2 } }],
+    ["fail", new LlmInterestExtractor({ everyN: 2, fetchImpl: fetch500 }), {}, 4, { effectiveTagger: "keyphrase-idf", fallback: true, fallbackReason: "call_failed", extractorCalls: { attempted: 2, ok: 0, failed: 2, capped: 0 } }],
+    ["offline", new LlmInterestExtractor({ everyN: 2, offline: true }), {}, 2, { effectiveTagger: "keyphrase-idf", fallback: true, fallbackReason: "offline", extractorCalls: { attempted: 1, ok: 0, failed: 0, capped: 0 } }],
+    ["not_due", new LlmInterestExtractor({ everyN: 6, fetchImpl: fetchOk }), {}, 2, { effectiveTagger: "keyphrase-idf", fallback: true, fallbackReason: "not_due", extractorCalls: { attempted: 0, ok: 0, failed: 0, capped: 0 } }],
+    ["no_key", { kind: "keyphrase-idf" }, { taggerFallback: "no_key" }, 2, { effectiveTagger: "keyphrase-idf", fallback: true, fallbackReason: "no_key", extractorCalls: { attempted: 0, ok: 0, failed: 0, capped: 0 } }],
+    ["mock", { kind: "keyphrase-idf" }, { taggerFallback: "mock_or_local" }, 2, { effectiveTagger: "keyphrase-idf", fallback: true, fallbackReason: "mock_or_local", extractorCalls: { attempted: 0, ok: 0, failed: 0, capped: 0 } }],
+    ["idf by choice", { kind: "keyphrase-idf" }, {}, 2, { effectiveTagger: "keyphrase-idf", fallback: false, extractorCalls: { attempted: 0, ok: 0, failed: 0, capped: 0 } }],
+  ];
+  for (const [name, tagger, opts, replies, want] of cases) {
+    const { fin, end, warnings } = await outcomeSession(tagger, opts, replies);
+    const got = { effectiveTagger: fin.effectiveTagger, fallback: fin.fallback, extractorCalls: fin.extractorCalls, ...(fin.fallbackReason ? { fallbackReason: fin.fallbackReason } : {}) };
+    assert.deepEqual(got, want, name);
+    for (const k of Object.keys(want)) assert.deepEqual(end[k], want[k], `${name}: session_end.${k}`);
+    const r = want.fallbackReason as string | undefined;
+    assert.deepEqual(warnings.map((w) => w.split("|")[0]), r && r !== "not_due" ? [r] : [], `${name}: one warning`);
+  }
+});
+
+test("extractor warning: study HUD shows it from the start / from the failing turn, same text in adaptive and baseline; no HUD warning outside studies", async () => {
+  const texts: string[] = [];
+  for (const adaptation of ["adaptive", "baseline"] as const) {
+    const a = await outcomeSession({ kind: "keyphrase-idf" }, { taggerFallback: "no_key", study: STUDY, adaptation });
+    assert.equal(a.huds[0]!.extractorWarning, "Interest AI unavailable this session (no key)");
+    const b = await outcomeSession(new LlmInterestExtractor({ everyN: 2, fetchImpl: fetchOk, reserveCall: () => false }), { study: STUDY, adaptation });
+    assert.deepEqual(b.huds.map((h) => h.extractorWarning ?? null), [null, null, "Interest AI unavailable this session (cap reached)", "Interest AI unavailable this session (cap reached)", "Interest AI unavailable this session (cap reached)"]);
+    texts.push(JSON.stringify([a.huds, b.huds].map((hs) => hs.map((h) => h.extractorWarning ?? null))));
+    assert.ok(!/adapt|baseline/i.test(JSON.stringify([a.fin, a.end, b.fin, b.end, a.warnings, b.warnings].map((x) => { const { t: _t, ...rest } = x as Record<string, unknown>; return rest; }))), "no mode");
+  }
+  assert.equal(texts[0], texts[1]);
+  const plain = await outcomeSession({ kind: "keyphrase-idf" }, { taggerFallback: "no_key" });
+  assert.ok(plain.huds.every((h) => h.extractorWarning === undefined));
+  assert.equal(plain.warnings.length, 1, "stderr hook still fires");
+});
+
+test("baseline sessions run the tagger/extractor with the same call pattern as adaptive ones", async () => {
+  const pattern: Record<string, unknown> = {};
+  for (const adaptation of ["adaptive", "baseline"] as const) {
+    const calls: Array<{ turn: number; body: unknown }> = [];
+    let turn = 0;
+    const f = (async (_u: string, init: { body: string }) => { calls.push({ turn, body: JSON.parse(init.body) }); return new Response(ANSWER, { status: 200 }); }) as unknown as typeof fetch;
+    const ex = new LlmInterestExtractor({ everyN: 3, fetchImpl: f });
+    const s = new HarnessSession({ userId: "u", backend: new MockBackend(5), store: null, seed: 5, adaptation, study: STUDY, tagger: ex });
+    await s.start();
+    for (const m of MSGS) { turn++; await s.reply(m); }
+    await s.end();
+    pattern[adaptation] = { calls, outcome: s.extractorOutcome(), net: ex.calls.network };
+  }
+  const a = pattern.adaptive as { calls: unknown[] };
+  assert.equal(a.calls.length, 2);
+  assert.deepEqual(pattern.baseline, pattern.adaptive);
 });

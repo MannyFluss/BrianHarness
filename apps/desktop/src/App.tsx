@@ -276,6 +276,11 @@ export function App() {
             </div>
             <div className="eeg-composer-dock pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background/90 to-transparent pt-10">
               <div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-3 md:px-4">
+                {hud?.extractorWarning && (
+                  <div role="status" data-testid="extractor-warning" className="mb-2 rounded-md border border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-center text-xs text-amber-200/90">
+                    {hud.extractorWarning}
+                  </div>
+                )}
                 <Composer value={draft} onChange={setDraft} onSend={() => void send()} busy={busy} telemetryRef={tel.attach} />
                 <div className="mt-2 truncate text-center text-xs text-muted-foreground/60">typing telemetry is logged locally · {pickerLabel(info)}</div>
               </div>

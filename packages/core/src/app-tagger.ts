@@ -70,6 +70,8 @@ export interface AppTaggerInput {
 
 export interface AppTaggerChoice {
   spec: TopicTaggerSpec;
+  /** set when keyphrase-idf was chosen because llm-extract could not be built */
+  fallback?: "no_key" | "mock_or_local";
   /** short human reason (HUD / logs) */
   reason: string;
 }
@@ -78,7 +80,7 @@ const CLOUD: ProviderKind[] = ["ollama-cloud", "openai", "anthropic"];
 
 export function appTaggerSpec(i: AppTaggerInput): AppTaggerChoice {
   const idf: TopicTaggerSpec = { kind: "keyphrase-idf" };
-  if (i.provider === "mock") return { spec: idf, reason: "mock provider: keyphrase-idf" };
+  if (i.provider === "mock") return { spec: idf, fallback: "mock_or_local", reason: "mock provider: keyphrase-idf" };
   const common: LlmExtractorOptions = {
     model: APP_EXTRACTOR_MODEL, rank: "lead", base: "keyphrase-idf", everyN: i.everyN ?? 6,
     promptVersion: i.promptVersion ?? DEFAULT_EXTRACTOR_PROMPT_VERSION,
@@ -98,5 +100,7 @@ export function appTaggerSpec(i: AppTaggerInput): AppTaggerChoice {
       reason: `llm-extract ${APP_EXTRACTOR_MODEL} via the Ollama app (cloud tag; prompt ${common.promptVersion})`,
     };
   }
-  return { spec: idf, reason: CLOUD.includes(i.provider) ? "no Ollama Cloud key for the extractor: keyphrase-idf" : "local provider: keyphrase-idf" };
+  return CLOUD.includes(i.provider)
+    ? { spec: idf, fallback: "no_key", reason: "no Ollama Cloud key for the extractor: keyphrase-idf" }
+    : { spec: idf, fallback: "mock_or_local", reason: "local provider: keyphrase-idf" };
 }

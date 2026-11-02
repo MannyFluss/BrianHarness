@@ -69,6 +69,18 @@ What to check, with Safari Web Inspector on the device, `localStorage["bh.debug"
 - To check on device: pick Ollama Cloud with a key, send 6 replies, end the session; the Files copy of
   `bh-session-*.jsonl` should contain one `final` line with `"extractorPromptVersion":"v2"`.
 
+**Extractor outcome + fallback warning (Nov 2 2026).** `final` and `session_end` now carry the extractor's real
+per-session outcome: `extractorCalls {attempted, ok, failed, capped}`, `effectiveTagger` (`llm-extract` only if
+at least one call returned an answer, else `keyphrase-idf`), `fallback` and `fallbackReason`
+(`no_key` | `mock_or_local` = the app never built an extractor; `cap_reached` | `call_failed` | `offline` = built,
+but no call answered; `not_due` = the session ended before the first extractor turn, no warning). In study
+sessions the HUD and a small banner above the composer (`data-testid="extractor-warning"`) show e.g.
+"Interest AI unavailable this session (cap reached)" from session start (no key / mock) or from the failing
+turn; it is identical in adaptive and baseline sessions (the tagger runs in both), so it reveals no mode.
+Electron and the sidecar print it to stderr once per session/reason. Exporter CSV columns: `effective_tagger,
+extractor_fallback, extractor_fallback_reason, extractor_calls_{attempted,ok,failed,capped}`. iOS: nothing to
+do beyond rebuilding; the banner is in the shared web UI.
+
 ## Export contract (what the files contain)
 
 One JSONL per session: `session_start` (with `study: {id, index, total, scheduleHash}` in study

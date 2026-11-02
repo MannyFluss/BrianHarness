@@ -212,7 +212,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       const s = await loadSettings();
       tagger = { ...tagger, baseUrl: tagger.baseUrl ?? normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL), fetchImpl: tagger.fetchImpl ?? fetchImpl };
     }
-    if (!tagger) tagger = async () => (await chooseTagger()).spec;
+    if (!tagger) tagger = async () => { const c = await chooseTagger(); return { spec: c.spec, fallback: c.fallback }; };
     host = new HarnessHost({
       userId,
       storage,

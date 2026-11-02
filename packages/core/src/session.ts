@@ -4,7 +4,7 @@
  *   -> interest map update (+autosave) -> Director plans -> state note -> backend speaks
  * Used identically by the desktop app (Electron main process) and the sim runner.
  */
-import type { ChatMessage, DirectorPlan, FeatureMap, FrameState, LogEvent, RatingRecord, TypingEvent } from "./types.js";
+import type { ChatMessage, DirectorPlan, ExtractorFallbackReason, ExtractorOutcomeRecord, FeatureMap, FrameState, LogEvent, RatingRecord, TypingEvent } from "./types.js";
 import { DIRECTOR_SYSTEM_PROMPT, type ModelBackend } from "./backends.js";
 import { OPEN_TOPIC, baselineRotation, planBaselineTurn, planTurn, type DirectorPolicyOptions } from "./director.js";
 import { estimateEngagement, eegQuality, textFeatures, type EegBlendOptions, type EngagementContext } from "./engagement.js";
@@ -44,7 +44,16 @@ export interface HarnessSessionOptions {
   adaptation?: Adaptation;
   /** blinded study session: logged in session_start; plans / state notes are sealed in the log */
   study?: { id: string; index: number; total: number; scheduleHash: string };
+  /** the app wanted llm-extract but could not build one (no key / mock or local model): logged as the fallback reason */
+  taggerFallback?: "no_key" | "mock_or_local";
+  /** called once per session per reason when the extractor is unavailable (Electron / sidecar: stderr) */
+  onExtractorWarning?: (message: string, reason: ExtractorFallbackReason) => void;
 }
+
+const FALLBACK_TEXT: Record<ExtractorFallbackReason, string> = {
+  no_key: "no key", mock_or_local: "mock or local model", cap_reached: "cap reached", call_failed: "calls failed", offline: "offline", not_due: "no call yet",
+};
+export const extractorWarningText = (r: ExtractorFallbackReason) => `Interest AI unavailable this session (${FALLBACK_TEXT[r]})`;
 
 export interface DirectorTurnResult {
   text: string;
@@ -78,6 +87,8 @@ export interface HudState {
   topStyles: Array<[string, number, number]>;
   /** blinded study session (the interest map, plan and hypothesis are withheld from the HUD) */
   study?: { index: number; total: number };
+  /** non-blocking warning: the interest extractor is unavailable this session (same text in both study modes) */
+  extractorWarning?: string;
 }
 
 const nowIso = () => new Date().toISOString();
@@ -142,6 +153,7 @@ export class HarnessSession {
   async start(opts: TurnOptions = {}): Promise<DirectorTurnResult> {
     this.map.data.sessions += 1;
     for (const s of this.sources) await s.start?.();
+    this.checkExtractorWarning(); // started without an extractor (no key / mock or local model)
     const st = this.opts.study;
     this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash } } : {}) });
     return this.directorTurn(opts);
@@ -200,6 +212,7 @@ export class HarnessSession {
   /** Process the user's reply and its telemetry, then produce the Director's next turn. */
   async reply(text: string, events: TypingEvent[] = [], sentAt = this.clock(), opts: TurnOptions = {}): Promise<{ user: UserTurnResult; director: DirectorTurnResult }> {
     const tags = await this.tagger.tag(text);
+    this.checkExtractorWarning();
     const user = this.observeUser(text, sanitizeTypingEvents(events), sentAt, tags);
     this.turn += 1;
     const director = await this.directorTurn(opts);
@@ -303,6 +316,8 @@ export class HarnessSession {
 
   async end(): Promise<void> {
     for (const s of this.sources) await s.stop?.();
+    const outcome = this.extractorOutcome();
+    if (outcome.fallback && outcome.fallbackReason && outcome.fallbackReason !== "not_due") this.warnExtractor(outcome.fallbackReason);
     const g = this.finalGuesses(3);
     const tg = this.tagger as TopicTagger & { model?: string; promptVersion?: string };
     this.log({
@@ -314,8 +329,9 @@ export class HarnessSession {
       top3Ids: g.map((x) => x.topic),
       tagger: tg.kind,
       ...(tg.promptVersion ? { extractorPromptVersion: tg.promptVersion, model: tg.model } : {}),
+      ...outcome,
     });
-    this.log({ type: "session_end", t: nowIso(), turns: this.turn });
+    this.log({ type: "session_end", t: nowIso(), turns: this.turn, ...outcome });
     if (!this.baseline) this.opts.store?.saveMap(this.map);
   }
 
@@ -349,11 +365,45 @@ export class HarnessSession {
     return finalGuesses(this.map, this.snapshots, k, { prior: this.tagger.rankPrior?.() ?? null, ...opts });
   }
 
+  /** the extractor's per-session outcome so far (see ExtractorOutcomeRecord) */
+  extractorOutcome(): ExtractorOutcomeRecord {
+    const tg = this.tagger as TopicTagger & { outcome?: { attempted: number; ok: number; failed: number; capped: number; offline: number }; baseKind?: string };
+    const o = tg.outcome;
+    if (!o) {
+      const fb = this.opts.taggerFallback;
+      return { extractorCalls: { attempted: 0, ok: 0, failed: 0, capped: 0 }, effectiveTagger: tg.kind, fallback: !!fb, ...(fb ? { fallbackReason: fb } : {}) };
+    }
+    const extractorCalls = { attempted: o.attempted, ok: o.ok, failed: o.failed, capped: o.capped };
+    if (o.ok > 0) return { extractorCalls, effectiveTagger: "llm-extract", fallback: false };
+    const fallbackReason: ExtractorFallbackReason = o.capped ? "cap_reached" : o.failed ? "call_failed" : o.offline ? "offline" : "not_due";
+    return { extractorCalls, effectiveTagger: tg.baseKind ?? "keyphrase-idf", fallback: true, fallbackReason };
+  }
+  /** live: the warning to show now (null while the extractor works or before its first due turn) */
+  private liveExtractorReason(): ExtractorFallbackReason | null {
+    const o = this.extractorOutcome();
+    return o.fallback && o.fallbackReason && o.fallbackReason !== "not_due" ? o.fallbackReason : null;
+  }
+  private warned = new Set<string>();
+  private warnExtractor(r: ExtractorFallbackReason) {
+    if (this.warned.has(r)) return;
+    this.warned.add(r);
+    this.opts.onExtractorWarning?.(extractorWarningText(r), r);
+  }
+  private checkExtractorWarning() {
+    const r = this.liveExtractorReason();
+    if (r) this.warnExtractor(r);
+  }
+
   hud(): HudState {
     const st = this.opts.study;
     if (st) {
-      // blinded: what the Director learned / plans would reveal the mode; typing features stay
-      return { sessionId: this.id, userId: this.userId, backend: this.backend.id, turn: this.turn, frame: this.frame, plan: null, hypothesis: null, topTopics: [], topStyles: [], study: { index: st.index, total: st.total } };
+      // blinded: what the Director learned / plans would reveal the mode; typing features stay. The extractor
+      // warning is mode-free (the tagger runs identically in adaptive and baseline sessions).
+      const r = this.liveExtractorReason();
+      return {
+        sessionId: this.id, userId: this.userId, backend: this.backend.id, turn: this.turn, frame: this.frame, plan: null, hypothesis: null, topTopics: [], topStyles: [],
+        study: { index: st.index, total: st.total }, ...(r ? { extractorWarning: extractorWarningText(r) } : {}),
+      };
     }
     return {
       sessionId: this.id,

@@ -49,6 +49,8 @@ test("export-ratings: one row per user turn, ratings joined, no mode column; --s
   for (const c of ["top1_running", "final_top1", "final_top3", "extractor_prompt_version", "extractor_model"]) assert.ok(head.split(",").includes(c), c);
   assert.ok(s1.every((r) => r.final_top1 && r.final_top1 === s1[0]!.final_top1), "session final top1 on every row");
   assert.ok(s1.every((r) => r.top1_running), "running top1 per turn");
+  for (const c of ["effective_tagger", "extractor_fallback", "extractor_fallback_reason", "extractor_calls_attempted", "extractor_calls_ok", "extractor_calls_failed", "extractor_calls_capped"]) assert.ok(head.split(",").includes(c), c);
+  assert.ok(s1.every((r) => r.effective_tagger && r.extractor_fallback === "false" && r.extractor_fallback_reason === "" && r.extractor_calls_attempted === "0"), "extractor outcome per row");
   assert.ok(!ratingsCsv(readSessionLogs([dir]), { hooked: false }).includes("herons"));
 
   // unsealed join (explicit, hash-checked)

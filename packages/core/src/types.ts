@@ -164,5 +164,20 @@ export type LogEvent =
    * Session-end interest labels (written just before session_end): the final top-3 guesses as labels, the
    * extractor that produced them (prompt version + model for llm-extract). Never carries the study mode.
    */
-  | { type: "final"; t: string; turns: number; top1: string | null; top3: string[]; top3Ids: string[]; tagger: string; extractorPromptVersion?: string; model?: string }
-  | { type: "session_end"; t: string; turns: number };
+  | ({ type: "final"; t: string; turns: number; top1: string | null; top3: string[]; top3Ids: string[]; tagger: string; extractorPromptVersion?: string; model?: string } & ExtractorOutcomeRecord)
+  | ({ type: "session_end"; t: string; turns: number } & Partial<ExtractorOutcomeRecord>);
+
+/**
+ * Why a session's topic tagging did not come from the LLM extractor: no_key / mock_or_local = the app never
+ * built one (selection); cap_reached / call_failed / offline = it was built but no call returned an answer;
+ * not_due = the session ended before the first extractor turn.
+ */
+export type ExtractorFallbackReason = "no_key" | "mock_or_local" | "cap_reached" | "call_failed" | "offline" | "not_due";
+/** the extractor's actual per-session outcome (never the study mode: the tagger runs in both modes) */
+export interface ExtractorOutcomeRecord {
+  extractorCalls: { attempted: number; ok: number; failed: number; capped: number };
+  /** "llm-extract" only when at least one extractor call returned an answer; otherwise the tagger that really tagged */
+  effectiveTagger: string;
+  fallback: boolean;
+  fallbackReason?: ExtractorFallbackReason;
+}

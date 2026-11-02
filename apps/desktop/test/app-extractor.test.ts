@@ -70,6 +70,7 @@ test("app tagger: real cloud provider + Ollama Cloud key -> llm-extract v2 (rank
   assert.deepEqual(r.sys, ["v2"], "one extractor call at user turn 6, v2 prompt");
   assert.equal(r.final.top1, "sourdough bread baking");
   assert.equal(r.final.extractorPromptVersion, "v2"); assert.equal(r.final.model, "gemma4:cloud"); assert.equal(r.final.tagger, "llm-extract");
+  assert.equal(r.final.effectiveTagger, "llm-extract"); assert.equal(r.final.fallback, false); assert.deepEqual(r.final.extractorCalls, { attempted: 1, ok: 1, failed: 0, capped: 0 });
   assert.ok(Array.isArray(r.final.top3) && r.final.top3.length >= 1);
   assert.ok(r.lines.filter((l) => l.type === "interest_update").every((l) => "top1" in l), "running top1 per turn");
   assert.equal(JSON.parse((await r.settingsKV.get(APP_EXTRACTOR_CALLS_KEY))!).calls, 1, "persisted shared call cap counter");
@@ -87,15 +88,19 @@ test("app tagger: mock -> keyphrase-idf, no extractor call; OpenAI without an Ol
   assert.match(m.info.tagger!, /mock provider: keyphrase-idf/);
   assert.deepEqual(m.sys, []);
   assert.equal(m.final.tagger, "keyphrase-idf"); assert.ok(!("extractorPromptVersion" in m.final));
+  assert.equal(m.final.fallback, true); assert.equal(m.final.fallbackReason, "mock_or_local");
   const o = await run({ provider: "openai", key: false });
   assert.match(o.info.tagger!, /no Ollama Cloud key/);
   assert.deepEqual(o.sys, []);
+  assert.equal(o.final.fallbackReason, "no_key"); assert.equal(o.final.effectiveTagger, "keyphrase-idf");
 });
 
 test("app tagger: extractor failure falls back to keyphrase-idf labels (session keeps going)", async () => {
   const r = await run({ provider: "ollama-cloud", extractor: "fail" });
   assert.deepEqual(r.sys, ["v2"]);
   assert.equal(r.final.tagger, "llm-extract");
+  assert.equal(r.final.effectiveTagger, "keyphrase-idf", "no call succeeded: keyphrase-idf did all the tagging");
+  assert.equal(r.final.fallback, true); assert.equal(r.final.fallbackReason, "call_failed");
   assert.ok(r.final.top1 && r.final.top1 !== "sourdough bread baking", `keyphrase-idf top1, got ${r.final.top1}`);
 });
 
@@ -106,6 +111,7 @@ test("app tagger: shared call cap refuses once spent (no fetch)", async () => {
   await kv.set(APP_EXTRACTOR_CALLS_KEY, JSON.stringify({ calls: 50 }));
   const r = await run({ provider: "ollama-cloud", settingsKV: kv });
   assert.deepEqual(r.sys, [], "cap reached: no network call");
+  assert.equal(r.final.fallbackReason, "cap_reached"); assert.deepEqual(r.final.extractorCalls, { attempted: 1, ok: 0, failed: 0, capped: 1 });
   assert.equal(appTaggerSpec({ provider: "ollama", model: "llama3.2:3b", ollamaUrl: "http://127.0.0.1:11434" }).spec.kind, "keyphrase-idf");
   assert.equal(appTaggerSpec({ provider: "ollama", model: "gpt-oss:120b-cloud", ollamaUrl: "http://127.0.0.1:11434" }).spec.kind, "llm-extract");
   assert.equal(appTaggerSpec({ provider: "ollama-cloud", ollamaCloudKey: "k", canReachOllamaCloud: false }).spec.kind, "keyphrase-idf");

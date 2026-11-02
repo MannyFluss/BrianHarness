@@ -29,6 +29,9 @@ export interface HostReply {
   title: string;
 }
 
+/** a tagger factory's answer: a tagger / spec, or a spec plus why the wanted extractor was not built */
+export type HostTaggerChoice = TopicTagger | TopicTaggerSpec | undefined | { spec: TopicTaggerSpec; fallback?: "no_key" | "mock_or_local" };
+
 export class HarnessHost {
   session: HarnessSession | null = null;
   private titles = new Map<string, { firstUserText: string | null; topicLabel: string | null; turns: number }>();
@@ -40,7 +43,9 @@ export class HarnessHost {
       backend: () => Promise<ModelBackend>;
       logRawEvents?: boolean;
       /** a spec / tagger, or a factory called once per new session (e.g. re-read the selected provider) */
-      tagger?: TopicTagger | TopicTaggerSpec | (() => TopicTagger | TopicTaggerSpec | undefined | Promise<TopicTagger | TopicTaggerSpec | undefined>);
+      tagger?: TopicTagger | TopicTaggerSpec | (() => HostTaggerChoice | Promise<HostTaggerChoice>);
+      /** extractor unavailable this session (Electron: stderr). The HUD shows it in study sessions. */
+      onExtractorWarning?: (message: string, info: { sessionId: string; reason: string }) => void;
       seed?: () => number;
       clock?: Clock;
       /** Phase D blinded study (StudyController); absent = every session adaptive, no study fields */
@@ -52,14 +57,16 @@ export class HarnessHost {
     this.clock = cfg.clock ?? systemClock;
   }
 
-  private async sessionTagger(): Promise<TopicTagger | TopicTaggerSpec | undefined> {
+  private async sessionTagger(): Promise<{ tagger?: TopicTagger | TopicTaggerSpec; fallback?: "no_key" | "mock_or_local" }> {
     const t = this.cfg.tagger;
-    if (typeof t !== "function") return t;
+    if (typeof t !== "function") return { tagger: t };
     try {
-      return await t();
+      const c = await t();
+      if (c && typeof c === "object" && "spec" in c) return { tagger: c.spec, ...(c.fallback ? { fallback: c.fallback } : {}) };
+      return { tagger: c as TopicTagger | TopicTaggerSpec | undefined };
     } catch (err) {
       console.warn("[brianharness] tagger selection failed; using keyphrase-idf:", (err as Error).message);
-      return { kind: "keyphrase-idf" };
+      return { tagger: { kind: "keyphrase-idf" } };
     }
   }
 
@@ -85,7 +92,11 @@ export class HarnessHost {
       store: this.cfg.storage,
       logRawEvents: this.cfg.logRawEvents ?? true,
       seed: this.cfg.seed ? this.cfg.seed() : this.clock() % 100000,
-      tagger: await this.sessionTagger(),
+      ...(await (async () => {
+        const c = await this.sessionTagger();
+        return { tagger: c.tagger, ...(c.fallback ? { taggerFallback: c.fallback } : {}) };
+      })()),
+      onExtractorWarning: (message, reason) => this.cfg.onExtractorWarning?.(message, { sessionId, reason }),
     });
     const d = await this.session.start(opts);
     return { sessionId: this.session.id, director: d, hud: this.session.hud(), title: "New chat" };

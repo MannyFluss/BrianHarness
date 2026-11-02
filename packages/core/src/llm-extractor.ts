@@ -206,6 +206,12 @@ export class LlmInterestExtractor implements TopicTagger {
    * per instance (= per session/case). network = HTTP attempts incl. retries; http = attempts by status;
    * lastError keeps the HTTP status / reason of the latest failure or refusal
    */
+  /**
+   * per-session outcome of each due extraction (logical calls, not HTTP attempts): ok = an answer was read
+   * (cache hit or HTTP 2xx), failed = HTTP / network failure or a refused non-cloud model, capped = the call cap
+   * refused it, offline = cache miss in offline mode. Feeds the session's effectiveTagger / fallback record.
+   */
+  readonly outcome = { attempted: 0, ok: 0, failed: 0, capped: 0, offline: 0 };
   readonly calls = { network: 0, cached: 0, refused: 0, failed: 0, retried: 0, http: {} as Record<string, number>, lastError: null as string | null };
   private base: TopicTagger | null;
   private user: string[] = [];
@@ -220,6 +226,8 @@ export class LlmInterestExtractor implements TopicTagger {
     this.base = (o.base ?? "keyphrase-idf") === "none" ? null : new KeyphraseIdfTagger(o.baseOptions);
   }
   get model() { return this.o.model ?? "gemma4:cloud"; }
+  /** the tagger that tags turns without an answer ("keyphrase-idf" or "none") */
+  get baseKind(): string { return this.base ? "keyphrase-idf" : "none"; }
   get promptVersion(): ExtractorPromptVersion { return this.o.promptVersion ?? DEFAULT_EXTRACTOR_PROMPT_VERSION; }
   private due(turn: number): boolean {
     if (this.o.atTurns?.length) return this.o.atTurns.includes(turn);
@@ -280,14 +288,16 @@ export class LlmInterestExtractor implements TopicTagger {
   private async extract(signal?: AbortSignal): Promise<ExtractedInterest[]> {
     const p = this.promptFor(this.user);
     const key = promptKey(p);
+    this.outcome.attempted++;
     const hit = await this.o.cache?.get(key);
-    if (hit !== undefined) { this.calls.cached++; return parseExtractorResponse(hit); }
-    if (this.o.offline) { this.calls.refused++; return []; }
+    if (hit !== undefined) { this.calls.cached++; this.outcome.ok++; return parseExtractorResponse(hit); }
+    if (this.o.offline) { this.calls.refused++; this.outcome.offline++; return []; }
     const url = `${normalizeOllamaBaseUrl(this.o.baseUrl ?? "https://ollama.com")}/api/chat`;
     const local = isLocalOllamaUrl(url);
     if (local && !this.o.allowLocalModels && !isCloudModelTag(this.model)) {
       this.calls.refused++;
       this.calls.lastError = `refused: ${this.model} is not a :cloud tag (a local Ollama URL may only forward cloud models)`;
+      this.outcome.failed++;
       return [];
     }
     const f = this.o.fetchImpl ?? fetch;
@@ -297,6 +307,7 @@ export class LlmInterestExtractor implements TopicTagger {
       if (this.o.reserveCall && !(await this.o.reserveCall())) {
         this.calls.refused++;
         this.calls.lastError = attempt ? `call cap reached before retry ${attempt} (last: ${this.calls.lastError})` : "call cap reached";
+        if (attempt) this.outcome.failed++; else this.outcome.capped++;
         return [];
       }
       let status = 0;
@@ -313,11 +324,12 @@ export class LlmInterestExtractor implements TopicTagger {
         const raw = await res.text();
         if (!res.ok) throw new ExtractorHttpError(status, raw);
         await this.o.cache?.set(key, raw);
+        this.outcome.ok++;
         return parseExtractorResponse(raw);
       } catch (e) {
         if (!status) this.calls.http.error = (this.calls.http.error ?? 0) + 1;
         this.calls.lastError = e instanceof Error ? e.message : String(e);
-        if (status < 500 || attempt >= retries) { this.calls.failed++; return []; }
+        if (status < 500 || attempt >= retries) { this.calls.failed++; this.outcome.failed++; return []; }
         this.calls.retried++;
         await new Promise((r) => setTimeout(r, (this.o.retryDelayMs ?? 500) * 2 ** attempt));
       }

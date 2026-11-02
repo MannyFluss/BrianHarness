@@ -21,7 +21,7 @@ export interface UnsealedSchedule { order: string[]; scheduleHash?: string }
 const META = ["sessionId", "studyIndex", "scheduleHash", "turn", "userTurn", "t", "engagement", "baseline", "text.words", "text.chars"] as const;
 const RATING = ["turn_rating", "turn_rating_dismissed", "turn_rating_reason", "turn_rating_shownAt", "turn_rating_answeredAt", "session_rating", "session_rating_dismissed", "session_hooked", "session_blindGuess"] as const;
 /** interest labels: running top-1 after this turn (interest_update.top1) + the session's {type:'final'} record */
-const LABELS = ["top1_running", "final_top1", "final_top3", "extractor_prompt_version", "extractor_model"] as const;
+const LABELS = ["top1_running", "final_top1", "final_top3", "extractor_prompt_version", "extractor_model", "effective_tagger", "extractor_fallback", "extractor_fallback_reason", "extractor_calls_attempted", "extractor_calls_ok", "extractor_calls_failed", "extractor_calls_capped"] as const;
 
 export function readSessionLogs(paths: string[]): SessionLog[] {
   const files: string[] = [];
@@ -51,7 +51,7 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
     const ratings = events.filter((e) => e.type === "rating");
     const lastOf = <T extends Ev>(xs: T[]) => xs[xs.length - 1];
     const sess = lastOf(ratings.filter((r) => r.scope === "session"));
-    const fin = lastOf(events.filter((e) => e.type === "final")) as (Ev & { top1?: string | null; top3?: string[]; extractorPromptVersion?: string; model?: string }) | undefined;
+    const fin = lastOf(events.filter((e) => e.type === "final")) as (Ev & { top1?: string | null; top3?: string[]; extractorPromptVersion?: string; model?: string; effectiveTagger?: string; fallback?: boolean; fallbackReason?: string; extractorCalls?: { attempted: number; ok: number; failed: number; capped: number } }) | undefined;
     const top1At = new Map<number, unknown>();
     for (const iu of events.filter((e) => e.type === "interest_update")) if ("top1" in iu) top1At.set(iu.turn as number, iu.top1);
     for (const u of events.filter((e) => e.type === "user_turn")) {
@@ -84,6 +84,13 @@ export function ratingsCsv(logs: SessionLog[], opts: { schedule?: UnsealedSchedu
         final_top3: fin?.top3?.join(" | "),
         extractor_prompt_version: fin?.extractorPromptVersion,
         extractor_model: fin?.model,
+        effective_tagger: fin?.effectiveTagger,
+        extractor_fallback: fin?.fallback,
+        extractor_fallback_reason: fin?.fallbackReason,
+        extractor_calls_attempted: fin?.extractorCalls?.attempted,
+        extractor_calls_ok: fin?.extractorCalls?.ok,
+        extractor_calls_failed: fin?.extractorCalls?.failed,
+        extractor_calls_capped: fin?.extractorCalls?.capped,
       });
     }
   }
