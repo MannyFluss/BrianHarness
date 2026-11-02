@@ -197,9 +197,10 @@ export class HarnessSession {
       // low engagement count against the question style that carried them
       if (!plan.scout) this.map.observeStyle(plan.style, score, 1);
     }
-    for (const t of mentioned) {
+    for (const tag of tags) {
+      const t = tag.id;
       if (t === plan?.topic || t === plan?.altTopic) continue;
-      observe(t, Math.min(1, score + 0.1), 0.7); // user steered there unprompted
+      observe(t, Math.min(1, score + 0.1), tag.observeWeight ?? 0.7); // user steered there unprompted
     }
     // Roll child evidence (specific hobbies, keyphrases) up to ancestors that weren't credited
     // directly this turn, once per ancestor (strongest child wins), so the parent accumulates it.

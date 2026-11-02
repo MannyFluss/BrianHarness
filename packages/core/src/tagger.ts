@@ -11,6 +11,8 @@
  */
 import { TOPIC_LEXICON, TOPICS, tokenize, topicHits } from "./topics.js";
 import { normalizeOllamaBaseUrl } from "./providers/ollama.js";
+import { KeyphraseIdfTagger, type KeyphraseIdfOptions } from "./tagger-idf.js";
+import { LlmInterestExtractor, type LlmExtractorOptions } from "./llm-extractor.js";
 
 export interface TopicTag {
   /** stable id (lexicon key, "x:<slug>" for specific topics, "kp:<phrase>" for keyphrases) */
@@ -20,6 +22,11 @@ export interface TopicTag {
   parent?: string;
   /** strength (keyword hits) */
   weight: number;
+  /**
+   * interest-map evidence weight when the user mentions this topic unprompted (default 0.7).
+   * keyphrase-idf scales it by distinctiveness; the LLM extractor by confidence.
+   */
+  observeWeight?: number;
 }
 
 export interface TopicTagger {
@@ -46,6 +53,10 @@ export type TopicTaggerSpec =
   | { kind: "keyphrase-only"; minRepeats?: number }
   /** keyphrase with lexicon "generic" */
   | { kind: "keyphrase-generic"; minRepeats?: number }
+  /** leak-free, IDF-weighted distinctive terms + proper nouns, clustered across turns (tagger-idf.ts) */
+  | ({ kind: "keyphrase-idf" } & KeyphraseIdfOptions)
+  /** LLM interest extractor every N turns on top of keyphrase-idf (llm-extractor.ts) */
+  | ({ kind: "llm-extract" } & LlmExtractorOptions)
   | { kind: "ollama"; model: string; baseUrl?: string; timeoutMs?: number; fetchImpl?: typeof fetch };
 
 /** Specific (open-vocab) topics: id -> label, parent, phrases (lowercase, matched on word boundaries). */
@@ -313,6 +324,10 @@ export function createTagger(spec?: TopicTaggerSpec): TopicTagger {
       return new KeyphraseTagger((spec as { minRepeats?: number }).minRepeats, "none");
     case "keyphrase-generic":
       return new KeyphraseTagger((spec as { minRepeats?: number }).minRepeats, "generic");
+    case "keyphrase-idf":
+      return new KeyphraseIdfTagger(spec as KeyphraseIdfOptions);
+    case "llm-extract":
+      return new LlmInterestExtractor(spec as LlmExtractorOptions);
     case "ollama":
       return new OllamaTagger(spec as { model: string; baseUrl?: string });
     default:
