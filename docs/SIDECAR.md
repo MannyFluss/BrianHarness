@@ -39,7 +39,7 @@ One session at a time; after `end` you can `start` again.
 | `allowPaid` | must be `true` **and** the process started with `--allow-paid` for paid backends (`*:cloud` Ollama models, remote APIs, subscriptions). Local Ollama / mock never need it. |
 | `eegWeight` | base EEG blend weight (default 0.25) |
 | `engagement` | `EegBlendOptions`: `{weight, zScore, minHistory, qualityWeighting, agreementWeighting, refWindowSec, flatBoost, typingSdLow, typingSdHigh, maxWeight}` |
-| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"keyphrase-only"}` (leak-free) \| `{"kind":"keyphrase-idf"}` (leak-free, IDF) \| `{"kind":"llm-extract","model":"gemma4:cloud","everyN":6,"cacheDir":"...","maxCalls":50}` (paid) \| `{"kind":"keyphrase-generic"}` \| `{"kind":"lexicon-generic"}` \| `{"kind":"keyphrase","lexicon":"full\|generic\|broad\|none"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
+| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"keyphrase-only"}` (leak-free) \| `{"kind":"keyphrase-idf"}` (leak-free, IDF) \| `{"kind":"llm-extract","model":"gemma4:cloud","everyN":6,"cacheDir":"...","maxCalls":50,"rank":"lead"}` (paid; `rank` `lead`\|`lead-eeg`\|`soft`\|`none`) \| `{"kind":"keyphrase-generic"}` \| `{"kind":"lexicon-generic"}` \| `{"kind":"keyphrase","lexicon":"full\|generic\|broad\|none"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
 | `userId`, `sessionId`, `dataDir` | ids; `dataDir` writes the session JSONL + interest-map save file there |
 | `charsPerSec` | speed for synthesized typing (default 5) |
 
@@ -155,12 +155,55 @@ messages go to `model` (default `gemma4:cloud`) at `https://ollama.com/api/chat`
 the network with `allowPaid` + `--allow-paid` + `OLLAMA_API_KEY`; otherwise it is offline (cache hits only).
 `cacheDir` caches every response (`<key>.json`) and enforces a hard `maxCalls` cap (default 50) persisted in
 `<cacheDir>/calls.json`; `responsesFile` (JSONL `{key, raw}`) is a read-only cache for scoring responses
-gathered elsewhere (`tools/llm-extractor-eval/`). `hud` reports `tagger.calls`.
+gathered elsewhere (`tools/llm-extractor-eval/`). `hud` reports `tagger.calls`
+(`{network, cached, refused, failed, retried, http: {<status>: n}, lastError}`, per session/case instance).
+
+- **Call cap is atomic.** Every reservation re-reads `<cacheDir>/calls.json` under an exclusive lock file
+  (`calls.json.lock`, `O_EXCL`) and writes via rename. Parallel cases and separate processes that share one
+  `cacheDir` therefore count exactly and share the cap. The old counter read the file once per instance and
+  lost updates (mock: 1 recorded for 3 made). For a per-case cap, give each case its own `cacheDir`.
+- **Local Ollama app.** A `baseUrl` on `localhost` / `127.0.0.1` / `[::1]` needs no key. No `Authorization`
+  header is sent, and the sidecar treats it as online whenever paid network is allowed. Only cloud tags
+  (`:cloud`, `-cloud`) are forwarded, so nothing runs on the local machine (the same rule as
+  `tools/llm-extractor-eval/run.mjs`). Any other model is refused, counted under `calls.refused`, and the reason
+  goes into `lastError`. `allowLocalModels: true` lifts the refusal.
+- **Errors and retries.** A non-2xx reply fails with `extractor HTTP <status>: <start of body>` in
+  `calls.lastError` (the key is never included). A 5xx is retried at most `retries` (default 2) times with
+  backoff `retryDelayMs` (default 500 ms, doubled each time). Every retry is reserved against the cap like a
+  first try, so a full cap stops retrying. A 4xx or a network error is not retried. Once the attempts are used
+  up, the tagger falls back to the base tagger for that call.
+- **Live sim cadence.** The live sim (`sim.py`) never sends the persona's last message (turn 12), because
+  there is no Director turn after it. The last extractor call therefore lands at user turn 11, which is why the
+  gate preset uses `--bh-extract-turns 6,11`. The offline replays here (`tools/llm-extractor-eval`, cadence 6,12)
+  see all 12 turns. To make a live run match, use the sim's `--bh-feed-last`, which sends turn 12 and discards
+  one extra Director call per case. HE needs no change for this.
 
 Final-guess merge (`rank`, default `"lead"`): the latest non-empty extractor answer leads `final_guesses` /
 `top3` in the extractor's own order, keyphrase-idf topics fill the remaining slots (all of them before the
 first non-empty answer, so an empty or failed reply falls back to keyphrases), and keyphrase topics whose words
 all occur in a ranked label are dropped as duplicates (`aliasBase`, default true). `"soft"` adds
 `priorWeight` (default 0.5) x 0.85^rank to the engagement score instead; `"none"` is the pre-merge behaviour.
+
+`"lead-eeg"` (opt-in) works like `"lead"`, but EEG may reorder the extractor's own labels. Under plain
+`"lead"`, EEG reaches only the keyphrase fill slots, so EEG minus sham on the extractor's labels is exactly 0.
+
+- **Base order.** The extractor's list order. Its confidences are not re-sorted, so ties in confidence keep
+  list order.
+- **Signal.** For each label: the mean within-session z of ln(`eeg.engagementIndex`) over the user turns it
+  cites. Only turns with usable EEG quality count, and the session needs at least `LEAD_EEG_MIN_TURNS` = 4
+  such turns.
+- **Move rule.** A label moves above an earlier one only if it beats it by more than
+  `LEAD_EEG_Z * sqrt(1/k_a + 1/k_b)` (k = cited turns with EEG).
+- **The constant.** `LEAD_EEG_Z` = 1.645 is a one-sided 5% test of "no difference" for unit-variance noise.
+  It was fixed a priori, not tuned on any persona set. Pure noise therefore swaps a given adjacent pair in
+  at most about 5% of sessions, and near-ties keep the extractor's order.
+- **No EEG.** A label with no EEG on its turns never moves and is never passed. Without EEG, `"lead-eeg"`
+  equals `"lead"`.
+- **Override.** `leadEegZ` overrides the constant (research only).
+
+Sweep: `docs/sweeps/phaseC_lead_eeg.md`.
+
+Final labels are unique. A label shown once is not shown again (case and punctuation ignored), so the
+keyphrase clusters `kp:alright` and `kp:alright-2` no longer both appear as "alright".
 Interest-map evidence is unchanged by `rank` (`observeScale` multiplies the extractor tags' evidence weight).
 Taggers without an extractor have no prior, so their ranking is unchanged. Sweep: `docs/sweeps/phaseC_tagger_track2_merge.md`.

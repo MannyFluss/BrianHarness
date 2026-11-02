@@ -115,6 +115,7 @@ def main():
             taggers["llm-extract %s + keyphrase-idf, evidence x3 (rank none)" % m] = dict(b, rank="none", observeScale=3)
             taggers["llm-extract %s + keyphrase-idf, soft prior 0.5" % m] = dict(b, rank="soft", priorWeight=0.5)
             taggers["llm-extract %s + keyphrase-idf, lead (DEFAULT)" % m] = dict(b, rank="lead")
+            taggers["llm-extract %s + keyphrase-idf, lead-eeg (z 1.645)" % m] = dict(b, rank="lead-eeg")
             taggers["llm-extract %s alone, lead" % m] = dict(b, base="none", rank="lead")
     direct = {}
     if a.responses:
@@ -205,7 +206,7 @@ def write_md(R, names, path, a):
     if calls:
         tot = collections.Counter()
         for c in calls:
-            tot.update(c)
+            tot.update({k: v for k, v in c.items() if isinstance(v, (int, float)) and not isinstance(v, bool)})
         L += ["", "Extractor call accounting during scoring (network must be 0): %s" % dict(tot)]
     open(path, "w").write("\n".join(L) + "\n")
     print("\n".join(L))

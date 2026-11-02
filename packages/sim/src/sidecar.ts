@@ -16,7 +16,7 @@ import path from "node:path";
 import {
   HarnessSession, PreparedFeatureSource, SessionStore, createBackend, detectOllama, parseBackendRef,
   synthesizeTypingFromText, type BackendSpec, type EegBlendOptions, type FeatureMap, type ProviderKind, type TypingEvent,
-  type HarnessSession as HS, type TopicTaggerSpec, type LlmExtractorOptions, type ExtractorCache, type FreqTable, parseZipf10,
+  type HarnessSession as HS, type TopicTaggerSpec, type LlmExtractorOptions, type ExtractorCache, type FreqTable, parseZipf10, isLocalOllamaUrl,
 } from "@brianharness/core";
 
 /**
@@ -64,21 +64,50 @@ export function llmExtractSpec(o: SidecarLlmExtractOptions, allowNetwork: boolea
     get: (k) => mem.get(k) ?? (dir && fs.existsSync(path.join(dir, `${k}.json`)) ? fs.readFileSync(path.join(dir, `${k}.json`), "utf8") : undefined),
     set: (k, raw) => { mem.set(k, raw); if (dir) fs.writeFileSync(path.join(dir, `${k}.json`), raw); },
   };
-  const apiKey = o.apiKey ?? process.env.OLLAMA_API_KEY;
   const max = o.maxCalls ?? 50;
   const counter = dir ? path.join(dir, "calls.json") : null;
-  let used = counter && fs.existsSync(counter) ? (JSON.parse(fs.readFileSync(counter, "utf8")) as { calls: number }).calls : 0;
   const { responsesFile: _r, cacheDir: _c, maxCalls: _m, ...core } = o;
+  const url = core.baseUrl ?? "https://ollama.com";
+  // a key is needed only for ollama.com; a local Ollama app (localhost / 127.0.0.1) takes none
+  const local = isLocalOllamaUrl(url);
+  const apiKey = local ? undefined : o.apiKey ?? process.env.OLLAMA_API_KEY;
+  let memCalls = 0; // in-memory counter when there is no cacheDir (per spec = per case)
   return {
     ...core, kind: "llm-extract", cache, apiKey,
-    offline: core.offline || !allowNetwork || !apiKey,
-    reserveCall: () => {
-      if (used >= max) return false;
-      used++;
-      if (counter) fs.writeFileSync(counter, JSON.stringify({ calls: used, max }));
-      return true;
-    },
+    offline: core.offline || !allowNetwork || (!local && !apiKey),
+    reserveCall: () => (counter ? reserveAtomic(counter, max) : memCalls < max ? (memCalls++, true) : false),
   };
+}
+
+/**
+ * Atomic persisted call counter: read-check-increment under an exclusive lock file, then write via rename,
+ * so concurrent sessions / processes sharing one cacheDir never lose an update (the old in-memory snapshot
+ * recorded 1 call for 3 made by parallel cases). Each call re-reads the file; the cap holds across all users.
+ */
+export function reserveAtomic(counter: string, max: number): boolean {
+  const lock = counter + ".lock";
+  const deadline = Date.now() + 5000;
+  let fd = -1;
+  while (fd < 0) {
+    try { fd = fs.openSync(lock, "wx"); } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      // stale lock (crashed holder) after 10 s
+      try { if (Date.now() - fs.statSync(lock).mtimeMs > 10_000) fs.rmSync(lock, { force: true }); } catch { /* raced */ }
+      if (Date.now() > deadline) throw new Error(`call counter lock busy: ${lock}`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+  try {
+    const cur = fs.existsSync(counter) ? (JSON.parse(fs.readFileSync(counter, "utf8")) as { calls?: number }).calls ?? 0 : 0;
+    if (cur >= max) return false;
+    const tmp = `${counter}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ calls: cur + 1, max }));
+    fs.renameSync(tmp, counter);
+    return true;
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(lock, { force: true });
+  }
 }
 
 export const SIDECAR_PROTOCOL = "brianharness-sidecar/1";

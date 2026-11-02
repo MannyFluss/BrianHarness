@@ -38,6 +38,13 @@ export interface RankPrior {
   weight: number;
   /** topic ids never shown as guesses (e.g. keyphrase duplicates of a ranked label) */
   suppress?: string[];
+  /**
+   * lead mode only: 1-based user turns each ranked topic cites (aligned with ranked). With reorderZ set,
+   * EEG engagement on those turns may move a topic above an earlier one (finalGuesses, "lead-eeg").
+   */
+  cites?: number[][];
+  /** one-sided z for the EEG reorder test (LEAD_EEG_Z); unset = keep the ranked order */
+  reorderZ?: number;
 }
 
 export interface TopicTagger {

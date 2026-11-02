@@ -220,7 +220,8 @@ export class HarnessSession {
     for (const s of this.sources) s.clear(sentAt);
 
     const hypothesis = this.map.hypothesis();
-    this.snapshots.push({ turn: this.turn, hypothesis, top: this.map.topTopics(3) });
+    const eegOk = features["eeg.engagementIndex"] !== undefined && eegQuality(features, this.opts.engagement?.refWindowSec).quality > 0;
+    this.snapshots.push({ turn: this.turn, hypothesis, top: this.map.topTopics(3), ...(eegOk ? { eegLn: Math.log(Math.max(1e-6, features["eeg.engagementIndex"]!)) } : {}) });
     this.log({
       type: "user_turn",
       t: nowIso(),

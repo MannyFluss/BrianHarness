@@ -17,6 +17,7 @@
 import type { RankPrior, TopicTag, TopicTagger } from "./tagger.js";
 import { KeyphraseIdfTagger, stem, type KeyphraseIdfOptions } from "./tagger-idf.js";
 import { normalizeOllamaBaseUrl } from "./providers/ollama.js";
+import { LEAD_EEG_Z } from "./final-guesses.js";
 
 export interface ExtractorCache {
   get(key: string): string | undefined | Promise<string | undefined>;
@@ -48,10 +49,13 @@ export interface LlmExtractorOptions {
   maxLabels?: number;
   /**
    * how the extractor's latest answer ranks the final guesses (default "lead"):
-   * "lead" = its labels first in its order, keyphrase fill; "soft" = additive prior (priorWeight);
+   * "lead" = its labels first in its order, keyphrase fill; "lead-eeg" = as lead, but EEG engagement on the
+   * turns each label cites may move it above an earlier label when the margin passes LEAD_EEG_Z; "soft" = additive prior (priorWeight);
    * "none" = old behaviour (extractor labels compete as ordinary evidence)
    */
-  rank?: "lead" | "soft" | "none";
+  rank?: "lead" | "lead-eeg" | "soft" | "none";
+  /** "lead-eeg" reorder threshold (one-sided z, default LEAD_EEG_Z = 1.645; preset, not tuned) */
+  leadEegZ?: number;
   /** soft prior weight added to the 0..1 final-guess score of the top label (x0.85 per rank) (default 0.5) */
   priorWeight?: number;
   /** drop keyphrase topics whose words all occur in a ranked extractor label (default true) */
@@ -65,7 +69,23 @@ export interface LlmExtractorOptions {
   reserveCall?: () => boolean | Promise<boolean>;
   /** never touch the network: cache hits only (offline scoring of returned outputs) */
   offline?: boolean;
+  /** retries after an HTTP 5xx, each reserved against the call cap like a first try (default 2; 4xx never retries) */
+  retries?: number;
+  /** backoff before retry i, doubled per retry (ms, default 500) */
+  retryDelayMs?: number;
+  /**
+   * through a LOCAL Ollama app (localhost / 127.0.0.1) only cloud tags (":cloud" / "-cloud") are sent, so
+   * nothing runs on the local machine (same rule as tools/llm-extractor-eval/run.mjs). true lifts that.
+   */
+  allowLocalModels?: boolean;
 }
+
+/** localhost / 127.0.0.1 / [::1] (a local Ollama app): no key needed, no Authorization header sent */
+export function isLocalOllamaUrl(url: string): boolean {
+  try { return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname); } catch { return false; }
+}
+/** Ollama cloud model tag, served remotely even through a local app (gemma4:cloud, gpt-oss:120b-cloud) */
+export const isCloudModelTag = (m: string) => /:(cloud|[^:]*-cloud)$/.test(m);
 
 export const EXTRACTOR_SYSTEM_PROMPT = [
   "You read one side of a casual chat: only the USER's messages, numbered by turn.",
@@ -136,16 +156,27 @@ export function parseExtractorResponse(raw: string): ExtractedInterest[] {
   return out;
 }
 
+/** non-2xx extractor reply; the message carries the HTTP status (and the start of the body, never the key) */
+export class ExtractorHttpError extends Error {
+  constructor(readonly status: number, body: string) { super(`extractor HTTP ${status}${body ? ": " + body.replace(/\s+/g, " ").slice(0, 160) : ""}`); }
+}
+
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
 
 export class LlmInterestExtractor implements TopicTagger {
   readonly kind = "llm-extract";
-  readonly calls = { network: 0, cached: 0, refused: 0, failed: 0 };
+  /**
+   * per instance (= per session/case). network = HTTP attempts incl. retries; http = attempts by status;
+   * lastError keeps the HTTP status / reason of the latest failure or refusal
+   */
+  readonly calls = { network: 0, cached: 0, refused: 0, failed: 0, retried: 0, http: {} as Record<string, number>, lastError: null as string | null };
   private base: TopicTagger | null;
   private user: string[] = [];
   private known = new Map<string, string>();
   /** latest non-empty answer: [topic id, label] in the extractor's order */
   private latest: Array<[string, string]> = [];
+  /** cited user turns of each label in `latest` */
+  private latestCites: number[][] = [];
   /** keyphrase (base) topics seen: id -> label */
   private baseTopics = new Map<string, string>();
   constructor(private o: LlmExtractorOptions = {}) {
@@ -170,6 +201,7 @@ export class LlmInterestExtractor implements TopicTagger {
     if (!this.due(this.user.length)) return out;
     const interests = await this.extract(signal);
     const answer: Array<[string, string]> = [];
+    const cites: number[][] = [];
     for (const it of interests.slice(0, this.o.maxLabels ?? 4)) {
       const s = slug(it.label);
       if (!s) continue;
@@ -177,13 +209,15 @@ export class LlmInterestExtractor implements TopicTagger {
       if (!id) for (const [k, v] of this.known) if (k.includes(s) || s.includes(k)) id = v;
       id ??= `o:${s}`;
       this.known.set(s, id);
-      if (!answer.some(([a]) => a === id)) answer.push([id, it.label]);
+      const turns = [...new Set(it.turns.filter((t) => Number.isInteger(t) && t >= 1 && t <= this.user.length))];
+      const at = answer.findIndex(([a]) => a === id);
+      if (at < 0) { answer.push([id, it.label]); cites.push(turns); } else cites[at] = [...new Set([...cites[at]!, ...turns])];
       if (out.some((x) => x.id === id)) continue;
       const support = Math.max(1, Math.min(3, new Set(it.turns.filter((t) => t >= 1 && t <= this.user.length)).size));
       const w = 0.7 * it.confidence * support * (this.o.observeScale ?? 1);
       out.push({ id, label: it.label, weight: it.confidence, observeWeight: Math.round(w * 1000) / 1000 });
     }
-    if (answer.length) this.latest = answer; // an empty / failed reply keeps the previous answer
+    if (answer.length) { this.latest = answer; this.latestCites = cites; } // an empty / failed reply keeps the previous answer
     return out;
   }
 
@@ -201,6 +235,7 @@ export class LlmInterestExtractor implements TopicTagger {
         if (w.length && labelWords.some((L) => w.every((x) => L.has(x)))) suppress.push(id);
       }
     }
+    if (mode === "lead-eeg") return { ranked, weight: Infinity, suppress, cites: this.latestCites.map((c) => [...c]), reorderZ: this.o.leadEegZ ?? LEAD_EEG_Z };
     return { ranked, weight: mode === "lead" ? Infinity : this.o.priorWeight ?? 0.5, suppress };
   }
 
@@ -210,24 +245,44 @@ export class LlmInterestExtractor implements TopicTagger {
     const hit = await this.o.cache?.get(key);
     if (hit !== undefined) { this.calls.cached++; return parseExtractorResponse(hit); }
     if (this.o.offline) { this.calls.refused++; return []; }
-    if (this.o.reserveCall && !(await this.o.reserveCall())) { this.calls.refused++; return []; }
-    try {
-      const f = this.o.fetchImpl ?? fetch;
-      const url = `${normalizeOllamaBaseUrl(this.o.baseUrl ?? "https://ollama.com")}/api/chat`;
-      this.calls.network++;
-      const res = await f(url, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...(this.o.apiKey ? { authorization: `Bearer ${this.o.apiKey}` } : {}) },
-        body: JSON.stringify(requestBody(p, this.o.numPredict)),
-        signal: signal ?? AbortSignal.timeout(this.o.timeoutMs ?? 90_000),
-      });
-      const raw = await res.text();
-      if (!res.ok) throw new Error(`extractor HTTP ${res.status}`);
-      await this.o.cache?.set(key, raw);
-      return parseExtractorResponse(raw);
-    } catch {
-      this.calls.failed++;
+    const url = `${normalizeOllamaBaseUrl(this.o.baseUrl ?? "https://ollama.com")}/api/chat`;
+    const local = isLocalOllamaUrl(url);
+    if (local && !this.o.allowLocalModels && !isCloudModelTag(this.model)) {
+      this.calls.refused++;
+      this.calls.lastError = `refused: ${this.model} is not a :cloud tag (a local Ollama URL may only forward cloud models)`;
       return [];
+    }
+    const f = this.o.fetchImpl ?? fetch;
+    const retries = Math.max(0, this.o.retries ?? 2);
+    for (let attempt = 0; ; attempt++) {
+      // the first try and every retry are reserved against the hard cap
+      if (this.o.reserveCall && !(await this.o.reserveCall())) {
+        this.calls.refused++;
+        this.calls.lastError = attempt ? `call cap reached before retry ${attempt} (last: ${this.calls.lastError})` : "call cap reached";
+        return [];
+      }
+      let status = 0;
+      try {
+        this.calls.network++;
+        const res = await f(url, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...(this.o.apiKey && !local ? { authorization: `Bearer ${this.o.apiKey}` } : {}) },
+          body: JSON.stringify(requestBody(p, this.o.numPredict)),
+          signal: signal ?? AbortSignal.timeout(this.o.timeoutMs ?? 90_000),
+        });
+        status = res.status;
+        this.calls.http[String(status)] = (this.calls.http[String(status)] ?? 0) + 1;
+        const raw = await res.text();
+        if (!res.ok) throw new ExtractorHttpError(status, raw);
+        await this.o.cache?.set(key, raw);
+        return parseExtractorResponse(raw);
+      } catch (e) {
+        if (!status) this.calls.http.error = (this.calls.http.error ?? 0) + 1;
+        this.calls.lastError = e instanceof Error ? e.message : String(e);
+        if (status < 500 || attempt >= retries) { this.calls.failed++; return []; }
+        this.calls.retried++;
+        await new Promise((r) => setTimeout(r, (this.o.retryDelayMs ?? 500) * 2 ** attempt));
+      }
     }
   }
 }

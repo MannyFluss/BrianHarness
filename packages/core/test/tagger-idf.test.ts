@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   HarnessSession, MockBackend, SPECIFIC_TOPICS, createTagger, idfCandidates, IDF_STOPWORDS, zipfOf, defaultFreqTable, parseZipf10, idf,
   LlmInterestExtractor, EXTRACTOR_SYSTEM_PROMPT, buildExtractorPrompt, promptKey, requestBody, parseExtractorResponse,
-  KeyphraseIdfTagger,
+  KeyphraseIdfTagger, isLocalOllamaUrl, isCloudModelTag, eegReorder, finalGuesses, InterestMap, LEAD_EEG_Z,
 } from "../src/index.ts";
 
 const curatedLabels = Object.values(SPECIFIC_TOPICS).map((t) => t.label.toLowerCase());
@@ -137,11 +137,11 @@ test("llm-extract: cache hit spends no call, cap refuses, offline never fetches"
   const mk = () => new LlmInterestExtractor({ everyN: 1, base: "none", fetchImpl: fakeFetch(REPLY, log), cache, reserveCall: () => budget-- > 0 });
   const a = mk();
   await a.tag("I like Justinian");
-  assert.deepEqual(a.calls, { network: 1, cached: 0, refused: 0, failed: 0 });
+  assert.deepEqual(a.calls, { network: 1, cached: 0, refused: 0, failed: 0, retried: 0, http: { 200: 1 }, lastError: null });
   const b = mk();
   await b.tag("I like Justinian"); // same prompt: cached
   await b.tag("something new"); // over the cap: refused
-  assert.deepEqual(b.calls, { network: 0, cached: 1, refused: 1, failed: 0 });
+  assert.deepEqual({ ...b.calls, lastError: undefined }, { network: 0, cached: 1, refused: 1, failed: 0, retried: 0, http: {}, lastError: undefined });
   const c = new LlmInterestExtractor({ everyN: 1, base: "none", offline: true, fetchImpl: fakeFetch(REPLY, log) });
   await c.tag("brand new prompt");
   assert.equal(c.calls.refused, 1);
@@ -206,4 +206,99 @@ test("llm-extract merge: an empty reply keeps the previous answer; no answer yet
   const old = await mergeSession({ rank: "none" });
   assert.equal(old.tagger.rankPrior!(), null);
   assert.equal(createTagger({ kind: "keyphrase-idf" }).rankPrior, undefined); // non-LLM taggers: ranking unchanged
+});
+
+// ---------- provider path: local URL, HTTP status, bounded 5xx retry ----------
+function statusFetch(statuses: number[], log: Array<{ url: string; init: RequestInit }>) {
+  let i = 0;
+  return (async (url: string, init: RequestInit) => {
+    log.push({ url, init });
+    const st = statuses[Math.min(i++, statuses.length - 1)]!;
+    return st === 200
+      ? new Response(JSON.stringify({ message: { role: "assistant", content: REPLY }, done: true }), { status: 200 })
+      : new Response("upstream says no", { status: st });
+  }) as unknown as typeof fetch;
+}
+
+test("llm-extract: local Ollama URL needs no key and sends no Authorization; non-cloud model refused locally", async () => {
+  assert.ok(isLocalOllamaUrl("http://127.0.0.1:11434") && isLocalOllamaUrl("http://localhost:11434/") && !isLocalOllamaUrl("https://ollama.com"));
+  assert.ok(isCloudModelTag("gemma4:cloud") && isCloudModelTag("gpt-oss:120b-cloud") && !isCloudModelTag("gemma3:4b"));
+  const log: Array<{ url: string; init: RequestInit }> = [];
+  const tg = new LlmInterestExtractor({ baseUrl: "http://localhost:11434", apiKey: "should-not-be-sent", everyN: 1, base: "none", fetchImpl: statusFetch([200], log) });
+  const out = await tg.tag("I like Justinian");
+  assert.equal(log[0]!.url, "http://localhost:11434/api/chat");
+  assert.equal((log[0]!.init.headers as Record<string, string>).authorization, undefined);
+  assert.equal(out[0]!.label.toLowerCase(), "byzantine history");
+  const loc = new LlmInterestExtractor({ baseUrl: "http://127.0.0.1:11434", model: "gemma3:4b", everyN: 1, base: "none", fetchImpl: statusFetch([200], log) });
+  assert.deepEqual(await loc.tag("x"), []);
+  assert.equal(log.length, 1); // no request
+  assert.equal(loc.calls.refused, 1);
+  assert.match(loc.calls.lastError!, /not a :cloud tag/);
+});
+
+test("llm-extract: 5xx retried twice (each reserved against the cap), 4xx not retried, status surfaced", async () => {
+  let reserved = 0;
+  const log: Array<{ url: string; init: RequestInit }> = [];
+  const ok = new LlmInterestExtractor({ apiKey: "k", everyN: 1, base: "none", retryDelayMs: 1, reserveCall: () => (reserved++, true), fetchImpl: statusFetch([503, 502, 200], log) });
+  assert.equal((await ok.tag("Justinian"))[0]!.label.toLowerCase(), "byzantine history");
+  assert.equal(log.length, 3); assert.equal(reserved, 3);
+  assert.deepEqual({ n: ok.calls.network, r: ok.calls.retried, f: ok.calls.failed, h: ok.calls.http }, { n: 3, r: 2, f: 0, h: { 503: 1, 502: 1, 200: 1 } });
+  // bounded: 3 attempts max, then failed with the status in lastError
+  const bad = new LlmInterestExtractor({ apiKey: "k", everyN: 1, base: "none", retryDelayMs: 1, fetchImpl: statusFetch([500], []) });
+  assert.deepEqual(await bad.tag("x"), []);
+  assert.equal(bad.calls.network, 3); assert.equal(bad.calls.failed, 1);
+  assert.match(bad.calls.lastError!, /extractor HTTP 500/);
+  // 4xx: one attempt only
+  const four = new LlmInterestExtractor({ apiKey: "k", everyN: 1, base: "none", retryDelayMs: 1, fetchImpl: statusFetch([401], []) });
+  await four.tag("x");
+  assert.equal(four.calls.network, 1); assert.equal(four.calls.retried, 0);
+  assert.match(four.calls.lastError!, /HTTP 401/);
+  assert.ok(!/Bearer|\bk\b/.test(four.calls.lastError!));
+  // the cap stops retries: 2 calls allowed -> first try + 1 retry, then refused
+  let cap = 2;
+  const capped = new LlmInterestExtractor({ apiKey: "k", everyN: 1, base: "none", retryDelayMs: 1, reserveCall: () => cap-- > 0, fetchImpl: statusFetch([503], []) });
+  await capped.tag("x");
+  assert.equal(capped.calls.network, 2); assert.equal(capped.calls.refused, 1);
+  assert.match(capped.calls.lastError!, /call cap reached before retry 2 .*HTTP 503/);
+});
+
+// ---------- final labels unique; rank "lead-eeg" ----------
+test("final guesses: one guess per label (no 'alright' + 'alright' from kp:alright and kp:alright-2)", () => {
+  const map = InterestMap.fresh("u");
+  for (const [id, m] of [["kp:alright", 0.9], ["kp:alright-2", 0.8], ["kp:pinball", 0.7]] as const) { map.defineTopic(id, "alright"); map.observeTopic(id, m, 1); }
+  map.defineTopic("kp:pinball", "pinball");
+  const g = finalGuesses(map, [], 3).map((x) => x.label);
+  assert.deepEqual(g, ["alright", "pinball"]);
+});
+
+test("lead-eeg reorder: only a margin beyond LEAD_EEG_Z*sqrt(1/ka+1/kb) moves a label; noise / missing EEG keep the order", () => {
+  const snap = (eeg?: number) => ({ turn: 0, hypothesis: null, top: [], ...(eeg !== undefined ? { eegLn: eeg } : {}) });
+  // turns 1..8: label B cites turns 7,8 (very high EEG), label A cites 1,2 (low)
+  const H = [-1, -1, 0, 0, 0, 0, 3, 3].map((v) => snap(v * 0.1));
+  assert.deepEqual(eegReorder(["A", "B"], [[1, 2], [7, 8]], H), ["B", "A"]);
+  // a near-tie (A and B both mid) keeps the extractor's order
+  assert.deepEqual(eegReorder(["A", "B"], [[3, 4], [5, 7]], H), ["A", "B"]);
+  // a label without usable EEG on its turns never moves and is never passed
+  assert.deepEqual(eegReorder(["A", "B", "C"], [[1], [], [7, 8]], H), ["A", "B", "C"]);
+  // too few EEG turns in the session: unchanged
+  assert.deepEqual(eegReorder(["A", "B"], [[1], [2]], [snap(-5), snap(5), snap(), snap()]), ["A", "B"]);
+  assert.equal(LEAD_EEG_Z, 1.645);
+  // null calibration: i.i.d. noise swaps an adjacent pair (2 vs 2 cited turns) in <= ~6% of sessions
+  let swaps = 0, seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return seed / 2 ** 31; };
+  const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+  for (let r = 0; r < 2000; r++) {
+    const h = Array.from({ length: 11 }, () => snap(gauss()));
+    if (eegReorder(["A", "B"], [[2, 3], [8, 9]], h)[0] === "B") swaps++;
+  }
+  assert.ok(swaps / 2000 < 0.08, String(swaps / 2000));
+});
+
+test("llm-extract rank lead-eeg: equals lead without EEG; prior carries cites + preset z", async () => {
+  const lead = await mergeSession({});
+  const le = await mergeSession({ rank: "lead-eeg" });
+  assert.deepEqual(le.finalGuesses(3).map((g) => g.label), lead.finalGuesses(3).map((g) => g.label));
+  const pr = le.tagger.rankPrior!()!;
+  assert.equal(pr.weight, Infinity); assert.equal(pr.reorderZ, LEAD_EEG_Z);
+  assert.deepEqual(pr.cites, [[5], [1, 2, 3, 4], [2, 3]]);
 });
