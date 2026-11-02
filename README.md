@@ -50,6 +50,12 @@ npm run sim -- --temperature 0.7 --backend-seed 3
 Paid backends (cloud/API/subscription) are refused without `--allow-paid`.
 The JSON-lines **sidecar** + Python adapter for other harnesses are covered in [docs/SIDECAR.md](docs/SIDECAR.md).
 
+## iPhone / iPad (web target, ios-prep)
+
+`npm run build:web` builds the same UI with the core running in-process to `apps/desktop/dist-web/`
+(static, relative paths, PWA manifest; the Capacitor webDir). `npm run dev:web` serves it on the LAN.
+See [docs/IOS_PORTING.md](docs/IOS_PORTING.md).
+
 ## Renaming
 
 The product name lives in one file, `packages/core/src/brand.json`. The window title, wordmark,
