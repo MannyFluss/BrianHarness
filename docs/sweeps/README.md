@@ -23,5 +23,8 @@
 | `phaseC_lead_eeg_synth.txt` | this commit | `tools/phaseC-tagger-eval/lead_eeg_synth.py`, 50 reps, Track 2 rows only |
 | `phaseC_lead_eeg_parity.txt` | 1474a83 | rankLeadEeg vs rank_proto (blend) and the Researcher's port (pure): 0/338400 mismatches |
 | `phaseC_gate_unique_check.md` | 870fccd | uniqueLabels: 8/8 gate typing finals unchanged vs 9ba666a, unscored |
+| `phaseC_tagger_keyphrase_stoplist.{md,jsonl}` | this commit | keyphrase-idf evaluative-adjective/superlative stoplist + intensifier down-weight, all 144: top-1/top-3 keyphrase-only 2/3 -> 2/3, CC0 11/21 -> 12/22, wordfreq 11/23 -> 11/24 |
+| `phaseC_tagger_track2_stoplist_leadeeg.{md,jsonl}` | this commit | Track 2 (24, cached answers, network 0) with the stoplist, incl. the lead-eeg column (lead 9/24 -> lead-eeg 11/24 top-1, 14/24 top-3 both) |
+| `phaseC_tagger_keyphrase_stoplist_leak_check.txt` | this commit | both leak checks with the stoplist (evaluative list included): PASS |
 
 The Researcher's own `sweep_results.json` (in eeg-harness-sim) is theirs and is not mirrored here.

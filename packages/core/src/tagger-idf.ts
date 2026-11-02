@@ -108,6 +108,35 @@ idk tbh imo imho btw fyi ngl lmao rofl smh omw irl nah meh yup ya yah ok k gonna
 bored tired busy stressed relaxed relaxing exhausted sleepy annoyed calm chill weird boring awesome cute
 `.split(/\s+/).filter(Boolean));
 
+/**
+ * Evaluative adjectives, intensifiers and exclamations ("i'd make the wizard mode insane", "alright"): they
+ * judge a topic, they never name one. Topic-free like IDF_STOPWORDS (tests assert no persona passion word);
+ * dropped as unigram candidates and as bigram parts.
+ */
+export const IDF_EVALUATIVE: ReadonlySet<string> = new Set(`
+insane insanely crazy alright aight decent solid legit epic dope sick wild rad neat sweet gnarly brutal unreal bonkers nuts mental
+terrible awful horrible horrid dreadful stupid dumb silly ridiculous absurd lame meh gross nasty sketchy messy crappy cheesy random
+incredible fantastic fabulous brilliant excellent outstanding superb gorgeous beautiful pretty hilarious adorable cozy comfy fancy
+tough rough intense extreme massive mega giant enormous decent mediocre average typical basic normal regular usual actual honest serious
+precise proper decent okay-ish alrighty sure-fire hell heck damn dang darn freaking frickin fricking bloody effing goddamn
+extremely incredibly ridiculously seriously truly really utterly highly deeply hugely wildly
+fave faves top best worst better worse greatest coolest nicest biggest
+`.split(/\s+/).filter(Boolean));
+
+/** words that grade the next word ("so insane", "really cool"): what follows is adjective-like */
+const INTENSIFIER = new Set(["so", "very", "really", "pretty", "too", "super", "quite", "extremely", "kinda", "sorta", "totally", "insanely", "incredibly", "absolutely"]);
+/** superlative of a common word ("closest", "fastest"): grades, does not name; base >= 4 letters ("forest" stays) */
+function isSuperlative(w: string): boolean {
+  if (!w.endsWith("est") || w.length < 7) return false;
+  const b = w.slice(0, -3);
+  const forms = [b, b + "e", b.endsWith("i") ? b.slice(0, -1) + "y" : "", b.length > 4 && b[b.length - 1] === b[b.length - 2] ? b.slice(0, -1) : ""].filter((f) => f.length >= 4);
+  return forms.some((f) => (zipfOf(f) ?? 0) >= 4);
+}
+/** cheap "noun-like" guard (no POS model): not evaluative, not a superlative */
+const isEvaluative = (low: string) => IDF_EVALUATIVE.has(low) || isSuperlative(low);
+/** score factor for a unigram right after an intensifier ("so wild", "pretty fancy"): adjective-like, halved */
+export const AFTER_INTENSIFIER = 0.5;
+
 const PN_BONUS = 1.4;
 const isRoman = (t: string) => /^(II|III|IV|V|VI|VII|VIII|IX|X|XI|XII)$/.test(t);
 const HONORIFIC = new Set(["mr", "mrs", "ms", "dr", "st", "mt", "sir", "lady", "saint", "queen", "king"]);
@@ -149,7 +178,7 @@ function toks(sentence: string): Tok[] {
 /** cheap part-of-speech guard: past tenses and adjective/adverb suffixes describe, they rarely name an interest */
 const MODIFIER = /(?<=..)(ed|ous|ful|ive|able|ible|less|ish|ly)$/;
 const isContent = (low: string, maxZipf: number) =>
-  low.length >= 3 && !(low.length >= 6 && MODIFIER.test(low)) && !IDF_STOPWORDS.has(low) && !IDF_STOPWORDS.has(stem(low)) && !(low.length >= 5 && low.endsWith("ly") && zipfOf(low) !== undefined && zipfOf(low)! > 3.5) && zipfOrStem(low) <= maxZipf;
+  low.length >= 3 && !(low.length >= 6 && MODIFIER.test(low)) && !IDF_STOPWORDS.has(low) && !isEvaluative(low) && !IDF_STOPWORDS.has(stem(low)) && !(low.length >= 5 && low.endsWith("ly") && zipfOf(low) !== undefined && zipfOf(low)! > 3.5) && zipfOrStem(low) <= maxZipf;
 
 /** "-ing" forms of a common verb ("decaying", "scrolling") are usually activity descriptions; down-weighted, not dropped (hobby gerunds recur) */
 function isVerbalIng(w: string): boolean {
@@ -217,7 +246,8 @@ function idfCandidatesActive(text: string, maxZipf: number): Cand[] {
         if (zipfOf(t.low)! > 4) continue;
       }
       if (!isContent(t.low, maxZipf)) continue;
-      add({ key: stem(t.low), label: t.low, score: idf(t.low) * (isVerbalIng(t.low) ? 0.6 : 1), pn: false });
+      const graded = i > 0 && T[i - 1]!.joinNext && INTENSIFIER.has(T[i - 1]!.low);
+      add({ key: stem(t.low), label: t.low, score: idf(t.low) * (isVerbalIng(t.low) ? 0.6 : 1) * (graded ? AFTER_INTENSIFIER : 1), pn: false });
       const u = T[i + 1];
       if (u && t.joinNext && !inSpan.has(i + 1) && isContent(u.low, maxZipf) && !/^[A-Z]{2,}$/.test(u.raw)) {
         const a = idf(t.low), b = idf(u.low);

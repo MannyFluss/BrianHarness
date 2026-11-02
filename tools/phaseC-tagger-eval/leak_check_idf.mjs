@@ -6,7 +6,9 @@ import path from "node:path";
 const HE = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const SIM = process.env.SIM_ROOT ?? "/workspace/eeg-harness-sim";
 const core = await import(`${HE}/packages/core/dist/index.js`);
-const { IDF_STOPWORDS, idfCandidates, createTagger, EXTRACTOR_SYSTEM_PROMPT, buildExtractorPrompt, SPECIFIC_TOPICS, zipfOf } = core;
+const { IDF_STOPWORDS, IDF_EVALUATIVE, idfCandidates, createTagger, EXTRACTOR_SYSTEM_PROMPT, buildExtractorPrompt, SPECIFIC_TOPICS, zipfOf } = core;
+// keyphrase-idf drops both lists (stopwords + evaluative adjectives/intensifiers)
+const STOP = { has: (w) => IDF_STOPWORDS.has(w) || IDF_EVALUATIVE.has(w) };
 const files = process.argv.slice(2).length ? process.argv.slice(2) : ["personas_c.json", "personas.json"];
 let fail = 0;
 const out = [];
@@ -19,8 +21,8 @@ for (const f of files) {
     const words = [...new Set(kws.flatMap((k) => k.split(/\s+/)))];
     const rx = p.rescore ? ["exact", "close"].map((k) => new RegExp(p.rescore[k], "i")) : [];
     // 1. stopword list must not contain any passion word (would systematically hide the passion)
-    const stop = kws.filter((w) => !w.includes(" ") && IDF_STOPWORDS.has(w));
-    const stopParts = words.filter((w) => IDF_STOPWORDS.has(w) && !stop.includes(w));
+    const stop = kws.filter((w) => !w.includes(" ") && STOP.has(w));
+    const stopParts = words.filter((w) => STOP.has(w) && !stop.includes(w));
     // 2. extractor system prompt must not name the passion (no examples in the prompt)
     const promptHits = [...kws.filter((k) => new RegExp(`(^|[^a-z])${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z]|$)`).test(EXTRACTOR_SYSTEM_PROMPT.toLowerCase())), ...rx.filter((r) => r.test(EXTRACTOR_SYSTEM_PROMPT)).map((r) => `/${r.source}/`)];
     // 3. a conversation that never mentions the passion yields no label matching its exact/close rules,

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  HarnessSession, MockBackend, SPECIFIC_TOPICS, createTagger, idfCandidates, IDF_STOPWORDS, zipfOf, defaultFreqTable, parseZipf10, idf,
+  HarnessSession, MockBackend, SPECIFIC_TOPICS, createTagger, idfCandidates, IDF_STOPWORDS, IDF_EVALUATIVE, zipfOf, defaultFreqTable, parseZipf10, idf,
   LlmInterestExtractor, EXTRACTOR_SYSTEM_PROMPT, buildExtractorPrompt, promptKey, requestBody, parseExtractorResponse,
   KeyphraseIdfTagger, isLocalOllamaUrl, isCloudModelTag, eegReorder, finalGuesses, InterestMap, LEAD_EEG_Z,
 } from "../src/index.ts";
@@ -301,4 +301,22 @@ test("llm-extract rank lead-eeg: equals lead without EEG; prior carries cites + 
   const pr = le.tagger.rankPrior!()!;
   assert.equal(pr.weight, Infinity); assert.equal(pr.reorderZ, LEAD_EEG_Z);
   assert.deepEqual(pr.cites, [[5], [1, 2, 3, 4], [2, 3]]);
+});
+
+// ---------- keyphrase fill junk: evaluative adjectives / intensifiers ----------
+test("keyphrase-idf: evaluative adjectives, superlatives and intensified words are not topics; nouns are", () => {
+  assert.deepEqual(PERSONA_WORDS.filter((w) => IDF_EVALUATIVE.has(w)), []);
+  const keys = (t: string) => idfCandidates(t).map((c) => c.key);
+  const k = keys("something dark. i'd make the wizard mode insane and add a few hidden ramps for high scores.");
+  assert.ok(!k.some((x) => x.split(" ").includes("insane")), k.join("|"));
+  assert.ok(k.includes("wizard") && k.includes("ramp"), k.join("|"));
+  assert.ok(!keys("nah just whatever place is closest.").includes("closest"));
+  assert.ok(keys("we hiked through the forest").includes("forest")); // not a superlative
+  assert.ok(keys("a perfect cradle separation").includes("cradle"));
+  const alright = idfCandidates("alright, the flippers were alright");
+  assert.ok(!alright.some((c) => c.key === "alright") && alright.some((c) => c.key === "flipper"));
+  // after an intensifier a word is graded (adjective-like): kept but halved
+  const find = (t: string) => idfCandidates(t).find((c) => c.key === "snazzy");
+  const plain = find("that shop is snazzy"), graded = find("that shop is so snazzy");
+  assert.ok(plain && graded && graded.key === "snazzy" && Math.abs(graded.score - plain.score / 2) < 1e-9, JSON.stringify([plain, graded]));
 });
