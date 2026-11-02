@@ -11,11 +11,56 @@
  *   -> {"cmd":"final_guesses","k":3}   -> {"cmd":"hud"}   -> {"cmd":"end"}
  */
 import { createInterface } from "node:readline";
+import fs from "node:fs";
+import path from "node:path";
 import {
   HarnessSession, PreparedFeatureSource, SessionStore, createBackend, detectOllama, parseBackendRef,
   synthesizeTypingFromText, type BackendSpec, type EegBlendOptions, type FeatureMap, type ProviderKind, type TypingEvent,
-  type HarnessSession as HS, type TopicTaggerSpec,
+  type HarnessSession as HS, type TopicTaggerSpec, type LlmExtractorOptions, type ExtractorCache,
 } from "@brianharness/core";
+
+/** Sidecar-only (Node) options for {"kind":"llm-extract"} on top of the core LlmExtractorOptions. */
+export interface SidecarLlmExtractOptions extends LlmExtractorOptions {
+  /** JSONL of {"key","raw"} responses (e.g. tools/llm-extractor-eval/out/responses.jsonl); used as a read-only cache */
+  responsesFile?: string;
+  /** directory for a read-write disk cache (<key>.json) + calls.json counter */
+  cacheDir?: string;
+  /** hard cap on network calls, persisted in <cacheDir>/calls.json (default 50) */
+  maxCalls?: number;
+}
+
+/** Build the llm-extract tagger spec: key from OLLAMA_API_KEY, disk cache, persisted hard call cap. */
+export function llmExtractSpec(o: SidecarLlmExtractOptions, allowNetwork: boolean): LlmExtractorOptions & { kind: "llm-extract" } {
+  const mem = new Map<string, string>();
+  if (o.responsesFile && fs.existsSync(o.responsesFile)) {
+    for (const l of fs.readFileSync(o.responsesFile, "utf8").split("\n")) {
+      if (!l.trim()) continue;
+      const r = JSON.parse(l) as { key?: string; raw?: string; ok?: boolean };
+      if (r.key && typeof r.raw === "string" && r.ok !== false) mem.set(r.key, r.raw);
+    }
+  }
+  const dir = o.cacheDir;
+  if (dir) fs.mkdirSync(dir, { recursive: true });
+  const cache: ExtractorCache = {
+    get: (k) => mem.get(k) ?? (dir && fs.existsSync(path.join(dir, `${k}.json`)) ? fs.readFileSync(path.join(dir, `${k}.json`), "utf8") : undefined),
+    set: (k, raw) => { mem.set(k, raw); if (dir) fs.writeFileSync(path.join(dir, `${k}.json`), raw); },
+  };
+  const apiKey = o.apiKey ?? process.env.OLLAMA_API_KEY;
+  const max = o.maxCalls ?? 50;
+  const counter = dir ? path.join(dir, "calls.json") : null;
+  let used = counter && fs.existsSync(counter) ? (JSON.parse(fs.readFileSync(counter, "utf8")) as { calls: number }).calls : 0;
+  const { responsesFile: _r, cacheDir: _c, maxCalls: _m, ...core } = o;
+  return {
+    ...core, kind: "llm-extract", cache, apiKey,
+    offline: core.offline || !allowNetwork || !apiKey,
+    reserveCall: () => {
+      if (used >= max) return false;
+      used++;
+      if (counter) fs.writeFileSync(counter, JSON.stringify({ calls: used, max }));
+      return true;
+    },
+  };
+}
 
 export const SIDECAR_PROTOCOL = "brianharness-sidecar/1";
 
@@ -38,9 +83,10 @@ export interface StartOptions {
   /**
    * topic tagger: {"kind":"lexicon"} (default) | {"kind":"keyphrase"} | {"kind":"keyphrase-only"} (leak-free:
    * no curated hobby list) | {"kind":"keyphrase-generic"} | {"kind":"lexicon-generic"} |
-   * {"kind":"keyphrase","lexicon":"full|generic|broad|none"} | {"kind":"ollama","model":"...","baseUrl":"..."}
+   * {"kind":"keyphrase","lexicon":"full|generic|broad|none"} | {"kind":"keyphrase-idf"} (leak-free, IDF-weighted) |
+   * {"kind":"llm-extract", ...SidecarLlmExtractOptions} | {"kind":"ollama","model":"...","baseUrl":"..."}
    */
-  tagger?: TopicTaggerSpec;
+  tagger?: TopicTaggerSpec | ({ kind: "llm-extract" } & SidecarLlmExtractOptions);
   /** write JSONL logs / interest-map save files here */
   dataDir?: string;
   /** typing synthesis when a reply has no events: chars/sec (default 5) */
@@ -65,7 +111,7 @@ export class Sidecar {
       case "reply":
         return this.reply(m);
       case "hud":
-        return { hud: this.need().hud(), ledger: this.ledger() };
+        return { hud: this.need().hud(), ledger: this.ledger(), tagger: { kind: this.need().tagger.kind, ...("calls" in this.need().tagger ? { calls: (this.need().tagger as unknown as { calls: unknown }).calls } : {}) } };
       case "final_guesses":
         return { guesses: this.need().finalGuesses(Number(m.k ?? 3)) };
       case "end": {
@@ -108,6 +154,11 @@ export class Sidecar {
     if (backend.paid && !(o.allowPaid && this.globalAllowPaid)) {
       throw new Error(`backend ${backend.id} is paid / uses subscription quota: needs options.allowPaid AND the --allow-paid flag`);
     }
+    let tagger = o.tagger as TopicTaggerSpec | undefined;
+    if (tagger?.kind === "llm-extract") {
+      // network calls spend Ollama-cloud quota: same double opt-in as paid backends; otherwise cache-only
+      tagger = llmExtractSpec(tagger as SidecarLlmExtractOptions, !!(o.allowPaid && this.globalAllowPaid));
+    }
     const engagement: EegBlendOptions = { ...(o.engagement ?? {}), ...(o.eegWeight !== undefined ? { weight: o.eegWeight } : {}) };
     this.src = new PreparedFeatureSource("eeg");
     this.session = new HarnessSession({
@@ -119,7 +170,7 @@ export class Sidecar {
       clock: () => this.clock,
       seed,
       engagement,
-      tagger: o.tagger,
+      tagger,
     });
     const d = await this.session.start();
     return { protocol: SIDECAR_PROTOCOL, sessionId: this.session.id, backend: backend.id, paid: backend.paid, director: { text: d.text, plan: d.plan } };

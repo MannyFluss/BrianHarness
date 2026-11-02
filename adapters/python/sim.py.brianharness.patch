@@ -46,8 +46,8 @@
 +    ap.add_argument("--bh-allow-paid", action="store_true", help="let the BrianHarness Director use paid/cloud models (e.g. *:cloud)")
 +    ap.add_argument("--bh-eeg-weight", type=float, default=None)
 +    ap.add_argument("--bh-tagger", default="lexicon",
-+                    choices=["lexicon", "lexicon-generic", "keyphrase", "keyphrase-generic", "keyphrase-only", "ollama"],
-+                    help="keyphrase-only = leak-free (no curated hobby list); lexicon/keyphrase merge it (see SIDECAR.md)")
++                    choices=["lexicon", "lexicon-generic", "keyphrase", "keyphrase-generic", "keyphrase-only", "keyphrase-idf", "llm-extract", "ollama"],
++                    help="keyphrase-only / keyphrase-idf = leak-free (no curated hobby list); llm-extract = paid cloud extractor (see SIDECAR.md)")
      cfg = ap.parse_args()
  
      if cfg.smoke:

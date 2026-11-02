@@ -51,8 +51,16 @@ class BrianHarnessDirector:
         self._timeout = timeout_s
         self._signals_fn = text_signals or _text_signals
         self.lengths, self.ledger, self.last_top3, self._opening = [], {}, [], None
-        # tagger: a spec dict, or a kind string, e.g. "keyphrase-only" (leak-free; see docs/SIDECAR.md)
-        if isinstance(tagger, str):
+        # tagger: a spec dict, or a kind string, e.g. "keyphrase-only" / "keyphrase-idf" (leak-free; see docs/SIDECAR.md).
+        # "llm-extract" = keyphrase-idf + a cloud LLM interest extractor every N turns (paid: needs allow_paid and
+        # OLLAMA_API_KEY in the env; calls https://ollama.com/api/chat, hard cap BH_LLM_MAX_CALLS, default 50,
+        # persisted in BH_LLM_CACHE/calls.json). Without a key it runs offline (base tagger only, cache hits).
+        if tagger == "llm-extract":
+            tagger = {"kind": "llm-extract", "model": os.environ.get("BH_LLM_MODEL", "gemma4:cloud"),
+                      "everyN": int(os.environ.get("BH_LLM_EVERY", "6")),
+                      "cacheDir": os.environ.get("BH_LLM_CACHE", os.path.join(os.getcwd(), "llm_extract_cache")),
+                      "maxCalls": int(os.environ.get("BH_LLM_MAX_CALLS", "50"))}
+        elif isinstance(tagger, str):
             tagger = {"kind": tagger}
         opts = {"provider": provider, "seed": seed, "allowPaid": bool(allow_paid)}
         for k, v in (("model", model), ("ollamaUrl", ollama_url), ("baseUrl", base_url), ("temperature", temperature),

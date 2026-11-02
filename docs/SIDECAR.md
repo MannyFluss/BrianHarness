@@ -39,7 +39,7 @@ One session at a time; after `end` you can `start` again.
 | `allowPaid` | must be `true` **and** the process started with `--allow-paid` for paid backends (`*:cloud` Ollama models, remote APIs, subscriptions). Local Ollama / mock never need it. |
 | `eegWeight` | base EEG blend weight (default 0.25) |
 | `engagement` | `EegBlendOptions`: `{weight, zScore, minHistory, qualityWeighting, agreementWeighting, refWindowSec, flatBoost, typingSdLow, typingSdHigh, maxWeight}` |
-| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"keyphrase-only"}` (leak-free) \| `{"kind":"keyphrase-generic"}` \| `{"kind":"lexicon-generic"}` \| `{"kind":"keyphrase","lexicon":"full\|generic\|broad\|none"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
+| `tagger` | `{"kind":"lexicon"}` (default) \| `{"kind":"keyphrase"}` \| `{"kind":"keyphrase-only"}` (leak-free) \| `{"kind":"keyphrase-idf"}` (leak-free, IDF) \| `{"kind":"llm-extract","model":"gemma4:cloud","everyN":6,"cacheDir":"...","maxCalls":50}` (paid) \| `{"kind":"keyphrase-generic"}` \| `{"kind":"lexicon-generic"}` \| `{"kind":"keyphrase","lexicon":"full\|generic\|broad\|none"}` \| `{"kind":"ollama","model":"gemma3:4b","baseUrl":"..."}` |
 | `userId`, `sessionId`, `dataDir` | ids; `dataDir` writes the session JSONL + interest-map save file there |
 | `charsPerSec` | speed for synthesized typing (default 5) |
 
@@ -94,7 +94,7 @@ d = BrianHarnessDirector(provider="ollama", model="gemma3:4b", ollama_url="http:
 - `--bh-provider`: default mock with `--mock`, else ollama with `--director-model` and `--url`;
 - `--bh-allow-paid`: needed for `*:cloud`;
 - `--bh-eeg-weight`;
-- `--bh-tagger lexicon|lexicon-generic|keyphrase|keyphrase-generic|keyphrase-only|ollama`.
+- `--bh-tagger lexicon|lexicon-generic|keyphrase|keyphrase-generic|keyphrase-only|keyphrase-idf|llm-extract|ollama`.
 
 It also logs `director_impl: "brianharness"` and the same row schema:
 
@@ -115,6 +115,8 @@ specific guess on those personas can be a leaked label rather than discovered vo
 | `lexicon-generic`, `keyphrase-generic` | all except the 8 persona passions | yes | no persona leak; other curated hobbies stay |
 | `{"kind":"keyphrase","lexicon":"broad"}` | none | yes | broad categories + user's phrases |
 | `keyphrase-only` | none | none | **only the user's own words** (`kp:` phrases) |
+| `keyphrase-idf` | none | none | **only the user's own words**, IDF-weighted (`kp:` topics) |
+| `llm-extract` | none | none | keyphrase-idf + labels a cloud LLM names from the transcript (`o:`), no examples in its prompt |
 
 For honest open-vocab numbers on the Phase-A personas use `--bh-tagger keyphrase-only` (or
 `keyphrase-generic` to keep non-persona curated hobbies). `keyphrase-only` rolls a phrase up to its
@@ -122,3 +124,26 @@ phrase cluster (the recurring word it most often shares messages with, e.g. `kp:
 or keeps the phrase as its own root. A test asserts it never emits a curated label that isn't in the
 user's text. Note that the Director's own question topics are still broad categories, so broad topics
 can enter the interest map through the questions it asks, not through tagging.
+
+### `keyphrase-idf` (leak-free, IDF-weighted)
+
+No curated hobby list. Words are weighted by IDF against a bundled general-English frequency list
+(`packages/core/src/wordfreq/`, from [wordfreq](https://github.com/rspeer/wordfreq) `small_en`, **CC BY-SA 4.0**,
+see `WORDFREQ_LICENSE.md`; regenerate with `scripts/gen-wordfreq.py`): `idf = max(0, 6 - zipf)`, words missing
+from the list (zipf < 3) count as rare. It keeps proper-noun spans and multiword names ("Basil II",
+"Hagia Sophia"), drops stopwords / common verbs / fillers / mood words, and down-weights -ing verbs and
+-ed/-ous/-ful/... modifiers. Each message gets at most one `kp:` tag: its distinctive terms are threaded into
+a running cluster (shared words, sub-word matches like bees/honeybees/hive/hives, continuity with the last
+message), so evidence aggregates across turns without a list. The label is the cluster's heaviest member.
+`observeWeight` scales how much an unprompted mention counts by how distinctive the message is relative to
+the user's own usual message. Options: `minScore` 1.6, `minRepeats` 2, `maxZipf` 5.3, `link` 3.
+
+### `llm-extract` (paid, cloud)
+
+`keyphrase-idf` tags every turn; every `everyN` user turns (or at `atTurns`) the last `contextTurns` user
+messages go to `model` (default `gemma4:cloud`) at `https://ollama.com/api/chat` (`stream:false`,
+`Authorization: Bearer $OLLAMA_API_KEY`), and the named interests become `o:` tags. The sidecar only goes to
+the network with `allowPaid` + `--allow-paid` + `OLLAMA_API_KEY`; otherwise it is offline (cache hits only).
+`cacheDir` caches every response (`<key>.json`) and enforces a hard `maxCalls` cap (default 50) persisted in
+`<cacheDir>/calls.json`; `responsesFile` (JSONL `{key, raw}`) is a read-only cache for scoring responses
+gathered elsewhere (`tools/llm-extractor-eval/`). `hud` reports `tagger.calls`.
