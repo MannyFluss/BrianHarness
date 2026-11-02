@@ -120,3 +120,10 @@ dismissed, reason?, hooked?, blindGuess?}`), `interest_update`, `final` (session
   Emulated check: `apps/desktop/scripts/keyboard-shots.mjs` -> `docs/screenshot-iphone-keyboard.png`,
   `docs/screenshot-iphone-keyboard-native.png`. Please confirm on a device (focus the composer, type, scroll the chat).
 - Session file names now carry a 6-char session tag (above), so `saveToDocuments` collisions can't happen.
+
+## Spider Cloud preset
+
+New provider row "Spider Cloud" (details in `IOS_PORTING.md` → Spider Cloud). On device: set the `bhd_` device
+token once via model picker → Spider Cloud → key (Keychain `credentials/spider`). It needs native fetch (no CORS)
+and works only after Manny deploys the Worker; until then it fails with a clear message and the study extractor
+falls back (banner "Interest AI unavailable this session (…)"). Nothing to add natively beyond BHStream.

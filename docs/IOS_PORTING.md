@@ -453,3 +453,21 @@ do beyond rebuilding; the banner is in the shared web UI.
   (`packages/sim/src/export-ratings.ts`): one row per user turn, typing features + the turn rating + the
   session rating / hooked / blindGuess. No mode column; `--schedule` (the unsealed JSON) adds `mode` by
   study index and refuses a schedule whose hash differs from the sessions'.
+
+## Spider Cloud (BrianHarness Worker)
+
+Provider `spider-cloud`: the Worker at `https://api.strangeriver.org/v1` (OpenAI-compatible
+`/v1/chat/completions` + `/v1/models`) relays to Ollama Cloud, so the device never holds an Ollama key.
+- Token: a per-device `bhd_…` token from the Worker admin CLI (`node scripts/admin.mjs issue <name>`, run by
+  Manny). Set it once: model picker → Spider Cloud → key button, paste. Stored in the Keychain (`credentials/spider`;
+  desktop: the safeStorage credentials file), never in settings or logs. The URL chip changes the base URL.
+- Models: `GET /v1/models` (live), else the static list `gemma4:cloud, gpt-oss:120b-cloud, gpt-oss:20b-cloud`.
+- Errors: 401 → "Spider Cloud: device token invalid or revoked"; 429 → "Spider Cloud: daily limit reached, resets at …"
+  (the extractor then falls back with `fallbackReason: cap_reached`).
+- The interest extractor (`gemma4:cloud`, prompt v2) goes over the same Worker (OpenAI wire, `oa:` cache keys).
+- Native only: the Worker sends no CORS headers, so a plain browser build shows "Spider Cloud needs the native
+  app"; iOS goes through BHStream / native fetch, Electron through the main process.
+- It works only once Manny has deployed the Worker. Until then use `tools/spider-local/spider-local.mjs`, which runs
+  the real Worker code under `wrangler dev --local` with a fake upstream and throwaway `--var` secrets (no account,
+  no deploy, no model calls): 14 checks (token, models, streaming + buffered chat, extractor, 429 cap, 401 revoke,
+  no secret in the Worker log). `--sessions` adds the `/v1/sessions` upload checks.
