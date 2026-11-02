@@ -156,3 +156,11 @@ the network with `allowPaid` + `--allow-paid` + `OLLAMA_API_KEY`; otherwise it i
 `cacheDir` caches every response (`<key>.json`) and enforces a hard `maxCalls` cap (default 50) persisted in
 `<cacheDir>/calls.json`; `responsesFile` (JSONL `{key, raw}`) is a read-only cache for scoring responses
 gathered elsewhere (`tools/llm-extractor-eval/`). `hud` reports `tagger.calls`.
+
+Final-guess merge (`rank`, default `"lead"`): the latest non-empty extractor answer leads `final_guesses` /
+`top3` in the extractor's own order, keyphrase-idf topics fill the remaining slots (all of them before the
+first non-empty answer, so an empty or failed reply falls back to keyphrases), and keyphrase topics whose words
+all occur in a ranked label are dropped as duplicates (`aliasBase`, default true). `"soft"` adds
+`priorWeight` (default 0.5) x 0.85^rank to the engagement score instead; `"none"` is the pre-merge behaviour.
+Interest-map evidence is unchanged by `rank` (`observeScale` multiplies the extractor tags' evidence weight).
+Taggers without an extractor have no prior, so their ranking is unchanged. Sweep: `docs/sweeps/phaseC_tagger_track2_merge.md`.

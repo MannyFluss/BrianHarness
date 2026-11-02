@@ -245,7 +245,7 @@ export class HarnessSession {
 
   /** Top-k final guesses at the user's interests (no LLM call; see final-guesses.ts). */
   finalGuesses(k = 3, opts?: FinalGuessOptions): FinalGuess[] {
-    return finalGuesses(this.map, this.snapshots, k, opts);
+    return finalGuesses(this.map, this.snapshots, k, { prior: this.tagger.rankPrior?.() ?? null, ...opts });
   }
 
   hud(): HudState {

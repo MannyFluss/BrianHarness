@@ -4,7 +4,7 @@
  * displaced by a last-turn wobble, and a specific (open-vocab) refinement beats its broad parent.
  */
 import type { InterestMap } from "./interest-map.js";
-import { isSpecificTopic } from "./tagger.js";
+import { isSpecificTopic, type RankPrior } from "./tagger.js";
 
 export interface TurnSnapshot {
   turn: number;
@@ -31,6 +31,8 @@ export interface FinalGuessOptions {
   decay?: number;
   /** bonus for specific open-vocab topics (x:/o:/kp:) over broad lexicon ones (default 0.08) */
   specificityBonus?: number;
+  /** a tagger's whole-conversation ranking (LlmInterestExtractor); none = plain engagement ranking */
+  prior?: RankPrior | null;
 }
 
 const RANK_CREDIT = [0.6, 0.4, 0.25];
@@ -58,5 +60,18 @@ export function finalGuesses(map: InterestMap, history: TurnSnapshot[], k = 3, o
     const score = 0.45 * p + 0.4 * cur * nconf + 0.15 * nconf + (parent || isSpecificTopic(t) ? spec : 0);
     return { topic: t, label: map.label(t), score: Math.round(score * 1000) / 1000, mean: c.mean, n: c.n, persistence: Math.round(p * 1000) / 1000, ...(parent ? { parent } : {}) };
   });
-  return scored.sort((a, b) => b.score - a.score || b.mean - a.mean).slice(0, k);
+  const pr = opts.prior;
+  if (!pr || !pr.ranked.length) return scored.sort((a, b) => b.score - a.score || b.mean - a.mean).slice(0, k);
+  const drop = new Set(pr.suppress ?? []);
+  const rank = new Map<string, number>();
+  pr.ranked.forEach((t, i) => { if (!rank.has(t)) rank.set(t, i); });
+  const kept = scored.filter((g) => !drop.has(g.topic) || rank.has(g.topic));
+  if (pr.weight === Infinity) {
+    // lead mode: the ranked topics first, in their order; the engagement ranking only fills the rest
+    const lead = kept.filter((g) => rank.has(g.topic)).sort((a, b) => rank.get(a.topic)! - rank.get(b.topic)!);
+    const fill = kept.filter((g) => !rank.has(g.topic)).sort((a, b) => b.score - a.score || b.mean - a.mean);
+    return [...lead, ...fill].slice(0, k);
+  }
+  const adj = (g: FinalGuess) => g.score + (rank.has(g.topic) ? pr.weight * 0.85 ** rank.get(g.topic)! : 0);
+  return kept.sort((a, b) => adj(b) - adj(a) || b.mean - a.mean).slice(0, k);
 }

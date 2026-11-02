@@ -165,3 +165,45 @@ test("llm-extract: the system prompt names no persona passion (no examples that 
   for (const w of PERSONA_WORDS) assert.ok(!new RegExp(`(^|[^a-z])${w}([^a-z]|$)`).test(sp), `prompt mentions "${w}"`);
   for (const l of curatedLabels) assert.ok(!sp.includes(l), `prompt mentions curated "${l}"`);
 });
+
+// ---------- llm-extract merge: the extractor's latest answer leads the final guesses ----------
+function seqFetch(contents: string[]) {
+  let i = 0;
+  return (async () => new Response(JSON.stringify({ message: { role: "assistant", content: contents[Math.min(i++, contents.length - 1)] }, done: true }), { status: 200 })) as unknown as typeof fetch;
+}
+const RANKED = JSON.stringify({ interests: [
+  { label: "peloton workouts", confidence: 0.6, turns: [5] },
+  { label: "craft beer", confidence: 0.9, turns: [1, 2, 3, 4] },
+  { label: "fantasy football", confidence: 0.8, turns: [2, 3] },
+] });
+const MSGS = ["I did a Peloton ride this morning", "then a craft beer at the brewery", "fantasy football draft tonight",
+  "the Peloton instructor was intense", "more Peloton tomorrow, the climb ride", "and a hazy IPA after"];
+async function mergeSession(opts: Record<string, unknown>, contents = [RANKED]) {
+  const s = new HarnessSession({ userId: "m", backend: new MockBackend(3), store: null, seed: 3,
+    tagger: new LlmInterestExtractor({ everyN: 3, fetchImpl: seqFetch(contents), ...opts }) });
+  await s.start();
+  for (const m of MSGS) await s.reply(m);
+  return s;
+}
+
+test("llm-extract merge (default lead): final guesses follow the extractor's own order; kp duplicates dropped", async () => {
+  const s = await mergeSession({});
+  const g = s.finalGuesses(3).map((x) => x.label.toLowerCase());
+  assert.deepEqual(g, ["peloton workouts", "craft beer", "fantasy football"]);
+  const prior = s.tagger.rankPrior!()!;
+  assert.equal(prior.weight, Infinity);
+  assert.ok(prior.suppress!.some((t) => t.startsWith("kp:") && /peloton/.test(t)), JSON.stringify(prior.suppress));
+  assert.ok(!s.finalGuesses(5).some((x) => x.topic.startsWith("kp:") && /^peloton$/.test(x.label.toLowerCase())));
+});
+
+test("llm-extract merge: an empty reply keeps the previous answer; no answer yet = keyphrase ranking; rank none = no prior", async () => {
+  const empty = JSON.stringify({ interests: [] });
+  const keep = await mergeSession({}, [RANKED, empty]);
+  assert.equal(keep.finalGuesses(1)[0]!.label.toLowerCase(), "peloton workouts");
+  const none = await mergeSession({}, [empty]);
+  assert.equal(none.tagger.rankPrior!(), null);
+  assert.ok(none.finalGuesses(3).length > 0); // keyphrase-idf fills everything
+  const old = await mergeSession({ rank: "none" });
+  assert.equal(old.tagger.rankPrior!(), null);
+  assert.equal(createTagger({ kind: "keyphrase-idf" }).rankPrior, undefined); // non-LLM taggers: ranking unchanged
+});

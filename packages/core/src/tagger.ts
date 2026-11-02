@@ -29,9 +29,22 @@ export interface TopicTag {
   observeWeight?: number;
 }
 
+/** A tagger's whole-conversation opinion for the final ranking (see final-guesses.ts FinalGuessOptions.prior). */
+export interface RankPrior {
+  /** topic ids, best first (e.g. the LLM extractor's latest answer in its own order) */
+  ranked: string[];
+  /** Infinity = these lead the final guesses in this order (rest filled by the engagement ranking);
+   *  finite w = soft prior, adds w * 0.85^rank to the engagement score */
+  weight: number;
+  /** topic ids never shown as guesses (e.g. keyphrase duplicates of a ranked label) */
+  suppress?: string[];
+}
+
 export interface TopicTagger {
   readonly kind: string;
   tag(text: string, signal?: AbortSignal): Promise<TopicTag[]>;
+  /** optional ranking prior for finalGuesses; taggers without one keep the plain engagement ranking */
+  rankPrior?(): RankPrior | null;
 }
 
 /**

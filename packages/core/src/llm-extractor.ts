@@ -4,12 +4,18 @@
  * the interest map as "o:<slug>" topics with an evidence weight from confidence x supporting turns.
  * Between calls (and on any failure) the base tagger (keyphrase-idf by default) keeps tagging.
  *
+ * Merge (rankPrior): the latest NON-EMPTY extractor answer is a whole-conversation judgment, so by default
+ * ("lead") its labels lead the final guesses in the extractor's own order; keyphrase topics only fill the
+ * remaining slots (or all of them while the extractor has said nothing, e.g. an empty or failed reply), and
+ * keyphrase topics whose words are all inside a ranked label are dropped as duplicates ("peloton" vs
+ * "peloton workouts"). Evidence in the interest map is unchanged, so the Director's planning still sees both.
+ *
  * Browser/iOS-safe: no fs, no process.env, no crypto.subtle. Node callers (the sidecar) inject the
  * API key, a disk cache and a hard call cap through the options.
  * Leak-free: the prompt contains no example hobbies; tests check it against the sim persona vocabulary.
  */
-import type { TopicTag, TopicTagger } from "./tagger.js";
-import { KeyphraseIdfTagger, type KeyphraseIdfOptions } from "./tagger-idf.js";
+import type { RankPrior, TopicTag, TopicTagger } from "./tagger.js";
+import { KeyphraseIdfTagger, stem, type KeyphraseIdfOptions } from "./tagger-idf.js";
 import { normalizeOllamaBaseUrl } from "./providers/ollama.js";
 
 export interface ExtractorCache {
@@ -40,6 +46,18 @@ export interface LlmExtractorOptions {
   baseOptions?: KeyphraseIdfOptions;
   /** max candidate interests used per call (default 4) */
   maxLabels?: number;
+  /**
+   * how the extractor's latest answer ranks the final guesses (default "lead"):
+   * "lead" = its labels first in its order, keyphrase fill; "soft" = additive prior (priorWeight);
+   * "none" = old behaviour (extractor labels compete as ordinary evidence)
+   */
+  rank?: "lead" | "soft" | "none";
+  /** soft prior weight added to the 0..1 final-guess score of the top label (x0.85 per rank) (default 0.5) */
+  priorWeight?: number;
+  /** drop keyphrase topics whose words all occur in a ranked extractor label (default true) */
+  aliasBase?: boolean;
+  /** multiplier on the extractor tags' interest-map evidence weight (default 1) */
+  observeScale?: number;
   fetchImpl?: typeof fetch;
   /** response cache keyed by promptKey(); a hit spends no call */
   cache?: ExtractorCache;
@@ -126,6 +144,10 @@ export class LlmInterestExtractor implements TopicTagger {
   private base: TopicTagger | null;
   private user: string[] = [];
   private known = new Map<string, string>();
+  /** latest non-empty answer: [topic id, label] in the extractor's order */
+  private latest: Array<[string, string]> = [];
+  /** keyphrase (base) topics seen: id -> label */
+  private baseTopics = new Map<string, string>();
   constructor(private o: LlmExtractorOptions = {}) {
     this.base = (o.base ?? "keyphrase-idf") === "none" ? null : new KeyphraseIdfTagger(o.baseOptions);
   }
@@ -144,8 +166,10 @@ export class LlmInterestExtractor implements TopicTagger {
   async tag(text: string, signal?: AbortSignal): Promise<TopicTag[]> {
     this.user.push(text);
     const out = this.base ? await this.base.tag(text, signal) : [];
+    for (const t of out) this.baseTopics.set(t.id, t.label);
     if (!this.due(this.user.length)) return out;
     const interests = await this.extract(signal);
+    const answer: Array<[string, string]> = [];
     for (const it of interests.slice(0, this.o.maxLabels ?? 4)) {
       const s = slug(it.label);
       if (!s) continue;
@@ -153,11 +177,31 @@ export class LlmInterestExtractor implements TopicTagger {
       if (!id) for (const [k, v] of this.known) if (k.includes(s) || s.includes(k)) id = v;
       id ??= `o:${s}`;
       this.known.set(s, id);
+      if (!answer.some(([a]) => a === id)) answer.push([id, it.label]);
       if (out.some((x) => x.id === id)) continue;
       const support = Math.max(1, Math.min(3, new Set(it.turns.filter((t) => t >= 1 && t <= this.user.length)).size));
-      out.push({ id, label: it.label, weight: it.confidence, observeWeight: Math.round(0.7 * it.confidence * support * 1000) / 1000 });
+      const w = 0.7 * it.confidence * support * (this.o.observeScale ?? 1);
+      out.push({ id, label: it.label, weight: it.confidence, observeWeight: Math.round(w * 1000) / 1000 });
     }
+    if (answer.length) this.latest = answer; // an empty / failed reply keeps the previous answer
     return out;
+  }
+
+  /** final-guess ranking prior from the latest non-empty answer (null before one, or with rank "none") */
+  rankPrior(): RankPrior | null {
+    const mode = this.o.rank ?? "lead";
+    if (mode === "none" || !this.latest.length) return null;
+    const words = (l: string) => l.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map(stem);
+    const ranked = this.latest.map(([id]) => id);
+    const suppress: string[] = [];
+    if (this.o.aliasBase ?? true) {
+      const labelWords = this.latest.map(([, l]) => new Set(words(l)));
+      for (const [id, label] of this.baseTopics) {
+        const w = words(label);
+        if (w.length && labelWords.some((L) => w.every((x) => L.has(x)))) suppress.push(id);
+      }
+    }
+    return { ranked, weight: mode === "lead" ? Infinity : this.o.priorWeight ?? 0.5, suppress };
   }
 
   private async extract(signal?: AbortSignal): Promise<ExtractedInterest[]> {
