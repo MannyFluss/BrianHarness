@@ -4,3 +4,4 @@ out/
 release/
 data/
 *.log
+dist-web/

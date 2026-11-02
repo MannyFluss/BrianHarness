@@ -1,3 +1,4 @@
+// Electron entry: the transport is window.eeg (electron/preload.cjs -> IPC -> core in the main process).
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";

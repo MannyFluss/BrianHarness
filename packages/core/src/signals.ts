@@ -64,7 +64,27 @@ export function summarizeTyping(events: TypingEvent[], window: TimeWindow): Feat
   const composeMs = Math.max(0, window.to - firstKeyAt);
   const activeMs = Math.max(1, composeMs - pauseTotal);
   const strokes = inserts + deletions;
+  // Input-source features: only emitted when the renderer reported sources, so desktop/sim
+  // feature maps (and the engagement estimator, which doesn't read these) are unchanged.
+  const src: FeatureMap = {};
+  const withSrc = keys.filter((e) => e.source);
+  if (withSrc.length) {
+    const count = (s: string) => withSrc.filter((e) => e.source === s).length;
+    src["typing.src.soft"] = count("soft-keyboard") / withSrc.length;
+    src["typing.src.hardware"] = count("hardware-key") / withSrc.length;
+    src["typing.src.autocorrect"] = count("autocorrect");
+    src["typing.src.predictive"] = count("predictive");
+    src["typing.src.dictation"] = count("dictation");
+    src["typing.src.composition"] = count("composition");
+    // share of inserted characters that came with per-key timing (1 = keystroke timing is meaningful)
+    const chars = (e: TypingEvent) => e.chars ?? 1;
+    const ins = withSrc.filter((e) => e.kind === "insert");
+    const total = ins.reduce((a, e) => a + chars(e), 0);
+    const timed = ins.filter((e) => e.source === "hardware-key" || e.source === "soft-keyboard").reduce((a, e) => a + Math.min(1, chars(e)), 0);
+    src["typing.src.timedShare"] = total ? timed / total : 1;
+  }
   return {
+    ...src,
     "typing.replyLatencyMs": Math.max(0, firstKeyAt - window.from),
     "typing.composeMs": composeMs,
     "typing.totalMs": Math.max(0, window.to - window.from),

@@ -11,7 +11,10 @@
     "build": "vite build",
     "start": "electron .",
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && EEG_DEV_URL=http://localhost:5173 electron .\"",
-    "dist:mac": "npm run build && electron-builder --config electron-builder.cjs --mac --arm64"
+    "dist:mac": "npm run build && electron-builder --config electron-builder.cjs --mac --arm64",
+    "build:web": "vite build --mode web && node scripts/check-web-bundle.mjs",
+    "dev:web": "vite --mode web",
+    "preview:web": "vite preview --mode web"
   },
   "dependencies": {
     "@brianharness/core": "0.1.0"

@@ -8,7 +8,7 @@ import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { BRAND, HarnessSession, ProviderHub, SessionStore, backendSpecFromEnv, createBackend, sessionTitle } from "@brianharness/core";
+import { BRAND, HarnessHost, ProviderHub, SessionStore, backendSpecFromEnv, createBackend } from "@brianharness/core";
 import { runDemo } from "./demo.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,10 +28,9 @@ const userId = process.env.EEG_USER ?? "local-user";
 let hub;
 /** @type {import("@brianharness/core").ModelBackend | null} */
 let backend = null;
-/** @type {HarnessSession | null} */
-let session = null;
-/** @type {Map<string, {firstUserText: string|null, topicLabel: string|null, turns: number}>} */
-const titleInfo = new Map();
+// Session lifecycle, titles and the session list live in core's HarnessHost (shared with the
+// in-process web/iOS transport), so both shells run the same logic.
+const host = new HarnessHost({ userId, storage: store, backend: () => ensureBackend(), logRawEvents: true, seed: () => Date.now() % 100000 });
 /** @type {BrowserWindow | null} */
 let mainWin = null;
 
@@ -59,52 +58,15 @@ async function ensureBackend() {
   return backend;
 }
 
-function titleFor(id) {
-  const t = titleInfo.get(id);
-  return t ? sessionTitle(t) : null;
-}
-
-async function newSession() {
-  if (session) await session.end();
-  session = new HarnessSession({ userId, backend: await ensureBackend(), store, logRawEvents: true, seed: Date.now() % 100000 });
-  const d = await session.start();
-  return { sessionId: session.id, director: d, hud: session.hud(), title: "New chat" };
-}
-
-function sessionList() {
-  return store.listSessions().slice(0, 50).map((id) => {
-    const events = store.readSession(id);
-    const firstUser = events.find((e) => e.type === "user_turn");
-    const start = events.find((e) => e.type === "session_start");
-    return {
-      id,
-      title: titleFor(id) ?? (firstUser ? sessionTitle({ firstUserText: firstUser.text }) : "New chat"),
-      turns: events.filter((e) => e.type === "user_turn").length,
-      startedAt: start?.t ?? null,
-      active: session?.id === id,
-    };
-  });
-}
-
 function info() {
   const s = hub.settings();
   return { backend: backend?.id ?? "…", paid: !!backend?.paid, provider: s.provider, model: s.model ?? null, dataDir, userId, platform: process.platform, appName: BRAND.name };
 }
 
-ipcMain.handle("harness:new", () => newSession());
-ipcMain.handle("harness:reply", async (_e, { text, events, sentAt, shownAt }) => {
-  if (!session) await newSession();
-  if (typeof shownAt === "number") session.markShown(shownAt);
-  const out = await session.reply(String(text), Array.isArray(events) ? events : [], typeof sentAt === "number" ? sentAt : Date.now());
-  const hud = session.hud();
-  const t = titleInfo.get(session.id) ?? { firstUserText: String(text), topicLabel: null, turns: 0 };
-  t.turns = session.turn;
-  t.topicLabel = hud.hypothesis ? session.map.label(hud.hypothesis) : null;
-  titleInfo.set(session.id, t);
-  return { director: out.director, hud, engagement: out.user.frame.engagement, title: sessionTitle(t) };
-});
-ipcMain.handle("harness:hud", () => session?.hud() ?? null);
-ipcMain.handle("harness:sessions", () => sessionList());
+ipcMain.handle("harness:new", () => host.newSession());
+ipcMain.handle("harness:reply", (_e, payload) => host.reply(payload ?? {}));
+ipcMain.handle("harness:hud", () => host.hud());
+ipcMain.handle("harness:sessions", () => host.sessions());
 ipcMain.handle("harness:info", async () => {
   await ensureBackend();
   return info();
@@ -116,11 +78,18 @@ ipcMain.handle("providers:select", async (_e, { provider, model }) => {
   const next = await hub.createBackend({ provider, model: model ?? undefined }); // throws -> renderer shows it
   hub.saveSettings({ provider, model: model ?? undefined });
   backend = next;
-  session?.setBackend(next); // swap mid-chat; the Director's state carries over
+  host.setBackend(next); // swap mid-chat; the Director's state carries over
   return info();
 });
 ipcMain.handle("providers:apiKey", async (_e, { provider, key }) => {
   await hub.setApiKey(provider, String(key ?? ""));
+  return { ok: true };
+});
+ipcMain.handle("providers:endpoint", async (_e, { provider, url }) => {
+  if (provider !== "ollama") throw new Error("only the Ollama URL is configurable on desktop");
+  const u = String(url ?? "").trim();
+  if (u && !/^https?:\/\//.test(u)) throw new Error("URL must start with http:// or https://");
+  hub.saveSettings({ ollamaUrl: u || undefined });
   return { ok: true };
 });
 ipcMain.handle("providers:logout", async (_e, { provider }) => {
@@ -224,6 +193,6 @@ app.whenReady().then(async () => {
   }
 });
 app.on("window-all-closed", async () => {
-  await session?.end();
+  await host.end();
   app.quit();
 });

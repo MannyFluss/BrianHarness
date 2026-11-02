@@ -7,6 +7,7 @@ import { Sidebar } from "./components/Sidebar";
 import { pickerLabel } from "./components/ModelPicker";
 import { TopBar } from "./components/TopBar";
 import { useTypingTelemetry } from "./telemetry";
+import { useLayoutMode, useVisualViewportHeight } from "./layout";
 
 let nextId = 0;
 const mid = () => `m${++nextId}`;
@@ -19,8 +20,20 @@ export function App() {
   const [stateNote, setStateNote] = useState("");
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [info, setInfo] = useState<Info | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [hudOpen, setHudOpen] = useState(true);
+  const layout = useLayoutMode();
+  const phone = layout === "phone";
+  useVisualViewportHeight();
+  const [sidebarOpen, setSidebarOpen] = useState(() => !matchMedia("(max-width: 767px)").matches);
+  const [hudOpen, setHudOpen] = useState(() => !matchMedia("(max-width: 767px)").matches);
+  // entering phone layout closes the overlays; leaving it restores the columns
+  const prevLayout = useRef(layout);
+  useEffect(() => {
+    if (prevLayout.current === layout) return;
+    const wasPhone = prevLayout.current === "phone";
+    prevLayout.current = layout;
+    if (phone) { setSidebarOpen(false); setHudOpen(false); }
+    else if (wasPhone) { setSidebarOpen(true); setHudOpen(true); }
+  }, [layout, phone]);
   const [tick, setTick] = useState(0);
   const [title, setTitle] = useState("New chat");
   const pickerRef = useRef<(() => void) | null>(null);
@@ -118,30 +131,31 @@ export function App() {
   }, [send, tel]);
 
   return (
-    <div className="flex h-dvh" data-busy={busy ? "true" : "false"}>
-      <Sidebar open={sidebarOpen} sessions={sessions} info={info} onNew={() => void startNew()} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} />
+    <div className="eeg-app flex" data-busy={busy ? "true" : "false"} data-layout={layout}>
+      <Sidebar variant={phone ? "drawer" : "column"} open={sidebarOpen} sessions={sessions} info={info} onNew={() => { if (phone) setSidebarOpen(false); void startNew(); }} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} />
       <main className="flex min-w-0 flex-1 flex-col">
-        <TopBar sidebarOpen={sidebarOpen} onOpenSidebar={() => setSidebarOpen(true)} hudOpen={hudOpen} onToggleHud={() => setHudOpen((v) => !v)}>
-          <span className="font-title text-3xl tracking-tight" title={title}>{title}</span>
+        <TopBar sidebarOpen={sidebarOpen && !phone} onOpenSidebar={() => { setSidebarOpen(true); if (phone) setHudOpen(false); }} hudOpen={hudOpen} onToggleHud={() => { setHudOpen((v) => !v); if (phone) setSidebarOpen(false); }}>
+          <span className="font-title text-2xl tracking-tight md:text-3xl" title={title}>{title}</span>
         </TopBar>
         <div className="flex min-h-0 flex-1">
           <div className="relative flex min-w-0 flex-1 flex-col">
-            <div ref={scroller} className="flex-1 overflow-y-auto">
-              <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-6 px-6 pb-40 pt-8">
+            <div ref={scroller} className="flex-1 overflow-y-auto overscroll-contain">
+              <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-6 px-4 pb-40 pt-6 md:px-6 md:pt-8">
                 {messages.map((m) => <Message key={m.id} msg={m} />)}
                 {busy && <Thinking tick={tick} />}
               </div>
             </div>
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background/90 to-transparent pb-5 pt-10">
-              <div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-4">
-                <Composer value={draft} onChange={setDraft} onSend={() => void send()} busy={busy} onInput={tel.onInput} onKeyDown={tel.onKeyDown} />
-                <div className="mt-2 text-center text-xs text-muted-foreground/60">typing telemetry is logged locally · {pickerLabel(info)}</div>
+            <div className="eeg-composer-dock pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background/90 to-transparent pt-10">
+              <div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-3 md:px-4">
+                <Composer value={draft} onChange={setDraft} onSend={() => void send()} busy={busy} telemetryRef={tel.attach} />
+                <div className="mt-2 truncate text-center text-xs text-muted-foreground/60">typing telemetry is logged locally · {pickerLabel(info)}</div>
               </div>
             </div>
           </div>
-          {hudOpen && <Hud hud={hud} stateNote={stateNote} />}
+          {hudOpen && !phone && <Hud variant="column" hud={hud} stateNote={stateNote} />}
         </div>
       </main>
+      {phone && <Hud variant="sheet" open={hudOpen} onClose={() => setHudOpen(false)} hud={hud} stateNote={stateNote} />}
     </div>
   );
 }

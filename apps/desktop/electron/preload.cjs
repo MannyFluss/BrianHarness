@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("eeg", {
     status: () => ipcRenderer.invoke("providers:status"),
     select: (provider, model) => ipcRenderer.invoke("providers:select", { provider, model }),
     setApiKey: (provider, key) => ipcRenderer.invoke("providers:apiKey", { provider, key }),
+    setEndpoint: (provider, url) => ipcRenderer.invoke("providers:endpoint", { provider, url }),
     logout: (provider) => ipcRenderer.invoke("providers:logout", { provider }),
     login: (provider) => ipcRenderer.invoke("providers:login", { provider }),
     cancelLogin: () => ipcRenderer.invoke("providers:cancelLogin"),
@@ -24,4 +25,6 @@ contextBridge.exposeInMainWorld("eeg", {
     onAuthPromptDone: on("auth:promptDone"),
   },
   platform: process.platform,
+  kind: "electron",
+  credentialNote: "Stored only on this Mac, encrypted with your login Keychain.",
 });

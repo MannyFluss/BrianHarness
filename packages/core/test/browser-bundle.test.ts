@@ -90,3 +90,15 @@ test("AnthropicFetchBackend sends the direct-browser-access header; browser fact
   assert.equal(createBrowserBackend({ provider: "mock" }).paid, false);
   assert.equal(createBrowserBackend({ provider: "ollama", baseUrl: "http://192.168.1.20:11434", model: "gemma3:4b" }).paid, false);
 });
+
+test("input-source features are additive (absent without sources, present with them)", async () => {
+  const { summarizeTyping } = await import("../src/signals.ts");
+  const base = [{ t: 1000, kind: "insert" as const, len: 1 }, { t: 1100, kind: "insert" as const, len: 2 }];
+  const plain = summarizeTyping(base, { from: 900, to: 1200 });
+  assert.ok(!Object.keys(plain).some((k) => k.startsWith("typing.src.")));
+  const tagged = summarizeTyping([{ ...base[0]!, source: "soft-keyboard" as const }, { ...base[1]!, len: 7, source: "autocorrect" as const, chars: 5 }], { from: 900, to: 1200 });
+  for (const k of Object.keys(plain)) assert.ok(k in tagged, k);
+  assert.equal(tagged["typing.src.autocorrect"], 1);
+  assert.equal(tagged["typing.src.soft"], 0.5);
+  assert.ok(Math.abs(tagged["typing.src.timedShare"]! - 1 / 6) < 1e-9);
+});

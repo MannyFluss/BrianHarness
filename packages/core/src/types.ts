@@ -8,12 +8,23 @@ export const QUESTION_STYLES: QuestionStyle[] = ["open", "either-or", "personal-
 export type DirectorMode = "explore" | "exploit" | "relax";
 
 /** One raw composer event captured in the renderer. Key identity is NOT stored, only its class. */
+/**
+ * Where an edit came from, when the platform can tell (beforeinput/input inputType + recent
+ * keydown/pointer). iOS gives no per-key timing for autocorrect, predictive-bar picks or
+ * dictation: those arrive as one multi-character insert.
+ */
+export type InputSource = "hardware-key" | "soft-keyboard" | "autocorrect" | "predictive" | "composition" | "dictation" | "paste" | "drop" | "programmatic" | "unknown";
+
 export interface TypingEvent {
   /** ms since epoch */
   t: number;
   kind: "insert" | "delete" | "paste" | "nav" | "submit" | "focus" | "blur";
   /** length of the composer value after the event */
   len: number;
+  /** optional: input source (web/iOS renderer); absent in older logs and the sim */
+  source?: InputSource;
+  /** optional: characters inserted (>1 for autocorrect / predictive / dictation / paste) */
+  chars?: number;
 }
 
 /** Numeric features for one window of time, from one signal source. */

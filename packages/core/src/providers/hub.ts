@@ -42,6 +42,8 @@ export interface ProviderStatus {
   models: ModelOption[];
   detail?: string;
   warning?: string;
+  /** configurable server URL (Ollama) */
+  endpoint?: string;
 }
 export interface AuthInteractionLike {
   prompt(p: { type: string; message: string; placeholder?: string; options?: readonly { id: string; label: string }[] }): Promise<string>;
@@ -102,6 +104,7 @@ export class ProviderHub {
         available: ollama.running && ollama.models.length > 0,
         signedIn: ollama.running,
         auth: ["none"],
+        endpoint: ollama.baseUrl,
         models: ollama.models.map((m) => ({ id: m.name, label: `${m.name}${m.parameterSize ? ` · ${m.parameterSize}` : ""}${m.cloud ? " · cloud" : ""}`, paid: m.cloud })),
         detail: ollama.running ? `${ollama.models.length} model(s) at ${ollama.baseUrl}` : `Not running at ${ollama.baseUrl}. Start the Ollama app, then refresh.`,
       },

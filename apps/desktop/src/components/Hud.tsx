@@ -1,4 +1,6 @@
+import { XIcon } from "lucide-react";
 import type { Hud as HudState } from "../bridge";
+import { cn } from "../lib";
 
 function Bar({ value, label, sub }: { value: number; label: string; sub?: string }) {
   return (
@@ -19,10 +21,37 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // The Director HUD: a debug overlay like a game's dev console. Shows what the Director "sees".
-export function Hud({ hud, stateNote }: { hud: HudState | null; stateNote: string }) {
-  const f = hud?.frame?.features ?? {};
+// column: right-hand panel (iPad landscape / Mac). sheet: bottom sheet over the chat (iPhone).
+export function Hud({ hud, stateNote, variant = "column", open = true, onClose }: { hud: HudState | null; stateNote: string; variant?: "column" | "sheet"; open?: boolean; onClose?: () => void }) {
+  if (variant === "sheet") {
+    return (
+      <>
+        <button aria-label="Close HUD" tabIndex={open ? 0 : -1} onClick={onClose} className={cn("fixed inset-0 z-40 bg-black/50 transition-opacity", open ? "opacity-100" : "pointer-events-none opacity-0")} />
+        <aside role="dialog" aria-label="Director HUD" aria-hidden={!open} className={cn("fixed inset-x-0 bottom-0 z-50 flex max-h-[72dvh] flex-col rounded-t-2xl border-t bg-background shadow-2xl shadow-black/70 transition-transform duration-200", open ? "translate-y-0" : "pointer-events-none translate-y-full")}>
+          <div className="flex shrink-0 items-center justify-between px-4 pt-2">
+            <span className="mx-auto h-1 w-10 rounded-full bg-border" />
+          </div>
+          <div className="flex shrink-0 items-center justify-between px-4 pb-1">
+            <span className="text-xs uppercase tracking-widest text-muted-foreground">Director HUD</span>
+            <button onClick={onClose} aria-label="Close HUD" className="eeg-tap flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"><XIcon className="size-4" /></button>
+          </div>
+          <div className="overflow-y-auto overscroll-contain px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"><HudBody hud={hud} stateNote={stateNote} /></div>
+        </aside>
+      </>
+    );
+  }
   return (
-    <aside className="flex w-80 shrink-0 flex-col gap-5 overflow-y-auto border-l bg-background p-4 text-xs">
+    <aside className="w-72 shrink-0 overflow-y-auto border-l bg-background p-4 text-xs xl:w-80">
+      <HudBody hud={hud} stateNote={stateNote} />
+    </aside>
+  );
+}
+
+function HudBody({ hud, stateNote }: { hud: HudState | null; stateNote: string }) {
+  const f = hud?.frame?.features ?? {};
+  const timed = f["typing.src.timedShare"];
+  return (
+    <div className="flex flex-col gap-5 text-xs">
       <Section title="This turn">
         {hud?.frame ? (
           <>
@@ -35,6 +64,7 @@ export function Hud({ hud, stateNote }: { hud: HudState | null; stateNote: strin
               <span>edits</span><span className="text-right text-foreground">{f["typing.edits"] ?? 0}</span>
               <span>long pauses</span><span className="text-right text-foreground">{f["typing.pauses"] ?? 0}</span>
               <span>chars/sec</span><span className="text-right text-foreground">{(f["typing.charsPerSec"] ?? 0).toFixed(1)}</span>
+              {timed !== undefined && (<><span>key-timed</span><span className="text-right text-foreground" title="share of inserted characters with per-key timing (autocorrect / predictive / dictation have none)">{Math.round(timed * 100)}%</span></>)}
             </div>
           </>
         ) : (
@@ -52,6 +82,6 @@ export function Hud({ hud, stateNote }: { hud: HudState | null; stateNote: strin
         {hud?.plan && <div className="text-foreground"><span className="uppercase">{hud.plan.mode}</span> {hud.plan.topic}{hud.plan.altTopic ? ` / ${hud.plan.altTopic}` : ""} · {hud.plan.style}</div>}
         <pre className="whitespace-pre-wrap rounded-md border border-border/60 bg-card p-2 font-ui text-[11px] leading-snug text-muted-foreground">{stateNote || "…"}</pre>
       </Section>
-    </aside>
+    </div>
   );
 }
