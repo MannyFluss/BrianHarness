@@ -53,7 +53,8 @@ export function App() {
   const phone = layout === "phone";
   useVisualViewportHeight();
   const [sidebarOpen, setSidebarOpen] = useState(() => !matchMedia("(max-width: 767px)").matches);
-  const [hudOpen, setHudOpen] = useState(() => !matchMedia("(max-width: 767px)").matches);
+  // the Director HUD starts closed on every form factor (demo default, Nov 3 2026); the toggle and Cmd/Ctrl+H stay
+  const [hudOpen, setHudOpen] = useState(false);
   // entering phone layout closes the overlays; leaving it restores the columns
   const prevLayout = useRef(layout);
   useEffect(() => {
@@ -61,7 +62,7 @@ export function App() {
     const wasPhone = prevLayout.current === "phone";
     prevLayout.current = layout;
     if (phone) { setSidebarOpen(false); setHudOpen(false); }
-    else if (wasPhone) { setSidebarOpen(true); setHudOpen(true); }
+    else if (wasPhone) setSidebarOpen(true); // the HUD stays as it was (closed unless toggled)
   }, [layout, phone]);
   const [tick, setTick] = useState(0);
   const [title, setTitle] = useState("New chat");
