@@ -57,6 +57,7 @@ export function overlaysOf(doc: Document): string[] {
   if (open("[data-siwa-screen]")) o.push("sign-in");
   if (open("[data-rating-probe='session']")) o.push("session-rating");
   if (open("[data-rating-probe='turn']")) o.push("turn-probe");
+  if (open("[data-transcript-viewer]")) o.push("past-chat");
   if (open("[data-feedback-sheet]")) o.push("report");
   return o;
 }

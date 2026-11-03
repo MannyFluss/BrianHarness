@@ -9,18 +9,21 @@ import { Composer } from "./components/Composer";
 import { Hud } from "./components/Hud";
 import { Message, Thinking, type ChatMsg } from "./components/Message";
 import { Sidebar } from "./components/Sidebar";
+import { TranscriptViewer } from "./components/TranscriptViewer";
+import { transcriptAllowed } from "./transcript";
 import { pickerLabel } from "./components/ModelPicker";
 import { TopBar } from "./components/TopBar";
 import { StudyLostBanner } from "./components/StudyData";
 import { AppleSignInScreen, useAppleAuth } from "./components/AppleSignIn";
 import { shouldOfferAtLaunch, type AppleAuthView } from "./transport/apple-auth";
 import { useTypingTelemetry } from "./telemetry";
+import { cn } from "./lib";
 import { useLayoutMode, useVisualViewportHeight } from "./layout";
 import { FeedbackSheet, type FeedbackSheetPhase } from "./components/FeedbackSheet";
 import { assembleReport, isReportShortcut, reportAllowed } from "./feedback/report";
 import { flightRecorder, setRecorderStudy, snapshotScreenNow } from "./feedback/recorder";
 import { feedbackBracket } from "./feedback/away";
-import type { FeedbackLogEvent } from "./transport/types";
+import type { FeedbackLogEvent, SessionTranscript } from "./transport/types";
 
 let nextId = 0;
 const mid = () => `m${++nextId}`;
@@ -48,6 +51,8 @@ export function App() {
   const [hud, setHud] = useState<HudState | null>(null);
   const [stateNote, setStateNote] = useState("");
   const [sessions, setSessions] = useState<SessionItem[]>([]);
+  /** a past session open read-only (sidebar row); the live session keeps running underneath, untouched */
+  const [viewing, setViewing] = useState<SessionTranscript | null>(null);
   const [info, setInfo] = useState<Info | null>(null);
   const layout = useLayoutMode();
   const phone = layout === "phone";
@@ -123,7 +128,7 @@ export function App() {
 
   const startNew = useCallback(async () => {
     try {
-      const { result: r, replyId } = await streamTurn(() => setMessages([]), (onToken) => bridge().newSession(onToken));
+      const { result: r, replyId } = await streamTurn(() => { setViewing(null); setMessages([]); }, (onToken) => bridge().newSession(onToken));
       setMessages((m) => completeReply(m, replyId, r.director.text, r.director.truncated));
       scheduler.current = probeScheduler(r.sessionId); // seeded per session: reproducible probe turns
       userTurns.current = 0;
@@ -383,6 +388,29 @@ export function App() {
     };
   }, [requestNew, dismissProbe, closeCard]);
 
+  // ---- past sessions, read-only (sidebar rows). Viewing reads the stored log only: no session starts, resumes or
+  // ends, nothing is written to any session log, no rating is shown or dismissed. Blocked while a STUDY session is in
+  // progress (rows disabled, and the transport refuses too), while a reply is coming, and while a rating step or the
+  // Report sheet is showing; the live session underneath is never touched.
+  const studyActive = !!hud?.study;
+  const canOpenPast = !!bridge().sessionTranscript;
+  const openLocked = !canOpenPast ? null
+    : studyActive ? "Past chats open after this study session."
+    : busy || card || probe ? "Past chats open once this step is done." : null;
+  const openSession = useCallback(async (s: SessionItem) => {
+    if (s.active) { setViewing(null); if (phone) setSidebarOpen(false); return; } // the current row: back to the live chat
+    if (!transcriptAllowed({ canOpen: !!bridge().sessionTranscript, studyActive: !!hud?.study, busy: uiRef.current.busy, ratingCardOpen: !!cardRef.current, turnProbeOpen: !!probeRef.current, reportOpen: !!reportRef.current })) return;
+    const t = await bridge().sessionTranscript!(s.id).catch(() => null);
+    if (!t) return;
+    flightRecorder.record("state", { event: "past_chat_open", turns: t.turns.length });
+    setViewing(t);
+    if (phone) setSidebarOpen(false);
+  }, [hud, phone]);
+  const closeViewer = useCallback(() => setViewing(null), []);
+  useEffect(() => { if (studyActive) setViewing(null); }, [studyActive]);
+  // back from a past chat: the live transcript was display:none, so pin it to the newest message again
+  useEffect(() => { if (!viewing) scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "auto" }); }, [viewing]);
+
   // dev/debug only: schedule hash (never the order) and the explicit unseal command
   useEffect(() => {
     const dev = !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV || (() => { try { return localStorage.getItem("bh.debug") === "1"; } catch { return false; } })();
@@ -414,14 +442,15 @@ export function App() {
 
   return (
     <div className="eeg-app flex" data-busy={busy ? "true" : "false"} data-layout={layout}>
-      <Sidebar variant={phone ? "drawer" : "column"} open={sidebarOpen} sessions={sessions} info={info} onNew={() => { if (phone) setSidebarOpen(false); requestNew(); }} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} onReport={canReport ? () => { if (phone) setSidebarOpen(false); openReport("sidebar"); } : undefined} />
+      <Sidebar variant={phone ? "drawer" : "column"} open={sidebarOpen} sessions={sessions} onOpenSession={canOpenPast ? (x) => void openSession(x) : undefined} viewingId={viewing?.id ?? null} openLocked={openLocked} info={info} onNew={() => { if (phone) setSidebarOpen(false); setViewing(null); requestNew(); }} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} onReport={canReport ? () => { if (phone) setSidebarOpen(false); openReport("sidebar"); } : undefined} />
       <main className="flex min-w-0 flex-1 flex-col">
         <TopBar sidebarOpen={sidebarOpen && !phone} onOpenSidebar={() => { setSidebarOpen(true); if (phone) setHudOpen(false); }} hudOpen={hudOpen} onToggleHud={() => { setHudOpen((v) => !v); if (phone) setSidebarOpen(false); }}>
-          <span className="font-title text-2xl tracking-tight md:text-3xl" title={title}>{title}</span>
+          <span className="font-title text-2xl tracking-tight md:text-3xl" title={viewing?.title ?? title}>{viewing?.title ?? title}</span>
         </TopBar>
         <StudyLostBanner />
         <div className="flex min-h-0 flex-1">
-          <div className="relative flex min-w-0 flex-1 flex-col">
+          {viewing && <TranscriptViewer t={viewing} onBack={closeViewer} onNew={() => { setViewing(null); requestNew(); }} />}
+          <div className={cn("relative flex min-w-0 flex-1 flex-col", viewing && "hidden")} aria-hidden={viewing ? true : undefined}>
             <div ref={scroller} className="flex-1 overflow-y-auto overscroll-contain">
               <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-6 px-4 pb-40 pt-6 md:px-6 md:pt-8" style={dockPad ? { paddingBottom: Math.max(160, dockPad) } : undefined} data-transcript>
                 {messages.map((m) => <Message key={m.id} msg={m} />)}
