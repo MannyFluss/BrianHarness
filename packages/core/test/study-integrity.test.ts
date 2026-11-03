@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   HarnessHost, MemoryHarnessStorage, MemoryKV, MockBackend, StudyController, UploadQueue, recoverNextIndex, setNextPhrase,
-  STUDY_PROGRESS_KEY, STUDY_PROGRESS_LOST_NOTE, STUDY_SCHEDULE_KEY, type StudySessionRecord, type TypingEvent,
+  STUDY_PROGRESS_KEY, STUDY_PROGRESS_LOST_NOTE, STUDY_PROTOCOL_VERSION, STUDY_SCHEDULE_KEY, type StudySessionRecord, type TypingEvent,
 } from "../src/index.js";
 
 const typed = (from: number, n: number, step = 200): TypingEvent[] =>
@@ -168,7 +168,7 @@ test("no schedule + no progress = fresh install: Start study at 1 (not 'lost'); 
   const study = new StudyController(secret, settings, { randomSeed: () => 1, recover: async () => { throw new Error("not needed"); } });
   const st = await study.status();
   assert.equal(st.progressLost, undefined); assert.equal(st.next, 1); assert.equal(st.scheduled, false);
-  assert.equal((await study.enable()).protocol, 2);
+  assert.equal((await study.enable()).protocol, STUDY_PROTOCOL_VERSION);
   assert.equal((await study.assign("a", () => 0))!.index, 1);
   // practice-build schedule (no protocol) + legacy progress -> both discarded
   const s2 = new MemoryKV(), set2 = new MemoryKV();
@@ -195,4 +195,28 @@ test("Keychain fail path unchanged: status error, enable rejects, sessions run w
   await host.newSession();
   assert.ok(!starts(storage)[0]!.study);
   assert.equal(await settings.get(STUDY_PROGRESS_KEY), JSON.stringify({ enabled: true, next: 3 }), "not migrated into a failing store, not removed");
+});
+
+test("protocol 2 -> 3 (P0 cut-off fix): a sealed v2 study at index 3 restarts cleanly at 1 with a new hash; no lost/recovered", async () => {
+  assert.equal(STUDY_PROTOCOL_VERSION, 3);
+  const v2raw = JSON.stringify({ study: "phaseD", version: 1, seed: 7, order: [...Array(5).fill("adaptive"), ...Array(5).fill("baseline")], createdAt: "2026-11-02T20:00:00.000Z", protocol: 2 });
+  const { sha256HexSync } = await import("../src/study.js");
+  const v2hash = sha256HexSync(v2raw);
+  const v2records: StudySessionRecord[] = [1, 2].map((index) => ({ sessionId: `v2-${index}`, index, scheduleHash: v2hash, valid: true }));
+  for (const progress of [JSON.stringify({ enabled: true, next: 3 }), null]) { // progress present, and evicted (would trigger recovery)
+    const secret = new MemoryKV(), settings = new MemoryKV();
+    await secret.set(STUDY_SCHEDULE_KEY, v2raw);
+    if (progress) await secret.set(STUDY_PROGRESS_KEY, progress);
+    let recoverCalls = 0;
+    const study = new StudyController(secret, settings, { randomSeed: () => 3, recover: async () => { recoverCalls++; return v2records; } });
+    const st = await study.status();
+    assert.equal(st.progressLost, undefined); assert.equal(st.progressRecovered, undefined); assert.equal(st.error, undefined);
+    assert.equal(st.enabled, false); assert.equal(st.next, 1); assert.equal(st.scheduled, false);
+    assert.equal(recoverCalls, 0, "protocol-2 progress is never resurrected");
+    const en = await study.enable();
+    assert.equal(en.protocol, 3); assert.notEqual(en.scheduleHash, v2hash);
+    const a = await study.assign("new-1", () => 0);
+    assert.equal(a!.index, 1); assert.equal(a!.protocol, 3); assert.equal(a!.scheduleHash, en.scheduleHash);
+    assert.equal(recoverCalls, 0);
+  }
 });

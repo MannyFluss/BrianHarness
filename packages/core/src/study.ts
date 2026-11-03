@@ -41,8 +41,11 @@ export const REISSUE_REASON_MAX = 120;
  * study_start and final. 1 = practice builds (<= 1438 / 11c71d1, which wrote no `protocol` field): a schedule
  * without it, or with a lower one, is discarded on launch together with the study progress (never the session
  * files or the upload queue), so "Start study" seals a fresh one. Sessions without `protocol` are practice.
+ * 2 = builds 1604 / 2031 (Director replies cut by max_tokens 200: the Researcher treats them as practice).
+ * 3 = the P0 cut-off fix (per-model max_tokens, finish_reason/truncated logged): a protocol-2 install restarts
+ *     at index 1 with a new schedule (no progress recovery: recovery only matches the new schedule's hash).
  */
-export const STUDY_PROTOCOL_VERSION = 2;
+export const STUDY_PROTOCOL_VERSION = 3;
 /** a study session counts only with >= this many user turns AND an answered session rating; else its index is reissued */
 export const STUDY_MIN_USER_TURNS = 8;
 

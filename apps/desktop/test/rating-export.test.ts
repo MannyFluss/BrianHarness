@@ -3,7 +3,7 @@
 // BHKeychain error shapes, and the blinded study end to end.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { KVCredentialStore, MemoryKV, STUDY_SCHEDULE_KEY, plainFiles, sessionExportName, type StoredCredential } from "@brianharness/core/browser";
+import { KVCredentialStore, MemoryKV, STUDY_PROTOCOL_VERSION, STUDY_SCHEDULE_KEY, plainFiles, sessionExportName, type StoredCredential } from "@brianharness/core/browser";
 import { createInProcessTransport } from "../src/transport/in-process.ts";
 import { BH_EXPORT_MESSAGES, bhExportErrorMessage, toExportFile } from "../src/transport/bh-export.ts";
 import { createKeychainCredentials, keychainStatus, nativeTransportOptions } from "../src/transport/native.ts";
@@ -225,5 +225,5 @@ test("Phase D study on iOS: schedule only in BHKeychain study/phaseD/schedule; l
   assert.match(String(await t.study!.hash!()), /^[0-9a-f]{64}$/);
   // session 1 had 2 user turns (< 8): invalid, so session 2 re-ran index 1 (reissueOf) and next is 2
   assert.equal((await t.study!.status()).next, 2);
-  assert.equal(evs[0].study.protocol, 2);
+  assert.equal(evs[0].study.protocol, STUDY_PROTOCOL_VERSION);
 });

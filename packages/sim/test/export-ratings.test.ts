@@ -49,7 +49,7 @@ test("export-ratings: one row per user turn, ratings joined, no mode column; --s
   const s1 = rows.filter((r) => r.sessionId === first);
   // session 1 had 3 user turns (< 8): invalid, so session 2 re-ran index 1 and says so
   const s2 = rows.filter((r) => r.sessionId !== first);
-  assert.deepEqual([s2[0]!.studyIndex, s2[0]!.reissue_of, s2[0]!.study_protocol, s1[0]!.reissue_of, s1[0]!.study_protocol], ["1", first, "2", "", "2"]);
+  assert.deepEqual([s2[0]!.studyIndex, s2[0]!.reissue_of, s2[0]!.study_protocol, s1[0]!.reissue_of, s1[0]!.study_protocol], ["1", first, "3", "", "3"]);
   assert.deepEqual(s1.map((r) => r.turn_rating), ["", "4", ""]);
   assert.equal(s1[2]!.turn_rating_dismissed, "true");
   assert.ok(s1.every((r) => r.session_rating === "5" && r.scheduleHash === scheduleHash));
