@@ -52,14 +52,27 @@ export function installTapRecorder(doc: Document, rec: FlightRecorder = flightRe
   return () => doc.removeEventListener("click", onClick, true);
 }
 
-/** a `screen` event whenever what's on screen settles into something new (debounced; identical snapshots skipped) */
-let active: { snapshotNow(): void } | null = null;
+/** a `screen` event whenever what's on screen settles into something new (debounced; identical snapshots skipped).
+ *  While the Report sheet is on top only its first snapshot is kept: every later change (the note being typed) is
+ *  counted and written as ONE `state {event:"report_note_edits"}` event when the sheet closes or the report is
+ *  assembled, so typing a note can never push chat / turn history out of the 200-event ring or the 100 KB report
+ *  (report d2bd6006 P6: 52 of 86 kept events were note-typing snapshots). */
+let active: { snapshotNow(): void; flushReportEdits(): void } | null = null;
 /** record the current screen right now (Report: the screen as it was when the sheet opened) */
 export const snapshotScreenNow = () => active?.snapshotNow();
+/** write the pending note-edit summary (call before assembling a report) */
+export const flushReportEdits = () => active?.flushReportEdits();
 export function installScreenRecorder(doc: Document, rec: FlightRecorder = flightRecorder, debounceMs = 600): { stop(): void; snapshotNow(): void } {
   const win = doc.defaultView!;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastSig = "";
+  let reportShown = false; // the last recorded screen had the Report sheet on top
+  let reportEdits = 0; // later Report-sheet snapshots folded into one summary
+  const flushEdits = () => {
+    if (!reportEdits) return;
+    rec.record("state", { event: "report_note_edits", snapshots: reportEdits });
+    reportEdits = 0;
+  };
   const snap = () => {
     timer = null;
     try {
@@ -67,6 +80,10 @@ export function installScreenRecorder(doc: Document, rec: FlightRecorder = fligh
       const sig = JSON.stringify(s);
       if (sig === lastSig) return;
       lastSig = sig;
+      const onReport = overlaysOf(doc).at(-1) === "report";
+      if (onReport && reportShown) { reportEdits++; return; }
+      flushEdits();
+      reportShown = onReport;
       rec.record("screen", s as unknown as Record<string, unknown>);
     } catch { /* never break the app */ }
   };
@@ -78,6 +95,7 @@ export function installScreenRecorder(doc: Document, rec: FlightRecorder = fligh
   const api = {
     stop() { mo.disconnect(); win.removeEventListener("resize", kick); if (timer) clearTimeout(timer); if (active === api) active = null; },
     snapshotNow() { if (timer) clearTimeout(timer); snap(); },
+    flushReportEdits() { try { flushEdits(); } catch { /* never break the app */ } },
   };
   active = api;
   return api;

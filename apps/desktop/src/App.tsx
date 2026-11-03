@@ -21,7 +21,7 @@ import { cn } from "./lib";
 import { useLayoutMode, useVisualViewportHeight } from "./layout";
 import { FeedbackSheet, type FeedbackSheetPhase } from "./components/FeedbackSheet";
 import { assembleReport, isReportShortcut, reportAllowed } from "./feedback/report";
-import { flightRecorder, setRecorderStudy, snapshotScreenNow } from "./feedback/recorder";
+import { flightRecorder, flushReportEdits, setRecorderStudy, snapshotScreenNow } from "./feedback/recorder";
 import { feedbackBracket } from "./feedback/away";
 import type { FeedbackLogEvent, SessionTranscript } from "./transport/types";
 
@@ -305,6 +305,7 @@ export function App() {
     if (!r || !fb) return;
     setReportPhase({ kind: "sending" });
     try {
+      flushReportEdits(); // one note-edit summary instead of a snapshot per keystroke
       const doc = await assembleReport({ note, trigger: r.trigger, messages: messagesRef.current, recorder: flightRecorder, bridge: bridge(), info: infoRef.current, ui: uiRef.current });
       if (!reportSent.current) logFeedback({ type: "feedback_sent", ts: Date.now(), report_id: doc.report_id });
       reportSent.current = true;

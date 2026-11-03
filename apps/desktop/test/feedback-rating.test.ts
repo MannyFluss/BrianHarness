@@ -14,7 +14,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FlightRecorder, KVCredentialStore, MemoryKV, buildFeedbackReport, ratingScrubEvent, type FeedbackReport } from "@brianharness/core/browser";
 import { createInProcessTransport } from "../src/transport/in-process.ts";
 import { SessionRatingCard, TurnProbe } from "../src/components/Rating.tsx";
-import { installScreenRecorder, installTapRecorder, setRecorderStudy } from "../src/feedback/recorder.ts";
+import { flushReportEdits, installScreenRecorder, installTapRecorder, setRecorderStudy } from "../src/feedback/recorder.ts";
 import { FeedbackBracket } from "../src/feedback/away.ts";
 import { AWAY_MS } from "../src/rating.ts";
 
@@ -231,4 +231,43 @@ test("away time: hidden time inside the feedback bracket (e.g. the iOS share she
   b.open(t0 + 80 * 60_000); b.open(t0 + 81 * 60_000); // a second open while open is ignored
   b.close(t0 + 82 * 60_000);
   assert.equal(b.overlap(t0 + 79 * 60_000, t0 + 90 * 60_000), 2 * 60_000);
+});
+
+// ---------------------------------------------------------------- report d2bd6006 P6: typing the note can't evict history
+test("Report note keystrokes fold into one summary event; chat and turn events survive (P6)", async () => {
+  const rec = new FlightRecorder();
+  const t = createInProcessTransport({
+    storageKV: new MemoryKV(), settingsKV: new MemoryKV(), secretKV: new MemoryKV(), uploadKV: new MemoryKV(), credentials: new KVCredentialStore(new MemoryKV()),
+    fetchImpl: (async () => new Response("{}", { status: 404 })) as typeof fetch, streaming: false, platform: "ios-tablet", uploadAutoSchedule: false,
+    download: () => true, recorder: rec,
+  });
+  await t.newSession();
+  for (let i = 0; i < 12; i++) await t.reply({ text: `lecture question ${i}`, events: [], sentAt: Date.now(), shownAt: Date.now() - 900 });
+  const chatBefore = rec.events().filter((e) => e.type !== "screen" && e.type !== "tap").length;
+  assert.ok(chatBefore >= 12, `chat/turn history recorded (${chatBefore})`);
+  const html = renderToStaticMarkup(h("div", { className: "eeg-app", "data-layout": "tablet" },
+    h("div", null, h("div", { "data-msg-role": "assistant" }, "Tell me about the lecture.")),
+    h("div", { "data-feedback-sheet": "", role: "dialog", "aria-label": "Report a problem" }, h("textarea", { "aria-label": "What went wrong?" }), h("button", null, "Send report")),
+  ));
+  const doc = fakeDocument(html);
+  const screen = installScreenRecorder(doc as never, rec, 1);
+  screen.snapshotNow(); // the sheet as it opened: recorded
+  const note = doc.querySelector("textarea")!;
+  const NOTE = "The delayed message appears after I type a reply on the iPad with the keyboard up, then it scrolls away";
+  for (let i = 1; i <= NOTE.length; i++) { note.value = NOTE.slice(0, i); screen.snapshotNow(); } // ~100 keystrokes, one snapshot each
+  flushReportEdits();
+  screen.stop();
+  const ev = rec.events();
+  const screens = ev.filter((e) => e.type === "screen");
+  const summaries = ev.filter((e) => e.type === "state" && (e.data as { event?: string }).event === "report_note_edits");
+  assert.equal(screens.length, 1, "only the first Report screen is a snapshot");
+  assert.equal(summaries.length, 1);
+  assert.equal((summaries[0]!.data as { snapshots: number }).snapshots, NOTE.length);
+  assert.equal(ev.filter((e) => e.type !== "screen" && e.type !== "tap").length, chatBefore + 1, "no chat / turn event was evicted");
+  flushReportEdits(); // idempotent: nothing pending
+  assert.equal(rec.events().length, ev.length);
+  const report = buildFeedbackReport({ events: rec.events(), chatTurns: [{ role: "user", text: "lecture question 11" }], header: { build: "1", platform: "ios-tablet", note: NOTE, sessionId: null, study: { inStudy: false, index: null }, trigger: "sidebar" } as never });
+  assert.equal(report.payload.header.counts.events_dropped, 0);
+  assert.ok(JSON.stringify(report).length < 100_000);
+  assert.equal(JSON.stringify(report).split(NOTE.slice(0, 60)).length - 1 <= 2, true, "the note text is not repeated per keystroke");
 });
