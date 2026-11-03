@@ -11,6 +11,7 @@ import { safeLocalKV, type InProcessOptions } from "./in-process";
 import { capacitorPlugin, createNativeStreamFetch, type BHStreamPlugin } from "./native-stream";
 import { createKeychainCredentials, keychainKV, type BHKeychainPlugin, type MigrationReport } from "./keychain";
 import type { BHExportPlugin } from "./types";
+import type { BHAppleAuthPlugin } from "./apple-auth";
 import type { KeyValueStore } from "@brianharness/core/browser";
 
 export { createNativeStreamFetch, type BHStreamPlugin, type BHStreamEvent } from "./native-stream";
@@ -61,7 +62,7 @@ export const KEYCHAIN_NOTE = "Stored in the iOS Keychain on this device (BHKeych
 export function nativeTransportOptions(
   win: unknown = globalThis,
   hooks: { onMigration?: (r: MigrationReport) => void; /** old store to migrate (default: localStorage "brianharness/") */ legacyCredentials?: CredentialStoreLike } = {},
-): Pick<InProcessOptions, "nativeFetch" | "fetchImpl" | "streaming" | "credentials" | "credentialNote" | "secretKV" | "bhExport" | "uploadKV" | "appVersion" | "build"> {
+): Pick<InProcessOptions, "nativeFetch" | "fetchImpl" | "streaming" | "credentials" | "credentialNote" | "secretKV" | "bhExport" | "uploadKV" | "appVersion" | "build" | "appleAuth"> {
   if (!isNativeCapacitor(win)) return {};
   const w = win as CapWindow;
   const buffered: typeof fetch = (input, init) => w.fetch(input, init);
@@ -88,6 +89,9 @@ export function nativeTransportOptions(
     // upload queue in Documents/pending-uploads (survives WKWebView storage eviction); older shells: IndexedDB
     if (typeof (exporter as BHExportKV).kvGet === "function") out.uploadKV = bhExportKV(exporter as BHExportKV);
   }
+  // Sign in with Apple (brianharness-ios `siwa`); absent on older shells -> no sign-in UI, pasted token only
+  const appleAuth = capacitorPlugin<BHAppleAuthPlugin>(win, "BHAppleAuth");
+  if (appleAuth) out.appleAuth = appleAuth;
   // CFBundleShortVersionString / CFBundleVersion, injected by the iOS shell at document start
   // (build may arrive as a number from the plist; normalised to a string)
   const info = (win as { __BH_APP_INFO__?: { appVersion?: string | number; build?: string | number } }).__BH_APP_INFO__;

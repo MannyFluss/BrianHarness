@@ -3,6 +3,8 @@
 //   - in-process: transport/in-process.ts runs @brianharness/core/browser in the page (web target,
 //     and the iOS Capacitor/WKWebView shell)
 // Shapes mirror @brianharness/core loosely so the Electron renderer bundle never imports core.
+import type { AppleAuthView } from "./apple-auth";
+export type { AppleAuthView, AppleAuthPhase } from "./apple-auth";
 export type InputSource = "hardware-key" | "soft-keyboard" | "autocorrect" | "predictive" | "composition" | "dictation" | "paste" | "drop" | "programmatic" | "unknown";
 export type TypingEvent = { t: number; kind: "insert" | "delete" | "paste" | "nav" | "submit" | "focus" | "blur"; len: number; source?: InputSource; chars?: number };
 export type Plan = { turn: number; mode: "explore" | "exploit" | "relax"; topic: string; altTopic?: string; style: string; reason: string };
@@ -146,6 +148,17 @@ export interface EegBridge {
     cancelReissue?(): Promise<{ ok: boolean }>;
     /** unblock after "progress lost": the next study session gets index n; confirm must be "SET NEXT n" */
     setNext?(n: number, confirm: string): Promise<{ ok: boolean; error?: string }>;
+  };
+  /**
+   * Sign in with Apple (iOS, BHAppleAuth present): the Worker session token goes into the Spider Cloud slot
+   * (credentials/spider). launch() runs the launch checks once (refresh < 14 days, credentialState).
+   */
+  appleAuth?: {
+    launch(): Promise<AppleAuthView>;
+    signIn(): Promise<AppleAuthView>;
+    skip(): void;
+    status(): Promise<AppleAuthView>;
+    onChange(cb: (v: AppleAuthView) => void): () => void;
   };
   /** study-log auto-upload to the Spider Cloud Worker (needs the device token) */
   uploads?: {

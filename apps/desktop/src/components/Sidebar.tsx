@@ -4,6 +4,7 @@ import { cn } from "../lib";
 import { Mark } from "./Mark";
 import { ModelPicker } from "./ModelPicker";
 import { StudyData } from "./StudyData";
+import { AppleSignInRow } from "./AppleSignIn";
 import { BRAND_NAME } from "../brand";
 
 function when(iso: string | null) {
@@ -56,6 +57,7 @@ export function Sidebar({ open, sessions, info, onNew, onClose, onInfo, pickerRe
         </div>
         <div className="border-t border-border/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
           <StudyData />
+          <AppleSignInRow />
           <ModelPicker info={info} onChanged={onInfo} openRef={pickerRef} />
         </div>
       </div>

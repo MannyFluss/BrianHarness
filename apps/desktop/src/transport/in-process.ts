@@ -50,6 +50,7 @@ import {
   STUDY_PROTOCOL_VERSION,
 } from "@brianharness/core/browser";
 import { saveViaBHExport, shareViaBHExport } from "./bh-export";
+import { createAppleAuth, deviceLabelFor, isAppleRecord, type AppleAuth, type AppleAuthView, type BHAppleAuthPlugin } from "./apple-auth";
 import type { BHExportPlugin, EegBridge, ExportResult, Info, KeyProvider, ProviderId, ProviderStatus, UploadStatusView } from "./types";
 
 /** Web fallback for "Export logs": one zip download (no share sheet in a plain browser). */
@@ -123,6 +124,8 @@ export interface InProcessOptions {
   build?: string | number | null;
   /** auto-upload timer (default true; tests pass false and call uploads.flush()) */
   uploadAutoSchedule?: boolean;
+  /** iOS BHAppleAuth plugin (Sign in with Apple -> Worker session token in credentials/spider) */
+  appleAuth?: BHAppleAuthPlugin;
 }
 export const APP_VERSION_DEFAULT = "0.1.0";
 /** a session file whose session_start carries the study block */
@@ -172,7 +175,20 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   const platform = opts.platform ?? guessPlatform();
   let storageName = "IndexedDB brianharness";
   // unbound wrapper so a passed-in window.fetch is never invoked with another `this`
-  const fetchImpl: typeof fetch = opts.fetchImpl ?? ((input, init) => fetch(input, init));
+  const rawFetch: typeof fetch = opts.fetchImpl ?? ((input, init) => fetch(input, init));
+  // Sign in with Apple: the Worker token sits in credentials/spider like a pasted one; the wrapper only swaps a
+  // token rotated by refresh and notices 401 session_expired/invalid_token (requests/bodies otherwise untouched)
+  const apple: AppleAuth | null = opts.appleAuth
+    ? createAppleAuth({
+        plugin: opts.appleAuth,
+        credentials,
+        fetchImpl: rawFetch,
+        baseUrl: async () => normalizeSpiderUrl((await loadSettings()).spiderCloudUrl),
+        deviceLabel: deviceLabelFor(platform),
+        onTokenSaved: () => void uploadQueue.then((q) => q.flush()).catch(() => {}), // same kick as a pasted token
+      })
+    : null;
+  const fetchImpl: typeof fetch = apple ? apple.wrapFetch(rawFetch) : rawFetch;
   const nativeFetch = opts.nativeFetch ?? !!opts.fetchImpl;
   const streaming = opts.streaming ?? !opts.fetchImpl;
 
@@ -374,7 +390,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         available: nativeFetch,
         signedIn: nativeFetch && !!spiderKey,
         auth: ["api_key"],
-        authSource: nativeFetch && spiderKey ? "device token (this device)" : undefined,
+        authSource: nativeFetch && spiderKey ? (isAppleRecord(await credentials.read(SPIDER_CREDENTIAL_ID).catch(() => undefined)) ? "Sign in with Apple (this device)" : "device token (this device)") : undefined,
         endpoint: spiderUrl,
         models: nativeFetch ? (spider?.models ?? [SPIDER_CLOUD_DEFAULT_MODEL]).map((m) => ({ id: m, label: `${m} · Spider Cloud`, paid: false })) : [],
         detail: !nativeFetch
@@ -505,6 +521,17 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         return { ok: true };
       },
     },
+    ...(apple
+      ? {
+          appleAuth: {
+            launch: () => apple.launch(),
+            signIn: () => apple.signIn(),
+            skip: () => apple.skip(),
+            status: () => apple.status(),
+            onChange: (cb: (v: AppleAuthView) => void) => apple.onChange(cb),
+          },
+        }
+      : {}),
     uploads: {
       status: async () => (await (await uploadQueue).summary()) as UploadStatusView,
       flush: async () => (await (await uploadQueue).flush({ force: true })) as UploadStatusView,
@@ -526,6 +553,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         if (!k) throw new Error("empty API key");
         await credentials.modify(provider, async () => ({ type: "api_key", key: k }));
         if (provider === SPIDER_CREDENTIAL_ID) void uploadQueue.then((q) => q.flush()).catch(() => {}); // a new token resumes a 401 pause
+        if (provider === SPIDER_CREDENTIAL_ID) apple?.noteSlotChanged();
         return { ok: true };
       },
       async setEndpoint(provider, url) {
@@ -542,6 +570,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       },
       async logout(provider: KeyProvider) {
         await credentials.delete(provider);
+        if (provider === SPIDER_CREDENTIAL_ID) apple?.noteSlotChanged();
         return { ok: true };
       },
       async login() {

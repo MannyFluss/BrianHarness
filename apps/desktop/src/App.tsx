@@ -11,6 +11,8 @@ import { Sidebar } from "./components/Sidebar";
 import { pickerLabel } from "./components/ModelPicker";
 import { TopBar } from "./components/TopBar";
 import { StudyLostBanner } from "./components/StudyData";
+import { AppleSignInScreen, useAppleAuth } from "./components/AppleSignIn";
+import { shouldOfferAtLaunch, type AppleAuthView } from "./transport/apple-auth";
 import { useTypingTelemetry } from "./telemetry";
 import { useLayoutMode, useVisualViewportHeight } from "./layout";
 
@@ -127,6 +129,26 @@ export function App() {
     void bridge().info().then(setInfo);
     void startNew();
   }, [startNew]);
+
+  // ---- Sign in with Apple launch screen (UI only; the session above starts regardless) ----
+  // Decided ONCE per launch, after the launch checks and the first session's start: shown only with nothing
+  // in the Spider Cloud slot, before the first turn, and never over a study session (shouldOfferAtLaunch).
+  const appleView = useAppleAuth();
+  const [launchApple, setLaunchApple] = useState<AppleAuthView | null>(null);
+  const [siwaOpen, setSiwaOpen] = useState(false);
+  const siwaDecided = useRef(false);
+  useEffect(() => {
+    const a = bridge().appleAuth;
+    if (!a) return;
+    let live = true;
+    void a.launch().then((v) => live && setLaunchApple(v), () => {});
+    return () => { live = false; };
+  }, []);
+  useEffect(() => {
+    if (siwaDecided.current || !launchApple || busy) return;
+    siwaDecided.current = true;
+    if (shouldOfferAtLaunch(launchApple, { sessionReady: true, study: !!hud?.study, userTurns: userTurns.current, drafting: !!draftRef.current, ratingOpen: !!cardRef.current, alreadyOffered: false })) setSiwaOpen(true);
+  }, [launchApple, busy, hud]);
 
   // The commit that shows the Director's message COMPLETE (stream end) starts the reply-latency
   // clock (completeAt), once per message; its first-token time is kept for the turn log.
@@ -291,6 +313,7 @@ export function App() {
           {hudOpen && !phone && <Hud variant="column" hud={hud} stateNote={stateNote} />}
         </div>
       </main>
+      <AppleSignInScreen open={siwaOpen && !card} view={appleView ?? launchApple} phone={phone} onClose={() => setSiwaOpen(false)} />
       <SessionRatingCard open={!!card} study={!!hud?.study} phone={phone} stateRef={cardState} onClose={closeCard} />
       {phone && <Hud variant="sheet" open={hudOpen} onClose={() => setHudOpen(false)} hud={hud} stateNote={stateNote} />}
     </div>
