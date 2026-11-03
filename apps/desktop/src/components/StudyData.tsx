@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DownloadIcon, FlaskConicalIcon, RotateCcwIcon, UploadCloudIcon } from "lucide-react";
 import { bridge, type StudyStatusView, type UploadStatusView } from "../bridge";
 import { cn } from "../lib";
@@ -27,6 +27,15 @@ export function StudyLostBanner() {
   );
 }
 
+/** the confirming tap must come at least this long after the first, so a double tap can't start the study */
+export const STUDY_CONFIRM_MIN_MS = 700;
+/** Start/stop button: first tap asks for the confirm; a confirming tap too soon after it is ignored; stop is one tap (unchanged) */
+export function studyTapAction(enabled: boolean, asked: boolean, sinceAskedMs: number): "ask" | "ignore" | "toggle" {
+  if (enabled) return "toggle";
+  if (!asked) return "ask";
+  return sinceAskedMs < STUDY_CONFIRM_MIN_MS ? "ignore" : "toggle";
+}
+
 // Settings > data: "Export logs" (session JSONL + interest map) and the Phase D study switch.
 // Shows only the study's progress, never its schedule or a session's condition.
 export function StudyData() {
@@ -35,6 +44,7 @@ export function StudyData() {
   const [busy, setBusy] = useState(false);
   const [study, setStudy] = useState<StudyStatusView | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const askedAt = useRef(0);
   const [uploads, setUploads] = useState<UploadStatusView | null>(null);
   const [redo, setRedo] = useState<{ n: string; reason: string; phrase: string } | null>(null);
   const [setNext, setSetNext] = useState<{ n: string; phrase: string } | null>(null);
@@ -61,7 +71,9 @@ export function StudyData() {
   };
   const toggleStudy = async () => {
     if (!b.study || !study) return;
-    if (!study.enabled && !confirm) return setConfirm(true);
+    const act = studyTapAction(study.enabled, confirm, Date.now() - askedAt.current);
+    if (act === "ask") { askedAt.current = Date.now(); return setConfirm(true); }
+    if (act === "ignore") return;
     setConfirm(false);
     const r = study.enabled ? await b.study.disable() : await b.study.enable();
     if (!r.ok) setMsg({ text: `Study not started: ${"error" in r && r.error ? r.error : "secure store unavailable"}`, error: true });
