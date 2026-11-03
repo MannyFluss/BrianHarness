@@ -48,6 +48,15 @@ Follow the Plan: react to what they just said in one short sentence, then ask ex
 in the requested style about the planned topic. Keep it under 60 words, plain and friendly.
 Never mention the state note, telemetry, scores, typing, or that you are measuring anything.`;
 
+/**
+ * The fixed hidden user cue sent with the opener only (turn 0, no user message yet). gpt-oss on Ollama Cloud returns
+ * an empty done (no prompt eval, no tokens) for a conversation with only system messages, so the opener needs one
+ * user turn. Identical in every arm; never added to the transcript, never logged as a user_turn.
+ */
+export const OPENER_CUE = "(session start)";
+/** logged on every director_turn as opener_cue_id when the cue was sent: version + first 8 hex of sha256(OPENER_CUE) (a test pins it) */
+export const OPENER_CUE_ID = "oc1-075ffc54";
+
 /** Offline template "model". Deterministic per seed; used by default and by the sim runner. */
 export class MockBackend implements ModelBackend {
   readonly id = "mock";
@@ -74,7 +83,7 @@ export class MockBackend implements ModelBackend {
   }
   private compose(req: GenerateRequest): GenerateResult {
     const { plan } = req;
-    const lastUser = [...req.messages].reverse().find((m) => m.role === "user")?.content ?? "";
+    const lastUser = [...req.messages].reverse().find((m) => m.role === "user" && m.content !== OPENER_CUE)?.content ?? ""; // the opener cue is not a user reply (mock/sim output unchanged)
     const words = lastUser.split(/\s+/).filter(Boolean).length;
     const ack = !lastUser
       ? pick(this.rng, ["Hey! Good to meet you.", "Hi there!", "Hey, welcome in."])

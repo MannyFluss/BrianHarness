@@ -149,6 +149,11 @@ export type LogEvent =
       /** only on a failed turn (after partial text, or before the first token with text ""): a short code, e.g.
        *  "stream_incomplete" | "aborted" | "upstream_incomplete" | "http_<status>" | "stream_error" (never a message) */
       error?: string;
+      /** Addendum 4 (empty opener fix): true on the opener (no user message yet), sent with the fixed hidden user cue
+       * OPENER_CUE (same bytes in every arm; never rendered, never a user_turn, cue text never logged) */
+      opener_cue?: boolean;
+      /** OPENER_CUE_ID ("oc1-" + 8 hex of sha256(cue)) when opener_cue, else null */
+      opener_cue_id?: string | null;
     }
   | {
       type: "user_turn";

@@ -189,6 +189,11 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
            completion_tokens: number | null,
            reasoning_tokens: number | null },              // Spider Cloud never reports reasoning_tokens -> null
   truncated: boolean,                                      // finish_reason "length" (app shows "Reply cut off"), or the turn failed
+  // opener cue (Addendum 4, empty-opener amendment; absent in older logs). Same keys on every director_turn in both arms
+  opener_cue: boolean,                                     // true only on the opener: no user message yet, so the request ended with the
+                                                           // fixed hidden user message OPENER_CUE = "(session start)" (packages/core/src/backends.ts),
+                                                           // byte-identical in both arms; never rendered, never a user_turn, cue text never logged
+  opener_cue_id: string | null,                            // "oc1-075ffc54" (version + first 8 hex of sha256(cue)) when opener_cue, else null
   error?: string }                                         // only on a failed turn, after partial text OR before the first token:
                                                            // a short code, never a message: "stream_incomplete" | "aborted" |
                                                            // "upstream_incomplete" (Worker error event) | a Worker error code |
@@ -273,3 +278,15 @@ without being sent. Storage: desktop `<userData>/pending-uploads/` (one 0600 fil
 `uploads/pause`, `uploads/body/<id>`); web/iOS IndexedDB `brianharness-uploads` unless the native shell passes
 `uploadKV` (iOS: Documents/pending-uploads, see IOS_DEV_NOTE_phaseD.md). Settings > Study shows
 "N logs waiting to upload (reason)" and "M need Export logs"; tapping it retries now.
+
+### Addendum 4, empty-opener amendment (Nov 3 2026)
+
+Builds 1604 and 2031 and b413996 sent the opener as `[system DIRECTOR_SYSTEM_PROMPT, system state note]` with no user
+message (unchanged since 324bba3). gpt-oss on Ollama Cloud answers that with one done chunk (no prompt eval, no tokens):
+the Worker relays `content ""`, `finish_reason "stop"`, usage 0/0/0 in about 150–420 ms, and the app showed nothing (an
+empty assistant message that stayed in the transcript as `assistant ""`). Those logs have a turn-0 director_turn with
+`text ""` (and, from b413996 on, `finish_reason "stop"` and `usage.completion_tokens 0`).
+
+Fix: the opener request ends with the fixed user message `OPENER_CUE` (see `opener_cue`, `opener_cue_id` above). Only the
+model input changes. Plans, state notes, the transcript, user_turn, features and the user-latency window
+(`promptShownAt`, set when the renderer finished showing the opener) keep their definitions.

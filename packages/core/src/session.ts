@@ -5,7 +5,7 @@
  * Used identically by the desktop app (Electron main process) and the sim runner.
  */
 import type { ChatMessage, DirectorPlan, ExtractorFallbackReason, ExtractorOutcomeRecord, FeatureMap, FrameState, LogEvent, RatingRecord, TypingEvent } from "./types.js";
-import { DIRECTOR_SYSTEM_PROMPT, type GenerateResult, type ModelBackend } from "./backends.js";
+import { DIRECTOR_SYSTEM_PROMPT, OPENER_CUE, OPENER_CUE_ID, type GenerateResult, type ModelBackend } from "./backends.js";
 import { OPEN_TOPIC, baselineRotation, planBaselineTurn, planTurn, type DirectorPolicyOptions } from "./director.js";
 import { estimateEngagement, eegQuality, textFeatures, type EegBlendOptions, type EngagementContext } from "./engagement.js";
 import { InterestMap } from "./interest-map.js";
@@ -197,11 +197,15 @@ export class HarnessSession {
   private async directorTurn(opts: TurnOptions = {}): Promise<DirectorTurnResult> {
     const plan = this.baseline ? planBaselineTurn(this.turn, this.plans, this.rotation, this.opts.policy) : planTurn(this.turn, this.map, this.frame, this.plans, this.rng, this.opts.policy);
     const stateNote = this.baseline ? buildBaselineStateNote(plan) : buildStateNote(this.frame, this.map, plan);
+    // opener (no user message yet): a fixed hidden user cue, same in every arm (backends.ts OPENER_CUE)
+    const openerCue = !this.transcript.some((m) => m.role === "user");
     const messages: ChatMessage[] = [
       { role: "system", content: DIRECTOR_SYSTEM_PROMPT },
       ...this.transcript,
       { role: "system", content: stateNote },
+      ...(openerCue ? [{ role: "user" as const, content: OPENER_CUE }] : []),
     ];
+    const cueMeta = { opener_cue: openerCue, opener_cue_id: openerCue ? OPENER_CUE_ID : null }; // same keys on every director_turn
     const t0 = systemClock();
     let firstTokenMs: number | undefined;
     let firstTokenClock: number | undefined;
@@ -234,7 +238,7 @@ export class HarnessSession {
       const shown = !!partial;
       this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : { plan, stateNote }), text: partial.trim(), backend: this.backend.id, genMs: systemClock() - t0,
         ...(shown ? { firstTokenMs, streamed: true as const } : {}),
-        ...replyMeta(this.backend.id, { text: "", ...(err && typeof err === "object" ? { maxTokens: (err as { maxTokens?: number }).maxTokens, model: (err as { model?: string }).model } : {}) }, sealedE), truncated: true, error: errorCode(err) });
+        ...replyMeta(this.backend.id, { text: "", ...(err && typeof err === "object" ? { maxTokens: (err as { maxTokens?: number }).maxTokens, model: (err as { model?: string }).model } : {}) }, sealedE), truncated: true, error: errorCode(err), ...cueMeta });
       throw err;
     }
     const { text } = gen;
@@ -246,7 +250,7 @@ export class HarnessSession {
     this.plans.push(plan);
     this.transcript.push({ role: "assistant", content: text });
     const sealed = !!this.opts.study;
-    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealed ? { sealed } : { plan, stateNote }), text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}), ...meta, truncated });
+    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealed ? { sealed } : { plan, stateNote }), text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}), ...meta, truncated, ...cueMeta });
     // server-side defaults; the renderer overrides both via markShown() with what it displayed
     this.promptShownAt = this.clock();
     this.promptFirstTokenAt = streamed ? firstTokenClock : undefined;
