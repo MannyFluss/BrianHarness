@@ -25,6 +25,18 @@ import type { FeedbackLogEvent } from "./transport/types";
 let nextId = 0;
 const mid = () => `m${++nextId}`;
 
+/** wait for the SIWA launch checks only when nothing is stored; a slow check never holds the launch past this */
+const LAUNCH_GATE_WAIT_MS = 2500;
+async function launchGate(a: NonNullable<ReturnType<typeof bridge>["appleAuth"]>): Promise<AppleAuthView | null> {
+  try {
+    if ((await a.status()).tokenSource) return null;
+    const v = await Promise.race([a.launch(), new Promise<null>((r) => setTimeout(() => r(null), LAUNCH_GATE_WAIT_MS))]);
+    return v?.launchOffer ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Final text replaces the streamed one (backends trim); adds the message if nothing streamed. */
 
 export function App() {
@@ -131,6 +143,25 @@ export function App() {
     if (booted.current) return; // StrictMode double-mount guard: one session per launch
     booted.current = true;
     void bridge().info().then(setInfo);
+    // Not signed in (Sign in with Apple available, nothing in the Spider Cloud slot): the sign-in screen is the
+    // ONLY launch screen and the first chat starts after it (signed in -> Spider Cloud, or Skip). Anything
+    // else (a stored token, no BHAppleAuth, slow launch checks) starts the chat right away, as before.
+    void (async () => {
+      const a = bridge().appleAuth;
+      const gate = a ? await launchGate(a) : null;
+      if (gate) {
+        siwaDecided.current = true; // the post-session offer below never shows a second screen
+        setLaunchApple(gate);
+        setSiwaGate(true);
+        return;
+      }
+      void startNew();
+    })();
+  }, [startNew]);
+  const [siwaGate, setSiwaGate] = useState(false);
+  const leaveGate = useCallback(() => {
+    setSiwaGate(false);
+    void bridge().info().then(setInfo); // the provider may have become Spider Cloud (token saved)
     void startNew();
   }, [startNew]);
 
@@ -408,6 +439,7 @@ export function App() {
           {hudOpen && !phone && <Hud variant="column" hud={hud} stateNote={stateNote} />}
         </div>
       </main>
+      <AppleSignInScreen open={siwaGate} gate view={appleView ?? launchApple} phone={phone} onClose={leaveGate} />
       <AppleSignInScreen open={siwaOpen && !card} view={appleView ?? launchApple} phone={phone} onClose={() => setSiwaOpen(false)} />
       <SessionRatingCard open={!!card} study={!!hud?.study} phone={phone} stateRef={cardState} onClose={closeCard} />
       {phone && <Hud variant="sheet" open={hudOpen} onClose={() => setHudOpen(false)} hud={hud} stateNote={stateNote} />}

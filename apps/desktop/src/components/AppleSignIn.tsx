@@ -39,14 +39,14 @@ export function AppleButton({ onClick, busy, label = "Sign in with Apple", class
  * nothing is stored in the Spider Cloud slot (App decides via shouldOfferAtLaunch). Skip, the X and the
  * backdrop all dismiss it; it never blocks the chat behind it from starting.
  */
-export function AppleSignInScreen({ open, view, phone, onClose }: { open: boolean; view: AppleAuthView | null; phone: boolean; onClose: () => void }) {
+export function AppleSignInScreen({ open, view, phone, onClose, gate }: { open: boolean; view: AppleAuthView | null; phone: boolean; onClose: () => void; gate?: boolean }) {
   if (!open || !view) return null;
   const busy = view.phase === "signing-in";
   const skip = () => { bridge().appleAuth?.skip(); onClose(); };
   const go = () => void bridge().appleAuth?.signIn().then((v) => { if (v.phase === "signed-in") onClose(); }, () => {});
   return (
     <>
-      <button aria-label="Skip sign in" onClick={skip} className="fixed inset-0 z-[60] bg-black/55" />
+      <button aria-label="Skip sign in" onClick={skip} className={cn("fixed inset-0 z-[60]", gate ? "cursor-default bg-background" : "bg-black/55")} {...(gate ? { "data-siwa-gate": "" } : {})} />
       <div
         role="dialog"
         aria-label="Sign in with Apple"
