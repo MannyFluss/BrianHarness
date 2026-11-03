@@ -181,7 +181,7 @@ try {
     });
     const page = await ctx.newPage();
     const errs = []; page.on("pageerror", (e) => errs.push(e.message));
-    await page.addInitScript(shim, { settings: { provider: "spider-cloud", model, spiderCloudUrl: `http://127.0.0.1:${PX}` } });
+    await page.addInitScript(shim, { settings: { provider: "spider-cloud", model, spiderCloudUrl: `http://127.0.0.1:${PX}`, pickMigration: 1 } });
     await page.goto(`http://127.0.0.1:${WEB}/`);
     await page.waitForSelector("textarea", { timeout: 30_000 });
     await page.waitForFunction(() => !document.querySelector("[data-streaming]") && document.querySelectorAll(".eeg-prose").length >= 1, null, { timeout: 180_000 });

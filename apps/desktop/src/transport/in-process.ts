@@ -158,8 +158,19 @@ type WebSettings = {
   spiderCloudUrl?: string;
   /** set by an explicit picker choice (providers.select); without it the default provider is resolved at load */
   providerChosen?: boolean;
+  /** one-time upgrade marker (see PICK_MIGRATION): settings written by this build or later carry it */
+  pickMigration?: number;
 };
 const SETTINGS_KEY = "settings";
+/**
+ * Upgrade reset (Nov 3 2026, launch/routing only): settings saved by an earlier install (no marker, e.g. the
+ * protocol-2 TestFlight builds 1604/2031) with a Mock or Spider Cloud pick (any model, e.g. gemma4:cloud) drop that
+ * pick ONCE in the native app, so the launch resolves to the default (a stored token -> Spider Cloud
+ * SPIDER_APP_DEFAULT_MODEL; no token -> unchanged: Mock behind the Sign in with Apple screen). Other settings
+ * (Worker URL, extractor flag) and other providers are kept; every later save carries the marker, so a pick
+ * made after the upgrade persists.
+ */
+export const PICK_MIGRATION = 1;
 /**
  * Model for the resolved default (stored token, no picker choice): gpt-oss:20b-cloud, the route verified live
  * (max_tokens 2048, opener cue, composer lock). The picker's model list and SPIDER_CLOUD_DEFAULT_MODEL are unchanged.
@@ -227,7 +238,22 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
     return { storage: await KVHarnessStorage.open(kv) };
   })();
 
+  let pickMigrated: Promise<void> | null = null;
+  const migratePick = () => (pickMigrated ??= (async () => {
+    if (!nativeFetch) return;
+    const raw = await settingsKV.get(SETTINGS_KEY).catch(() => null);
+    if (!raw) return; // fresh install: nothing saved, nothing to reset
+    let old: Partial<WebSettings>;
+    try { old = JSON.parse(raw) as Partial<WebSettings>; } catch { return; }
+    if ((old.pickMigration ?? 0) >= PICK_MIGRATION) return;
+    const next: Partial<WebSettings> = { ...old, pickMigration: PICK_MIGRATION };
+    if (old.provider === undefined || old.provider === "mock" || old.provider === "spider-cloud") {
+      delete next.provider; delete next.model; delete next.providerChosen;
+    }
+    await settingsKV.set(SETTINGS_KEY, JSON.stringify(next)).catch(() => {});
+  })());
   const loadStoredSettings = async (): Promise<WebSettings> => {
+    await migratePick();
     try {
       const raw = await settingsKV.get(SETTINGS_KEY);
       return { provider: "mock", ...(raw ? (JSON.parse(raw) as Partial<WebSettings>) : {}) };
@@ -252,7 +278,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
     if (!s.providerChosen) backend = null;
   };
   const saveSettings = async (s: Partial<WebSettings>) => {
-    const next = { ...(await loadStoredSettings()), ...s };
+    const next = { ...(await loadStoredSettings()), ...s, pickMigration: PICK_MIGRATION };
     await settingsKV.set(SETTINGS_KEY, JSON.stringify(next));
     return next;
   };

@@ -266,7 +266,7 @@ try {
     const errs = []; page.on("pageerror", (e) => errs.push(e.message));
     await page.addInitScript(native);
     await page.addInitScript(observer);
-    await page.addInitScript(shim, { settings: { provider: "spider-cloud", model, spiderCloudUrl: `http://127.0.0.1:${PX}/p/${tag}` }, order: ORDER, next: ORDER.indexOf(arm) + 1 });
+    await page.addInitScript(shim, { settings: { provider: "spider-cloud", model, spiderCloudUrl: `http://127.0.0.1:${PX}/p/${tag}`, pickMigration: 1 }, order: ORDER, next: ORDER.indexOf(arm) + 1 });
     await page.goto(`http://127.0.0.1:${WEB}/`);
     let probe = null;
     try {
