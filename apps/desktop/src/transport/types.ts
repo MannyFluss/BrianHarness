@@ -8,7 +8,7 @@ export type { AppleAuthView, AppleAuthPhase } from "./apple-auth";
 export type InputSource = "hardware-key" | "soft-keyboard" | "autocorrect" | "predictive" | "composition" | "dictation" | "paste" | "drop" | "programmatic" | "unknown";
 export type TypingEvent = { t: number; kind: "insert" | "delete" | "paste" | "nav" | "submit" | "focus" | "blur"; len: number; source?: InputSource; chars?: number };
 export type Plan = { turn: number; mode: "explore" | "exploit" | "relax"; topic: string; altTopic?: string; style: string; reason: string };
-export type DirectorTurn = { text: string; plan: Plan; stateNote: string; genMs: number; firstTokenMs?: number };
+export type DirectorTurn = { text: string; plan: Plan; stateNote: string; genMs: number; firstTokenMs?: number; /** finish_reason "length" */ truncated?: boolean };
 /** Incremental Director text (a delta to append). Non-streaming backends send the whole text once. */
 export type TokenHandler = (delta: string) => void;
 export type Hud = {

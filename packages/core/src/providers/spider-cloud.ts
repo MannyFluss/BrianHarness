@@ -7,6 +7,7 @@
  *   429 daily_cap_device|daily_cap_global -> "daily limit reached, resets at <local time>" (reset_at / Retry-After)
  * The Worker sends no CORS for the app: iOS uses the native fetch (BHStream / CapacitorHttp), desktop Node fetch.
  */
+import { chatMaxTokens } from "./max-tokens.js";
 import { OpenAICompatibleBackend, type GenerateRequest, type GenerateResult, type ModelBackend } from "../backends.js";
 
 export const SPIDER_CLOUD_URL = "https://api.strangeriver.org";
@@ -87,8 +88,9 @@ export class SpiderCloudBackend implements ModelBackend {
     const model = cfg.model ?? SPIDER_CLOUD_DEFAULT_MODEL;
     this.id = `spider-cloud:${model}`;
     this.inner = new OpenAICompatibleBackend({
-      baseUrl: `${normalizeSpiderUrl(cfg.baseUrl)}/v1`, apiKey: cfg.token, model, temperature: cfg.temperature, seed: cfg.seed, maxTokens: cfg.maxTokens,
-      paid: true, fetchImpl: spiderFetch(cfg.fetchImpl), streaming: cfg.streaming, timeoutMs: cfg.timeoutMs,
+      baseUrl: `${normalizeSpiderUrl(cfg.baseUrl)}/v1`, apiKey: cfg.token, model, temperature: cfg.temperature, seed: cfg.seed,
+      maxTokens: chatMaxTokens(model, cfg.maxTokens), // per-model table (providers/max-tokens.ts), reasoning floor
+      paid: true, fetchImpl: spiderFetch(cfg.fetchImpl), streaming: cfg.streaming, timeoutMs: cfg.timeoutMs, streamUsage: true,
     });
   }
   generate(req: GenerateRequest): Promise<GenerateResult> {

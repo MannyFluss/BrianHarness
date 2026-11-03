@@ -26,7 +26,13 @@ export interface GenerateRequest {
 }
 export interface GenerateResult {
   text: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number };
+  /** normalized: "stop" | "length" (cut off by max_tokens) | provider value; undefined = none reported */
+  finishReason?: string;
+  /** the max_tokens actually sent (HTTP chat backends) */
+  maxTokens?: number;
+  /** the model name sent */
+  model?: string;
 }
 export interface ModelBackend {
   /** e.g. "mock", "openai:gpt-4o-mini" */
@@ -120,6 +126,8 @@ export class OpenAICompatibleBackend implements ModelBackend {
       timeoutMs?: number;
       /** fetchImpl streams bodies (default true). false = always stream:false (CapacitorHttp). */
       streaming?: boolean;
+      /** streamed requests ask for a final usage chunk (stream_options.include_usage); the Spider Cloud Worker supports it */
+      streamUsage?: boolean;
     },
   ) {
     this.id = `openai-compatible:${cfg.model}`;
@@ -128,20 +136,28 @@ export class OpenAICompatibleBackend implements ModelBackend {
   async generate(req: GenerateRequest): Promise<GenerateResult> {
     const f = this.cfg.fetchImpl ?? fetch; // called unbound: a stored window.fetch must not get cfg as `this`
     const stream = !!req.onToken && this.cfg.streaming !== false;
+    const maxTokens = this.cfg.maxTokens ?? 200;
     const res = await f(`${this.cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", ...(this.cfg.apiKey ? { authorization: `Bearer ${this.cfg.apiKey}` } : {}) },
       body: JSON.stringify({
         model: this.cfg.model,
         messages: req.messages,
-        max_tokens: this.cfg.maxTokens ?? 200,
+        max_tokens: maxTokens,
         temperature: this.cfg.temperature ?? 0.8,
         stream, // SSE only when the fetch really streams (not CapacitorHttp's buffered fetch)
+        ...(stream && this.cfg.streamUsage ? { stream_options: { include_usage: true } } : {}),
         ...(this.cfg.seed !== undefined ? { seed: this.cfg.seed } : {}),
       }),
       signal: req.signal ?? timeoutSignal(this.cfg.timeoutMs ?? 120_000), // never hang the UI
     });
-    return stream ? readChatStream(res, "model backend", req.onToken!) : readChatResponse(res, "model backend");
+    try {
+      const body = stream ? await readChatStream(res, "model backend", req.onToken!) : await readChatResponse(res, "model backend");
+      return { ...body, maxTokens, model: this.cfg.model };
+    } catch (err) { // a stream that failed part-way: the turn log still records what was asked for
+      if (err && typeof err === "object") Object.assign(err, { maxTokens, model: this.cfg.model });
+      throw err;
+    }
   }
 }
 

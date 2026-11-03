@@ -34,5 +34,6 @@ export * from "./providers/anthropic-fetch.js";
 export * from "./providers/response-body.js";
 export * from "./providers/browser-factory.js";
 export * from "./providers/spider-cloud.js";
+export * from "./providers/max-tokens.js";
 export * from "./upload-body.js";
 export * from "./upload-queue.js";

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { nextPaint, runStreamedTurn } from "./chat-flow";
+import { completeReply, failStreaming } from "./reply-state";
 import { bridge, type Hud as HudState, type Info, type RatingInput, type SessionItem } from "./bridge";
 import { SessionRatingCard, TurnProbe, type SessionRatingResult } from "./components/Rating";
 import { AWAY_MS, probeScheduler } from "./rating";
@@ -20,8 +21,6 @@ let nextId = 0;
 const mid = () => `m${++nextId}`;
 
 /** Final text replaces the streamed one (backends trim); adds the message if nothing streamed. */
-const completeReply = (m: ChatMsg[], replyId: string, text: string): ChatMsg[] =>
-  m.some((x) => x.id === replyId) ? m.map((x) => (x.id === replyId ? { ...x, text, streaming: false } : x)) : [...m, { id: replyId, role: "assistant", text }];
 
 export function App() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -107,14 +106,14 @@ export function App() {
   const startNew = useCallback(async () => {
     try {
       const { result: r, replyId } = await streamTurn(() => setMessages([]), (onToken) => bridge().newSession(onToken));
-      setMessages((m) => completeReply(m, replyId, r.director.text));
+      setMessages((m) => completeReply(m, replyId, r.director.text, r.director.truncated));
       scheduler.current = probeScheduler(r.sessionId); // seeded per session: reproducible probe turns
       userTurns.current = 0;
       setTitle(r.title ?? "New chat");
       setHud(r.hud);
       setStateNote(r.director.stateNote);
     } catch (err) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `⚠ ${(err as Error).message}` }]);
+      setMessages((m) => failStreaming(m, (err as Error).message, mid()));
     } finally {
       setPending(false);
       setBusy(false);
@@ -194,7 +193,7 @@ export function App() {
         },
         (onToken) => bridge().reply({ text, events, sentAt, ...prompt }, onToken),
       );
-      setMessages((m) => completeReply(m.map((x) => (x.id === userMsg.id ? { ...x, engagement: r.engagement } : x)), replyId, r.director.text));
+      setMessages((m) => completeReply(m.map((x) => (x.id === userMsg.id ? { ...x, engagement: r.engagement } : x)), replyId, r.director.text, r.director.truncated));
       const turn = r.hud?.turn ?? ++userTurns.current;
       userTurns.current = turn;
       if (bridge().rate && scheduler.current.shouldProbe(turn)) setProbe({ turn, shownAt: Date.now(), afterId: replyId });
@@ -202,7 +201,7 @@ export function App() {
       setStateNote(r.director.stateNote);
       if (r.title) setTitle(r.title);
     } catch (err) {
-      setMessages((m) => [...m.map((x) => (x.streaming ? { ...x, streaming: false } : x)), { id: mid(), role: "assistant", text: `⚠ ${(err as Error).message}` }]);
+      setMessages((m) => failStreaming(m, (err as Error).message, mid()));
     } finally {
       setPending(false);
       setBusy(false);

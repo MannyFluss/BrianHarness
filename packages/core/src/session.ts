@@ -5,7 +5,7 @@
  * Used identically by the desktop app (Electron main process) and the sim runner.
  */
 import type { ChatMessage, DirectorPlan, ExtractorFallbackReason, ExtractorOutcomeRecord, FeatureMap, FrameState, LogEvent, RatingRecord, TypingEvent } from "./types.js";
-import { DIRECTOR_SYSTEM_PROMPT, type ModelBackend } from "./backends.js";
+import { DIRECTOR_SYSTEM_PROMPT, type GenerateResult, type ModelBackend } from "./backends.js";
 import { OPEN_TOPIC, baselineRotation, planBaselineTurn, planTurn, type DirectorPolicyOptions } from "./director.js";
 import { estimateEngagement, eegQuality, textFeatures, type EegBlendOptions, type EngagementContext } from "./engagement.js";
 import { InterestMap } from "./interest-map.js";
@@ -55,6 +55,24 @@ const FALLBACK_TEXT: Record<ExtractorFallbackReason, string> = {
 };
 export const extractorWarningText = (r: ExtractorFallbackReason) => `Interest AI unavailable this session (${FALLBACK_TEXT[r]})`;
 
+/**
+ * director_turn reply metadata (Addendum 4). The same keys on every director_turn in every arm; null = not reported
+ * (mock backend, a provider without usage). model: the model name sent (else the backend id).
+ */
+function replyMeta(backendId: string, g: GenerateResult | undefined) {
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    model: g?.model ?? backendId.replace(/^[a-z-]+:/, ""),
+    max_tokens: n(g?.maxTokens),
+    finish_reason: g?.finishReason ?? null,
+    usage: { prompt_tokens: n(g?.usage?.inputTokens), completion_tokens: n(g?.usage?.outputTokens), reasoning_tokens: n(g?.usage?.reasoningTokens) },
+  };
+}
+const errorCode = (err: unknown): string => {
+  const e = err as { code?: unknown; name?: unknown };
+  return typeof e?.code === "string" ? e.code : e?.name === "AbortError" || e?.name === "TimeoutError" ? "aborted" : "stream_error";
+};
+
 export interface DirectorTurnResult {
   text: string;
   plan: DirectorPlan;
@@ -62,6 +80,8 @@ export interface DirectorTurnResult {
   genMs: number;
   /** ms from request start to the first streamed delta (undefined: not streamed) */
   firstTokenMs?: number;
+  /** finish_reason "length": the reply hit max_tokens (the UI shows a "reply cut off" note) */
+  truncated?: boolean;
 }
 
 /** Per-turn options: onToken receives the Director's reply incrementally. */
@@ -195,18 +215,35 @@ export class HarnessSession {
           }
         }
       : undefined;
-    const { text } = await this.backend.generate({ messages, plan, stateNote, onToken, signal: opts.signal });
+    let partial = "";
+    const onTokenLogged = onToken ? (d: string) => { if (d) partial += d; onToken(d); } : undefined;
+    let gen: GenerateResult;
+    try {
+      gen = await this.backend.generate({ messages, plan, stateNote, onToken: onTokenLogged, signal: opts.signal });
+    } catch (err) {
+      // the stream failed after some text was shown: log what the person saw (truncated), then fail the turn as
+      // before (the transcript does not keep it; the next director_turn reuses this turn number)
+      if (partial) {
+        const sealedE = !!this.opts.study;
+        this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : { plan, stateNote }), text: partial.trim(), backend: this.backend.id, genMs: systemClock() - t0, firstTokenMs, streamed: true,
+          ...replyMeta(this.backend.id, { text: "", ...(err as { maxTokens?: number; model?: string }) }), truncated: true, error: errorCode(err) });
+      }
+      throw err;
+    }
+    const { text } = gen;
+    const meta = replyMeta(this.backend.id, gen);
+    const truncated = meta.finish_reason === "length";
     const streamed = firstTokenMs !== undefined;
     if (user && !streamed && text) onToken!(text); // non-streaming backend: one delta with the whole text
     const genMs = systemClock() - t0;
     this.plans.push(plan);
     this.transcript.push({ role: "assistant", content: text });
     const sealed = !!this.opts.study;
-    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealed ? { sealed } : { plan, stateNote }), text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}) });
+    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealed ? { sealed } : { plan, stateNote }), text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}), ...meta, truncated });
     // server-side defaults; the renderer overrides both via markShown() with what it displayed
     this.promptShownAt = this.clock();
     this.promptFirstTokenAt = streamed ? firstTokenClock : undefined;
-    return { text, plan, stateNote: sealed ? "" : stateNote, genMs, ...(streamed ? { firstTokenMs } : {}) };
+    return { text, plan, stateNote: sealed ? "" : stateNote, genMs, ...(streamed ? { firstTokenMs } : {}), ...(truncated ? { truncated } : {}) };
   }
 
   /** Process the user's reply and its telemetry, then produce the Director's next turn. */

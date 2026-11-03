@@ -138,6 +138,15 @@ export type LogEvent =
       /** request start -> first streamed delta (absent when the backend did not stream) */
       firstTokenMs?: number;
       streamed?: boolean;
+      /** Addendum 4 (P0 cut-off fix): reply metadata, same keys in every arm; null = not reported */
+      model?: string;
+      max_tokens?: number | null;
+      finish_reason?: string | null;
+      usage?: { prompt_tokens: number | null; completion_tokens: number | null; reasoning_tokens: number | null };
+      /** finish_reason "length" (the app shows "reply cut off"), or the stream failed after partial text */
+      truncated?: boolean;
+      /** only on a turn whose stream failed after partial text: "stream_incomplete" | "aborted" | "stream_error" */
+      error?: string;
     }
   | {
       type: "user_turn";

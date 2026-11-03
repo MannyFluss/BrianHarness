@@ -157,7 +157,18 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
   genMs: number, firstTokenMs?: number, streamed?: true,
   sealed?: true,                                           // study sessions: no plan, no stateNote
   plan?: { turn: number, mode: "explore"|"exploit"|"relax" /*pacing*/, topic: string, altTopic?: string, style: string, reason: string, scout?: boolean },
-  stateNote?: string }                                     // non-study only
+  stateNote?: string,                                      // non-study only
+  // reply metadata (Addendum 4, builds after 20261102.2031; absent in older logs). Same keys on every
+  // director_turn in both arms; null = not reported by the backend (mock, providers without usage)
+  model: string,                                           // model name sent, e.g. "gpt-oss:20b-cloud" (mock: "mock")
+  max_tokens: number | null,                               // the max_tokens sent (providers/max-tokens.ts table)
+  finish_reason: string | null,                            // "stop" | "length" (hit max_tokens) | provider value; null on a failed stream
+  usage: { prompt_tokens: number | null, completion_tokens: number | null,
+           reasoning_tokens: number | null },              // Spider Cloud never reports reasoning_tokens -> null
+  truncated: boolean,                                      // finish_reason "length" (app shows "Reply cut off"), or the stream failed after partial text
+  error?: string }                                         // only on a failed stream: "stream_incomplete" | "aborted" | "stream_error";
+                                                           // text = what was shown; the transcript does not keep it and the next
+                                                           // director_turn reuses the same turn number
 
 // user_turn (turn = 0-based index of this reply; the rating card's turn = user_turn.turn + 1)
 { type: "user_turn", t: string, turn: number, text: string,

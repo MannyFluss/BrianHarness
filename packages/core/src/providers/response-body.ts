@@ -19,14 +19,26 @@
  */
 export interface ChatBody {
   text: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
+  usage?: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number };
+  /**
+   * Why generation stopped, normalized: "stop" | "length" (token cap hit: the reply is cut off) | other provider
+   * values as sent. OpenAI finish_reason, Ollama done_reason, Anthropic stop_reason ("max_tokens" -> "length").
+   * Undefined when the response carried none.
+   */
+  finishReason?: string;
 }
 
 type AnyObj = Record<string, any>;
+type Acc = { text: string; usage: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number }; finishReason?: string };
+const normFinish = (r: unknown): string | undefined => (typeof r === "string" && r ? (r === "max_tokens" ? "length" : r) : undefined);
 
-function fromObject(o: AnyObj, acc: { text: string; usage: { inputTokens?: number; outputTokens?: number } }) {
+// Reasoning tokens (gpt-oss delta.reasoning_content / delta.reasoning, Ollama message.thinking, Anthropic thinking
+// blocks) are NEVER reply text: only content fields below are read.
+function fromObject(o: AnyObj, acc: Acc) {
   if (typeof o.error === "string" || (o.error && typeof o.error === "object" && !o.choices)) {
-    throw new Error(`model error: ${typeof o.error === "string" ? o.error : JSON.stringify(o.error).slice(0, 300)}`);
+    const e = o.error as AnyObj | string;
+    const msg = typeof e === "string" ? e : typeof e.message === "string" ? `${e.message}${typeof e.code === "string" ? ` (${e.code})` : ""}` : JSON.stringify(e).slice(0, 300);
+    throw Object.assign(new Error(`model error: ${msg}`), typeof e === "object" && typeof e.code === "string" ? { code: e.code } : {});
   }
   // Ollama /api/chat (whole or one NDJSON line)
   if (o.message && typeof o.message.content === "string") acc.text += o.message.content;
@@ -34,9 +46,16 @@ function fromObject(o: AnyObj, acc: { text: string; usage: { inputTokens?: numbe
   if (typeof o.eval_count === "number") acc.usage.outputTokens = o.eval_count;
   // OpenAI chat completions (message) or SSE chunk (delta)
   const ch = Array.isArray(o.choices) ? o.choices[0] : undefined;
-  if (ch) acc.text += ch.message?.content ?? ch.delta?.content ?? ch.text ?? "";
+  if (ch) {
+    const c = ch.message?.content ?? ch.delta?.content ?? ch.text;
+    if (typeof c === "string") acc.text += c;
+    if (normFinish(ch.finish_reason)) acc.finishReason = normFinish(ch.finish_reason);
+  }
+  if (o.done === true && normFinish(o.done_reason)) acc.finishReason = normFinish(o.done_reason);
   if (o.usage?.prompt_tokens !== undefined) acc.usage.inputTokens = o.usage.prompt_tokens;
   if (o.usage?.completion_tokens !== undefined) acc.usage.outputTokens = o.usage.completion_tokens;
+  const rt = o.usage?.completion_tokens_details?.reasoning_tokens;
+  if (typeof rt === "number") acc.usage.reasoningTokens = rt;
   // Anthropic Messages (whole) or SSE events
   if (Array.isArray(o.content)) acc.text += o.content.filter((c: AnyObj) => c?.type === "text").map((c: AnyObj) => c.text ?? "").join("");
   if (o.type === "content_block_delta" && o.delta?.type === "text_delta") acc.text += o.delta.text ?? "";
@@ -44,18 +63,21 @@ function fromObject(o: AnyObj, acc: { text: string; usage: { inputTokens?: numbe
   const u = o.type === "message_start" ? o.message?.usage : o.usage;
   if (u?.input_tokens !== undefined) acc.usage.inputTokens = u.input_tokens;
   if (u?.output_tokens !== undefined) acc.usage.outputTokens = u.output_tokens;
+  const sr = o.type === "message_delta" ? o.delta?.stop_reason : o.type === "message" || (o.role === "assistant" && Array.isArray(o.content)) ? o.stop_reason : undefined;
+  if (normFinish(sr)) acc.finishReason = normFinish(sr);
 }
+const bodyOf = (acc: Acc): ChatBody => ({ text: acc.text.trim(), usage: acc.usage, ...(acc.finishReason ? { finishReason: acc.finishReason } : {}) });
 
 /** Parse a fully buffered chat response body (JSON, NDJSON or SSE). */
 export function parseChatBody(raw: string): ChatBody {
-  const acc = { text: "", usage: {} as { inputTokens?: number; outputTokens?: number } };
+  const acc: Acc = { text: "", usage: {} };
   const s = raw.replace(/^\uFEFF/, "").trim();
   if (!s) return { text: "" };
   try {
     const whole = JSON.parse(s);
     if (whole && typeof whole === "object") {
       fromObject(whole as AnyObj, acc);
-      return { text: acc.text.trim(), usage: acc.usage };
+      return bodyOf(acc);
     }
   } catch (e) {
     if ((e as Error).message.startsWith("model error")) throw e;
@@ -74,7 +96,7 @@ export function parseChatBody(raw: string): ChatBody {
     }
   }
   if (!parsedAny) throw new Error(`unreadable model response: ${s.slice(0, 200)}`);
-  return { text: acc.text.trim(), usage: acc.usage };
+  return bodyOf(acc);
 }
 
 /** Read a Response with text() only (no body stream), throwing a short error on HTTP failure. */
@@ -105,7 +127,9 @@ function isWholeJsonObject(raw: string): boolean {
  * A plain JSON content type (server ignored stream:true) is buffered and parsed once at the end.
  */
 export function createChatStreamParser(onDelta: TokenCallback, contentType = "") {
-  const acc = { text: "", usage: {} as { inputTokens?: number; outputTokens?: number } };
+  const acc: Acc = { text: "", usage: {} };
+  let sawDone = false; // SSE "data: [DONE]"
+  let sawChoices = false; // OpenAI chat.completion.chunk stream (the Spider Cloud Worker's wire format)
   let buf = "";
   let raw = "";
   let parsedAny = false;
@@ -124,7 +148,7 @@ export function createChatStreamParser(onDelta: TokenCallback, contentType = "")
     let line = lineIn.trim();
     if (!line || line.startsWith("event:") || line.startsWith(":") || line.startsWith("id:") || line.startsWith("retry:")) return;
     if (line.startsWith("data:")) line = line.slice(5).trim();
-    if (line === "[DONE]") return;
+    if (line === "[DONE]") { sawDone = true; return; }
     let obj: unknown;
     try {
       obj = JSON.parse(line);
@@ -133,6 +157,7 @@ export function createChatStreamParser(onDelta: TokenCallback, contentType = "")
     }
     if (!obj || typeof obj !== "object") return;
     const before = acc.text.length;
+    if (Array.isArray((obj as AnyObj).choices) && (obj as AnyObj).object === "chat.completion.chunk") sawChoices = true;
     fromObject(obj as AnyObj, acc); // throws "model error: .." on error events
     parsedAny = true;
     emit(acc.text.slice(before));
@@ -165,7 +190,12 @@ export function createChatStreamParser(onDelta: TokenCallback, contentType = "")
         emit(b.text);
         return b;
       }
-      return { text: acc.text.trim(), usage: acc.usage };
+      // An OpenAI-style stream that just stops (no [DONE], no finish_reason) was cut by the network / server:
+      // an error, never a silently complete reply. The text shown so far stays on screen.
+      if (sawChoices && !sawDone && !acc.finishReason) {
+        throw Object.assign(new Error("the reply stream ended before it finished (connection dropped)"), { code: "stream_incomplete" });
+      }
+      return bodyOf(acc);
     },
   };
 }
