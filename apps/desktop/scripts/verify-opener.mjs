@@ -7,7 +7,18 @@
 //
 //   BH_TEST_TOKEN=bhd_… PLAYWRIGHT_CORE=<dir of playwright-core> node apps/desktop/scripts/verify-opener.mjs
 //   node apps/desktop/scripts/verify-opener.mjs --dry-run [--worker <brianharness-worker dir, branch p0-empty-opener>]
-//   options: --dist <web build> (default apps/desktop/dist-web), --out <dir>, --models a,b (<= 2), --port-base n
+//   options: --dist <web build> (default apps/desktop/dist-web), --out <base dir>, --models a,b (<= 2), --port-base n,
+//            --timeout-ms n (per opener, default 240000), --probe-typing (try to type during the reasoning phase and
+//            after the reply; never sends), dry run only: --reasoning-delay-ms n (fake-upstream FAKE_DELAY_MS after every 1-9 byte
+//            write; gpt-oss thinks 180 tokens first, so n = 1 gives ~3-5 s of reasoning before the first content token)
+//   output: a NEW timestamped folder <base>/<YYYYMMDD-HHMMSS> (nothing existing is deleted)
+//
+// Each page's requests go to http://127.0.0.1:<proxy>/p/<page tag>/v1/…, so every request is matched to its page
+// by tag (not by arrival order). A page is done when (1) the proxy saw that page's opener stream end, (2) the app
+// logged director_turn 0, and (3) the UI is idle (no thinking indicator, no streaming reply, data-busy false); only
+// then the screenshot, and the next page starts only after the previous page's stream ended. A UI timeline per page
+// (request start, first reasoning / content chunk, thinking indicator, first token on screen, complete, composer
+// unlocked, first key) is written to timeline-<tag>.json, and the run checks the composer is locked while busy.
 //
 // Safety (same conditions as verify-live-stream.mjs):
 //   - network: the page may reach ONLY 127.0.0.1 (anything else is aborted and fails the run). The proxy forwards ONLY
@@ -39,7 +50,13 @@ const MODELS = (arg("--models", "gpt-oss:20b-cloud,gpt-oss:120b-cloud")).split("
 const ARMS = ["adaptive", "baseline"];
 if (MODELS.length * ARMS.length > MAX_LIVE) { console.error(`at most ${MAX_LIVE} openers (models x 2 arms)`); process.exit(2); }
 const dist = resolve(arg("--dist", new URL("../dist-web/", import.meta.url).pathname)) + "/";
-const OUT = resolve(arg("--out", DRY ? "/workspace/p0-stream/live-opener/dry-run" : "/workspace/p0-stream/live-opener"));
+const OUT_BASE = resolve(arg("--out", DRY ? "/workspace/p0-stream/live-opener/dry-run" : "/workspace/p0-stream/live-opener"));
+const stamp = new Date().toLocaleString("sv-SE", { hour12: false }).replace(/[-: ]/g, (c) => (c === " " ? "-" : "")).slice(0, 15);
+const OUT = join(OUT_BASE, stamp + (arg("--label", "") ? `-${arg("--label")}` : ""));
+const TIMEOUT = Number(arg("--timeout-ms", 240_000));
+const PROBE_TYPING = argv.includes("--probe-typing");
+const REASONING_DELAY = DRY ? Number(arg("--reasoning-delay-ms", 0)) : 0;
+if (!DRY && argv.includes("--reasoning-delay-ms")) { console.error("--reasoning-delay-ms is a dry-run option"); process.exit(2); }
 const chrome = process.env.CHROME ?? "/usr/bin/google-chrome";
 const base = Number(arg("--port-base", 18770));
 const UP = base, W = base + 1, PX = base + 2, WEB = base + 3;
@@ -56,7 +73,8 @@ if (!existsSync(chrome)) { console.error(`no Chrome at ${chrome} (set CHROME)`);
 let pw;
 try { pw = await import(process.env.PLAYWRIGHT_CORE ? pathToFileURL(join(process.env.PLAYWRIGHT_CORE, "index.mjs")).href : "playwright-core"); }
 catch { console.error("playwright-core not found (set PLAYWRIGHT_CORE to its directory)"); process.exit(2); }
-rmSync(OUT, { recursive: true, force: true }); mkdirSync(OUT, { recursive: true });
+if (existsSync(OUT)) { console.error(`output folder exists already: ${OUT}`); process.exit(2); }
+mkdirSync(OUT, { recursive: true }); // a fresh subfolder; earlier runs are kept
 
 // ---- upstream: live Spider Cloud, or (dry run) wrangler dev + fake-upstream with a throwaway local token
 const kids = []; let persist = null;
@@ -70,7 +88,7 @@ if (DRY) {
   persist = mkdtempSync(join(tmpdir(), "bh-verify-"));
   // FAKE_SYSTEM_ONLY=load: a system-only request gets the live behaviour (one empty done chunk, no counts), so an
   // unfixed build fails the dry run exactly like it fails live (needs the Worker branch p0-empty-opener fake-upstream)
-  kids.push(spawn(process.execPath, [join(worker, "scripts/fake-upstream.mjs")], { env: { ...process.env, PORT: String(UP), FAKE_UPSTREAM_KEY: fakeKey, FAKE_SCENARIO: "realistic", FAKE_DELAY_MS: "0", FAKE_SYSTEM_ONLY: "load" }, stdio: "ignore" }));
+  kids.push(spawn(process.execPath, [join(worker, "scripts/fake-upstream.mjs")], { env: { ...process.env, PORT: String(UP), FAKE_UPSTREAM_KEY: fakeKey, FAKE_SCENARIO: "realistic", FAKE_DELAY_MS: String(REASONING_DELAY), FAKE_SYSTEM_ONLY: "load" }, stdio: "ignore" }));
   let wlog = "";
   const wr = spawn(join(worker, "node_modules/.bin/wrangler"), ["dev", "--local", "--ip", "127.0.0.1", "--port", String(W), "--show-interactive-dev-session=false", "--persist-to", persist,
     "--var", `UPSTREAM_BASE_URL:http://127.0.0.1:${UP}`, "--var", `OLLAMA_API_KEY:${fakeKey}`, "--var", `ADMIN_SECRET:${admin}`, "--var", `COUNTER_SCOPE:verify-${Date.now()}`],
@@ -91,52 +109,64 @@ if (!upstreamAllowed(upURL)) { console.error("refusing upstream " + upURL.origin
 const trace = join(OUT, "trace.jsonl"); writeFileSync(trace, "");
 const tlog = (o) => appendFileSync(trace, redact(JSON.stringify({ t: new Date().toISOString(), ...o })) + "\n");
 let live = 0, localOnly = 0;
-const perPage = new Map(); // page tag -> chat requests forwarded
-const chats = [];
+const TAGS = new Set(); // page tags of this run (/p/<tag>/…)
+const perPage = new Map(); // tag -> chat requests forwarded
+const inflight = new Map(); // tag -> streams not yet ended
+const chats = []; // one record per ended chat request, with its tag
+const wire = new Map(); // tag -> { reqAt, firstReasoningAt, firstContentAt, endAt } (epoch ms, this machine)
 const px = createServer(async (req, res) => {
   const cors = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET,POST,PUT,OPTIONS", "access-control-expose-headers": "*" };
   if (req.method === "OPTIONS") return res.writeHead(204, cors).end();
   let body = ""; for await (const c of req) body += c;
-  const url = new URL(req.url, "http://x"), path = url.pathname;
-  const tag = url.searchParams.get("page") ?? req.headers["x-verify-page"] ?? currentPage;
-  const deny = (why) => { fail(`proxy refused ${req.method} ${path}: ${why}`); tlog({ dir: "refused", page: tag, method: req.method, path, why }); res.writeHead(403, { ...cors, "content-type": "application/json" }).end(JSON.stringify({ error: `verify-opener: ${why}` })); };
-  if (req.method === "GET" && path === "/v1/models") { localOnly++; tlog({ dir: "local", path }); return res.writeHead(503, { ...cors, "content-type": "application/json" }).end('{"error":"verify-opener: answered locally"}'); }
-  if (path.startsWith("/v1/sessions")) { localOnly++; tlog({ dir: "local", method: req.method, path: "/v1/sessions…" }); return res.writeHead(503, { ...cors, "content-type": "application/json" }).end('{"error":"verify-opener: uploads stay queued"}'); }
+  const url = new URL(req.url, "http://x");
+  const m = /^\/p\/([A-Za-z0-9_-]+)(\/.*)$/.exec(url.pathname);
+  const tag = m?.[1] ?? null, path = m?.[2] ?? url.pathname;
+  const deny = (why) => { fail(`proxy refused ${req.method} ${path} (page ${tag}): ${why}`); tlog({ dir: "refused", page: tag, method: req.method, path, why }); res.writeHead(403, { ...cors, "content-type": "application/json" }).end(JSON.stringify({ error: `verify-opener: ${why}` })); };
+  if (!tag || !TAGS.has(tag)) return deny("request without a known page tag");
+  if (req.method === "GET" && path === "/v1/models") { localOnly++; tlog({ dir: "local", page: tag, path }); return res.writeHead(503, { ...cors, "content-type": "application/json" }).end('{"error":"verify-opener: answered locally"}'); }
+  if (path.startsWith("/v1/sessions")) { localOnly++; tlog({ dir: "local", page: tag, method: req.method, path: "/v1/sessions…" }); return res.writeHead(503, { ...cors, "content-type": "application/json" }).end('{"error":"verify-opener: uploads stay queued"}'); }
   if (!(req.method === "POST" && path === "/v1/chat/completions")) return deny("path not allowed");
   let parsed = null; try { parsed = body ? JSON.parse(body) : null; } catch {}
   if (parsed?.response_format || parsed?.format) return deny("extractor call");
   if ((perPage.get(tag) ?? 0) >= 1) return deny(`second chat request from page ${tag} (an empty-completion retry: the opener came back empty)`);
   if (live >= MAX_LIVE) return deny(`live request cap ${MAX_LIVE} reached`);
-  perPage.set(tag, (perPage.get(tag) ?? 0) + 1);
-  const n = ++live;
   const target = new URL(path, UPSTREAM);
   if (!upstreamAllowed(target)) return deny("host not allowed: " + target.host);
-  const roles = parsed?.messages?.map((m) => m.role) ?? [];
+  perPage.set(tag, (perPage.get(tag) ?? 0) + 1);
+  inflight.set(tag, (inflight.get(tag) ?? 0) + 1);
+  const n = ++live; // counted when the request STARTS, so slow streams can never get past the cap
+  const roles = parsed?.messages?.map((x) => x.role) ?? [];
   const cue = parsed?.messages?.at(-1)?.role === "user" ? parsed.messages.at(-1).content : null;
-  tlog({ n, page: tag, dir: "req", model: parsed?.model, stream: parsed?.stream, max_tokens: parsed?.max_tokens, roles, last_user: cue, chars: parsed?.messages?.map((m) => String(m.content ?? "").length) });
+  const w = { reqAt: Date.now(), firstReasoningAt: null, firstContentAt: null, endAt: null }; wire.set(tag, w);
+  tlog({ n, page: tag, dir: "req", model: parsed?.model, stream: parsed?.stream, max_tokens: parsed?.max_tokens, roles, last_user: cue, chars: parsed?.messages?.map((x) => String(x.content ?? "").length) });
   const headers = { "content-type": "application/json", accept: req.headers.accept ?? "*/*", authorization: `Bearer ${TOKEN}`, ...(body ? { "content-length": Buffer.byteLength(body) } : {}) };
   const mod = target.protocol === "https:" ? httpsRequest : httpRequest;
-  const t0 = Date.now();
+  const t0 = w.reqAt;
+  const done = (r) => { if (w.endAt !== null) return; w.endAt = Date.now(); inflight.set(tag, (inflight.get(tag) ?? 1) - 1); chats.push(r); tlog({ dir: "end", ...r }); };
   const up = mod(target, { method: "POST", headers }, (ur) => {
     const h = { ...ur.headers }; delete h["set-cookie"];
     res.writeHead(ur.statusCode, { ...h, ...cors });
-    const parts = []; let ttfb = null;
-    ur.on("data", (c) => { if (ttfb === null) ttfb = Date.now() - t0; parts.push(c); res.write(c); });
+    const parts = []; let ttfb = null, carry = "";
+    ur.on("data", (c) => {
+      if (ttfb === null) ttfb = Date.now() - t0;
+      parts.push(c); res.write(c);
+      carry += c.toString("utf8"); const lines = carry.split("\n"); carry = lines.pop() ?? "";
+      for (const l of lines) { if (!l.startsWith("data:")) continue; try { const d = JSON.parse(l.slice(5)).choices?.[0]?.delta ?? {}; if (d.reasoning_content && !w.firstReasoningAt) w.firstReasoningAt = Date.now(); if (d.content && !w.firstContentAt) w.firstContentAt = Date.now(); } catch {} }
+    });
     ur.on("end", () => {
       res.end();
       const text = Buffer.concat(parts).toString("utf8");
       const ev = text.split(/\r?\n/).filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim());
       let content = "", reasoning = 0; const fin = []; let usage = null, error = null;
       for (const e of ev) { if (e === "[DONE]") continue; try { const o = JSON.parse(e); if (o.error) error = o.error; const d = o.choices?.[0]?.delta ?? {}; content += d.content ?? ""; if (d.reasoning_content) reasoning++; if (o.choices?.[0]?.finish_reason) fin.push(o.choices[0].finish_reason); if (o.usage) usage = o.usage; } catch {} }
-      const r = { n, page: tag, model: parsed?.model, roles, last_user: cue, status: ur.statusCode, ttfb_ms: ttfb, ms: Date.now() - t0, bytes: Buffer.byteLength(text), sse_events: ev.length, done: ev.at(-1) === "[DONE]", finish_reason: fin.at(-1) ?? null, reasoning_events: reasoning, content_words: content.trim() ? content.trim().split(/\s+/).length : 0, content_head: content.slice(0, 80), usage, error };
-      chats.push(r); tlog({ dir: "end", ...r });
+      done({ n, page: tag, model: parsed?.model, roles, last_user: cue, status: ur.statusCode, ttfb_ms: ttfb, ms: Date.now() - t0, bytes: Buffer.byteLength(text), sse_events: ev.length, done: ev.at(-1) === "[DONE]", finish_reason: fin.at(-1) ?? null, reasoning_events: reasoning, content_words: content.trim() ? content.trim().split(/\s+/).length : 0, content_head: content.slice(0, 80), usage, error });
     });
-    ur.on("error", (e) => { tlog({ n, dir: "error", message: e.message }); });
+    ur.on("error", (e) => { tlog({ n, page: tag, dir: "error", message: e.message }); done({ n, page: tag, model: parsed?.model, roles, last_user: cue, status: ur.statusCode, error: e.message }); });
   });
-  up.on("error", (e) => { tlog({ n, dir: "error", message: e.message }); if (!res.headersSent) res.writeHead(502, cors); res.end(); });
+  up.on("error", (e) => { tlog({ n, page: tag, dir: "error", message: e.message }); if (!res.headersSent) res.writeHead(502, cors); res.end(); done({ n, page: tag, model: parsed?.model, roles, last_user: cue, status: 502, error: e.message }); });
   up.end(body || undefined);
 }).listen(PX, "127.0.0.1");
-let currentPage = null;
+const until = async (what, fn, ms) => { const t = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t > ms) throw new Error(`timed out after ${ms} ms waiting for ${what}`); await new Promise((r) => setTimeout(r, 200)); } };
 
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".woff2": "font/woff2", ".ttf": "font/ttf", ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json" };
 const web = createServer((req, res) => {
@@ -192,6 +222,22 @@ const native = () => {
   const plugins = { BHStream, BHKeychain, BHExport };
   window.Capacitor = { isNativePlatform: () => true, isPluginAvailable: (n) => n in plugins, Plugins: plugins };
 };
+// UI timeline (epoch ms): thinking indicator, first token on screen, reply complete (data-streaming removed: the
+// commit that stamps completeAt), data-busy, composer lock (textarea readOnly/disabled), every input event
+const observer = () => {
+  const T = (window.__timeline = []); const mark = (k, extra) => T.push({ k, t: Date.now(), ...(extra ?? {}) });
+  let last = {};
+  const look = () => {
+    const ta = document.querySelector("textarea");
+    const now = { thinking: !!document.querySelector("[data-typing-indicator]"), streaming: !!document.querySelector("[data-streaming]"),
+      busy: document.querySelector("[data-busy]")?.getAttribute("data-busy") ?? null, locked: ta ? ta.readOnly || ta.disabled : null };
+    let changed = false; for (const k of Object.keys(now)) if (now[k] !== last[k]) changed = true;
+    if (changed) for (const k of Object.keys(now)) if (now[k] !== last[k]) mark(`${k}=${now[k]}`, { busy: now.busy, locked: now.locked, thinking: now.thinking, streaming: now.streaming });
+    last = now;
+  };
+  new MutationObserver(look).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-busy", "data-streaming", "readonly", "disabled"] });
+  document.addEventListener("input", (e) => { if (e.target instanceof HTMLTextAreaElement) mark("input", { busy: last.busy, thinking: last.thinking, streaming: last.streaming, locked: last.locked }); }, true);
+};
 const sessionLog = (page) => page.evaluate(async () => {
   const db = await new Promise((ok, ko) => { const r = indexedDB.open("brianharness"); r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); });
   const out = [];
@@ -203,10 +249,11 @@ const sessionLog = (page) => page.evaluate(async () => {
 const ORDER = Array.from({ length: 10 }, (_, i) => ARMS[i % 2]); // TEST schedule: index 1 adaptive, 2 baseline, …
 const browser = await pw.chromium.launch({ executablePath: chrome, args: ["--no-sandbox"] });
 const results = [];
+const readLog = async (page) => (await sessionLog(page)).split("\n").filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 try {
   for (const model of MODELS) for (const arm of ARMS) {
     const tag = `${model.replace(/[:.]/g, "_")}-${arm}`;
-    currentPage = tag;
+    TAGS.add(tag);
     const har = join(OUT, `${tag}.har`);
     const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, bypassCSP: true, recordHar: { path: har, content: "embed", urlFilter: `http://127.0.0.1:${PX}/**` }, serviceWorkers: "block" });
     await ctx.route("**/*", (route) => {
@@ -218,33 +265,65 @@ try {
     const page = await ctx.newPage();
     const errs = []; page.on("pageerror", (e) => errs.push(e.message));
     await page.addInitScript(native);
-    await page.addInitScript(shim, { settings: { provider: "spider-cloud", model, spiderCloudUrl: `http://127.0.0.1:${PX}` }, order: ORDER, next: ORDER.indexOf(arm) + 1 });
-    const c0 = chats.length;
+    await page.addInitScript(observer);
+    await page.addInitScript(shim, { settings: { provider: "spider-cloud", model, spiderCloudUrl: `http://127.0.0.1:${PX}/p/${tag}` }, order: ORDER, next: ORDER.indexOf(arm) + 1 });
     await page.goto(`http://127.0.0.1:${WEB}/`);
-    await page.waitForSelector("textarea", { timeout: 30_000 });
-    await page.waitForFunction(() => !document.querySelector("[data-streaming]") && !document.querySelector("textarea")?.disabled, null, { timeout: 180_000 });
-    await page.waitForTimeout(800);
-    const ui = await page.evaluate(() => ({ texts: [...document.querySelectorAll(".eeg-prose")].map((e) => e.textContent.trim()).filter(Boolean), failed: [...document.querySelectorAll("[role=alert]")].map((e) => e.textContent.trim()).filter(Boolean).length }));
+    let probe = null;
+    try {
+      await page.waitForSelector("textarea", { timeout: 30_000 });
+      if (PROBE_TYPING) {
+        // the reasoning phase: request out, reasoning chunks arriving, no content yet, thinking indicator shown
+        const inReasoning = await until("the reasoning phase", async () => wire.get(tag)?.firstReasoningAt && !wire.get(tag)?.firstContentAt && !!(await page.$("[data-typing-indicator]")), Math.min(TIMEOUT, 60_000)).catch(() => false);
+        const during = await page.evaluate(() => { const ta = document.querySelector("textarea"); return { busy: document.querySelector("[data-busy]")?.getAttribute("data-busy"), thinking: !!document.querySelector("[data-typing-indicator]"), streaming: !!document.querySelector("[data-streaming]"), readOnly: ta.readOnly, disabled: ta.disabled, sendDisabled: document.querySelector("button[aria-label=Send]")?.disabled ?? null }; });
+        await page.locator("textarea").focus().catch(() => {});
+        await page.keyboard.type("x");
+        await page.keyboard.press("Enter"); // must not send: the Director is busy
+        probe = { during: { inReasoning: !!inReasoning, contentYet: !!wire.get(tag)?.firstContentAt, ...during, typedValue: await page.locator("textarea").inputValue() } };
+      }
+      // done = this page's stream ended (proxy) + director_turn 0 logged (app) + the UI idle
+      await until(`the opener stream of ${tag} to end`, () => wire.get(tag)?.endAt && (inflight.get(tag) ?? 0) === 0, TIMEOUT);
+      await until(`director_turn 0 in the log of ${tag}`, async () => (await readLog(page)).some((e) => e.type === "director_turn" && e.turn === 0), 30_000);
+      await until(`the UI of ${tag} to be idle`, () => page.evaluate(() => !document.querySelector("[data-typing-indicator]") && !document.querySelector("[data-streaming]") && document.querySelector("[data-busy]")?.getAttribute("data-busy") === "false"), 30_000);
+      await page.waitForTimeout(500);
+      if (PROBE_TYPING) {
+        await page.locator("textarea").fill(""); await page.locator("textarea").focus();
+        await page.keyboard.type("y"); // the first key AFTER completeAt (never sent)
+        probe.after = { typedValue: await page.locator("textarea").inputValue() };
+      }
+    } catch (e) { fail(`${tag}: ${e.message}`); }
+    const ui = await page.evaluate(() => ({ texts: [...document.querySelectorAll(".eeg-prose")].map((e) => e.textContent.trim()).filter(Boolean), alerts: [...document.querySelectorAll("[role=alert]")].map((e) => e.textContent.trim()).filter(Boolean), thinking: !!document.querySelector("[data-typing-indicator]") }));
     const shot = join(OUT, `${tag}-opener.png`);
     await page.screenshot({ path: shot, fullPage: true });
-    const ev = (await sessionLog(page)).split("\n").filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const ev = await readLog(page);
+    const timelineUI = await page.evaluate(() => window.__timeline ?? []);
     const ss = ev.find((e) => e.type === "session_start" && e.study), dt = ev.find((e) => e.type === "director_turn" && e.turn === 0);
-    const wire = chats.slice(c0);
-    const w = wire[0] ?? null;
-    const r = { model, arm, study_index: ss?.study?.index ?? null, requests: wire.length, roles: w?.roles, last_user: w?.last_user, finish_reason: w?.finish_reason ?? null, ttfb_ms: w?.ttfb_ms, ms: w?.ms, completion_tokens: w?.usage?.completion_tokens ?? null, content_words: w?.content_words ?? 0,
-      ui_words: ui.texts.join(" ").split(/\s+/).filter(Boolean).length, error_notice: ui.failed > 0 || ui.texts.some((t) => t.startsWith("⚠")),
+    const mine = chats.filter((c) => c.page === tag); // matched by tag, never by arrival order
+    const w = mine[0] ?? null, wt = wire.get(tag) ?? {};
+    const tl = [...Object.entries(wt).filter(([, v]) => typeof v === "number").map(([k, t]) => ({ k: `wire.${k}`, t })), ...timelineUI.map((x) => ({ ...x, k: `ui.${x.k}` }))].sort((a, b) => a.t - b.t).map((x) => ({ ...x, ms: wt.reqAt ? x.t - wt.reqAt : null }));
+    writeFileSync(join(OUT, `timeline-${tag}.json`), JSON.stringify({ tag, probe, timeline: tl }, null, 1));
+    // composer lock: while the Director is busy (incl. the thinking phase) the textarea must not accept input
+    const unlockedWhileBusy = timelineUI.filter((x) => x.busy === "true" && x.locked === false);
+    const inputWhileBusy = timelineUI.filter((x) => x.k === "input" && (x.busy === "true" || x.thinking || x.streaming));
+    const r = { model, arm, tag, study_index: ss?.study?.index ?? null, requests: mine.length, roles: w?.roles, last_user: w?.last_user, finish_reason: w?.finish_reason ?? null, ttfb_ms: w?.ttfb_ms, ms: w?.ms, completion_tokens: w?.usage?.completion_tokens ?? null, content_words: w?.content_words ?? 0,
+      ui_words: ui.texts.join(" ").split(/\s+/).filter(Boolean).length, error_notice: ui.alerts.length > 0, thinking_still_shown: ui.thinking, composer_unlocked_while_busy: unlockedWhileBusy.length > 0, input_while_busy: inputWhileBusy.length, probe,
       log: dt ? { text_chars: dt.text.length, finish_reason: dt.finish_reason, opener_cue: dt.opener_cue, opener_cue_id: dt.opener_cue_id, empty_retries: dt.empty_retries, error: dt.error ?? null, genMs: dt.genMs, firstTokenMs: dt.firstTokenMs } : null, screenshot: shot };
     results.push(r);
-    log(`${tag}: index ${r.study_index}, roles ${r.roles?.join(",")}, finish ${r.finish_reason}, completion_tokens ${r.completion_tokens}, words ${r.content_words}/${r.ui_words}`);
+    log(`${tag}: index ${r.study_index}, requests ${r.requests}, roles ${r.roles?.join(",")}, finish ${r.finish_reason}, completion_tokens ${r.completion_tokens}, words ${r.content_words}/${r.ui_words}, composer locked while busy: ${!r.composer_unlocked_while_busy}`);
     if (r.study_index !== ORDER.indexOf(arm) + 1) fail(`${tag}: launch session is not study index ${ORDER.indexOf(arm) + 1} (got ${r.study_index})`);
     if (r.requests !== 1) fail(`${tag}: ${r.requests} chat requests (want exactly 1 opener)`);
     if (r.roles?.at(-1) !== "user" || r.last_user !== "(session start)") fail(`${tag}: the opener does not end with the user cue`);
     if (r.finish_reason !== "stop") fail(`${tag}: finish_reason ${r.finish_reason}`);
     if (!r.content_words || !r.ui_words || !(r.completion_tokens > 0)) fail(`${tag}: empty opener (words ${r.content_words}, ui ${r.ui_words}, completion_tokens ${r.completion_tokens})`);
-    if (r.error_notice) fail(`${tag}: error notice shown`);
+    if (r.error_notice) fail(`${tag}: error notice shown: ${ui.alerts.join(" | ")}`);
+    if (r.thinking_still_shown) fail(`${tag}: the thinking indicator is still shown`);
+    if (r.composer_unlocked_while_busy) fail(`${tag}: the composer accepted input while the Director was busy (${[...new Set(unlockedWhileBusy.map((x) => x.k))].join(", ")})`);
+    if (r.input_while_busy) fail(`${tag}: ${r.input_while_busy} input event(s) landed before the reply was complete`);
+    if (probe && (!probe.during.inReasoning || probe.during.typedValue !== "" || probe.after?.typedValue !== "y")) fail(`${tag}: typing probe: in reasoning ${probe.during.inReasoning}, typed during reasoning ${JSON.stringify(probe.during.typedValue)} (want ""), after complete ${JSON.stringify(probe.after?.typedValue)} (want "y")`);
     if (!r.log || r.log.opener_cue !== true || r.log.opener_cue_id !== "oc1-075ffc54" || r.log.empty_retries !== 0 || r.log.error) fail(`${tag}: director_turn 0 not logged as a cued opener without retry: ${JSON.stringify(r.log)}`);
     if (ev.some((e) => JSON.stringify(e).includes("(session start)"))) fail(`${tag}: the cue text is in the session log`);
     if (errs.length) log(`${tag}: page errors`, errs);
+    // never start the next page while this page's stream is still open
+    await until(`all streams of ${tag} to end`, () => (inflight.get(tag) ?? 0) === 0, TIMEOUT).catch((e) => fail(e.message));
     await ctx.close(); // flushes the HAR
   }
 } catch (e) { fail(`run aborted: ${e?.message ?? e}`); }
@@ -263,7 +342,7 @@ const hits = [];
 const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else { const b = readFileSync(p); if (b.includes("bhd_") || (TOKEN && b.includes(TOKEN))) hits.push(p); } } };
 walk(OUT);
 log(`\nresults (${summary.mode}):`);
-for (const r of results) log(`  ${r.model} ${r.arm}: index=${r.study_index} cue=${r.last_user === "(session start)"} finish_reason=${r.finish_reason} completion_tokens=${r.completion_tokens} words=${r.content_words} ttfb=${r.ttfb_ms}ms total=${r.ms}ms`);
+for (const r of results) log(`  ${r.model} ${r.arm}: index=${r.study_index} requests=${r.requests} cue=${r.last_user === "(session start)"} finish_reason=${r.finish_reason} completion_tokens=${r.completion_tokens} words=${r.content_words} ttfb=${r.ttfb_ms}ms total=${r.ms}ms composer_locked_while_busy=${!r.composer_unlocked_while_busy}${r.probe ? ` typed_during_reasoning=${JSON.stringify(r.probe.during.typedValue)}` : ""}`);
 log(`upstream chat requests: ${live} (cap ${MAX_LIVE}); answered locally (models/uploads): ${localOnly}`);
 log(`outputs: ${OUT}`);
 if (hits.length) { console.error(`SELF-CHECK FAILED: "bhd_" found in ${hits.join(", ")}`); process.exit(1); }
