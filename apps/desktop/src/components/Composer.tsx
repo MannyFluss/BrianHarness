@@ -37,6 +37,12 @@ export function Composer({
           rows={1}
           enterKeyHint="send"
           value={value}
+          // locked while the Director is busy (request start -> reply complete or error, incl. the thinking phase and an
+          // empty-completion retry): no typing, paste, IME or drop can land before completeAt (typing.* start there).
+          // readOnly, not disabled: the field keeps focus and the soft keyboard stays up between turns
+          readOnly={busy}
+          aria-busy={busy || undefined}
+          data-composer-locked={busy ? "true" : undefined}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {

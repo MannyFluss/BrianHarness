@@ -178,6 +178,11 @@ export type LogEvent =
       rawEvents?: TypingEvent[];
       /** inter-key gaps (ms) inside the reply window, in order: timings only, never content */
       keyGaps?: number[];
+      /** keystrokes (insert/delete/paste) with t < prompt.completeAt: typed before the Director's message was complete
+       *  (0 in normal use: the composer is locked while busy). Not in any typing.* feature (their window starts at completeAt) */
+      keys_before_complete?: number;
+      /** completeAt - the first such keystroke (ms, > 0), else null */
+      first_key_before_complete_ms?: number | null;
     }
   | RatingRecord
   | { type: "interest_update"; t: string; turn: number; topTopics: Array<[string, number]>; hypothesis: string | null; top1?: string | null }

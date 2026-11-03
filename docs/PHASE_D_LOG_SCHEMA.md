@@ -227,7 +227,14 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
   engagement: number, baseline: number, mentionedTopics: string[],
   prompt: { firstTokenAt?: number, completeAt: number },
   rawEvents?: Array<{ t: number, kind: "insert"|"delete"|"paste"|"submit"|..., len: number, source?: string }>,  // no key identities
-  keyGaps: number[] }
+  keyGaps: number[],
+  // Addendum 4 (composer lock, Nov 3 2026; absent in older logs). Same keys on every user_turn in both arms
+  keys_before_complete: number,                  // keystrokes (insert/delete/paste) with t < prompt.completeAt, i.e. typed before
+                                                 // the Director's message was complete. 0 in normal use: the composer is locked
+                                                 // (read-only) from request start until complete or error, incl. the thinking phase
+                                                 // and an empty-completion retry. typing.* features never include these keys
+                                                 // (their window starts at completeAt), so flag turns with keys_before_complete > 0
+  first_key_before_complete_ms: number | null }  // completeAt - the first such keystroke (ms), else null
 
 // interest_update
 { type: "interest_update", t: string, turn: number, topTopics: Array<[topicId: string, mean: number]>, hypothesis: string|null, top1: string|null }

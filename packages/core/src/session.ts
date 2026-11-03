@@ -70,10 +70,19 @@ function replyMeta(backendId: string, g: GenerateResult | undefined, sealed: boo
     usage: { prompt_tokens: sealed ? null : n(g?.usage?.inputTokens), completion_tokens: n(g?.usage?.outputTokens), reasoning_tokens: n(g?.usage?.reasoningTokens) },
   };
 }
-/** a short code only (never err.message: an HTTP error message can quote the response body) */
+/**
+ * Keystrokes (insert/delete/paste) that landed BEFORE the Director's message was complete (t < completeAt). The
+ * composer is locked while the Director is busy, so this is 0 in normal use; the typing.* features drop such keys
+ * (their window starts at completeAt), so they are counted here to flag the turn. Same keys in every turn and arm.
+ */
+const keysBeforeComplete = (events: TypingEvent[], completeAt: number) => {
+  const early = events.filter((e) => (e.kind === "insert" || e.kind === "delete" || e.kind === "paste") && e.t < completeAt);
+  return { keys_before_complete: early.length, first_key_before_complete_ms: early.length ? completeAt - Math.min(...early.map((e) => e.t)) : null };
+};
 /** an upstream that did not run the model: no visible text, finish "stop" or none, 0 (or unreported) completion tokens.
  *  Covers the live empty done chunk and a 200 with an empty body; never a "length" cut-off or a reply with tokens. */
 const isEmptyCompletion = (g: GenerateResult) => !g.text.trim() && (g.finishReason === "stop" || g.finishReason == null) && (g.usage?.outputTokens ?? 0) === 0;
+/** a short code only (never err.message: an HTTP error message can quote the response body) */
 const errorCode = (err: unknown): string => {
   const e = err as { code?: unknown; name?: unknown; status?: unknown };
   if (typeof e?.code === "string" && e.code) return e.code;
@@ -371,6 +380,7 @@ export class HarnessSession {
       prompt: { ...(this.promptFirstTokenAt !== undefined ? { firstTokenAt: this.promptFirstTokenAt } : {}), completeAt: this.promptShownAt },
       ...(this.opts.logRawEvents ? { rawEvents: events } : {}),
       keyGaps: keyGaps(events, window),
+      ...keysBeforeComplete(events, window.from),
     });
     // running top-1 label (final-guess ranking, pure: no state change) so label drift is visible per turn
     const top1 = this.finalGuesses(1)[0]?.label ?? null;
