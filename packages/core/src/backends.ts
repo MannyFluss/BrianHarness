@@ -137,24 +137,24 @@ export class OpenAICompatibleBackend implements ModelBackend {
     const f = this.cfg.fetchImpl ?? fetch; // called unbound: a stored window.fetch must not get cfg as `this`
     const stream = !!req.onToken && this.cfg.streaming !== false;
     const maxTokens = this.cfg.maxTokens ?? 200;
-    const res = await f(`${this.cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...(this.cfg.apiKey ? { authorization: `Bearer ${this.cfg.apiKey}` } : {}) },
-      body: JSON.stringify({
-        model: this.cfg.model,
-        messages: req.messages,
-        max_tokens: maxTokens,
-        temperature: this.cfg.temperature ?? 0.8,
-        stream, // SSE only when the fetch really streams (not CapacitorHttp's buffered fetch)
-        ...(stream && this.cfg.streamUsage ? { stream_options: { include_usage: true } } : {}),
-        ...(this.cfg.seed !== undefined ? { seed: this.cfg.seed } : {}),
-      }),
-      signal: req.signal ?? timeoutSignal(this.cfg.timeoutMs ?? 120_000), // never hang the UI
-    });
     try {
+      const res = await f(`${this.cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(this.cfg.apiKey ? { authorization: `Bearer ${this.cfg.apiKey}` } : {}) },
+        body: JSON.stringify({
+          model: this.cfg.model,
+          messages: req.messages,
+          max_tokens: maxTokens,
+          temperature: this.cfg.temperature ?? 0.8,
+          stream, // SSE only when the fetch really streams (not CapacitorHttp's buffered fetch)
+          ...(stream && this.cfg.streamUsage ? { stream_options: { include_usage: true } } : {}),
+          ...(this.cfg.seed !== undefined ? { seed: this.cfg.seed } : {}),
+        }),
+        signal: req.signal ?? timeoutSignal(this.cfg.timeoutMs ?? 120_000), // never hang the UI
+      });
       const body = stream ? await readChatStream(res, "model backend", req.onToken!) : await readChatResponse(res, "model backend");
       return { ...body, maxTokens, model: this.cfg.model };
-    } catch (err) { // a stream that failed part-way: the turn log still records what was asked for
+    } catch (err) { // a request / stream that failed (before or after the first token): the turn log still records what was asked for
       if (err && typeof err === "object") Object.assign(err, { maxTokens, model: this.cfg.model });
       throw err;
     }

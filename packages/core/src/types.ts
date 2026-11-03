@@ -142,10 +142,12 @@ export type LogEvent =
       model?: string;
       max_tokens?: number | null;
       finish_reason?: string | null;
+      /** prompt_tokens: always null in study sessions (the prompt includes the arm-dependent state note) */
       usage?: { prompt_tokens: number | null; completion_tokens: number | null; reasoning_tokens: number | null };
-      /** finish_reason "length" (the app shows "reply cut off"), or the stream failed after partial text */
+      /** finish_reason "length" (the app shows "reply cut off"), or the turn failed (error set) */
       truncated?: boolean;
-      /** only on a turn whose stream failed after partial text: "stream_incomplete" | "aborted" | "stream_error" */
+      /** only on a failed turn (after partial text, or before the first token with text ""): a short code, e.g.
+       *  "stream_incomplete" | "aborted" | "upstream_incomplete" | "http_<status>" | "stream_error" (never a message) */
       error?: string;
     }
   | {

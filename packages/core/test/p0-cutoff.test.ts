@@ -118,8 +118,9 @@ test("director_turn logs model, max_tokens, finish_reason, usage, truncated; sam
     assert.equal(r.director.truncated, undefined);
     const [t0, t1] = turns(store, s.id);
     assert.equal(t0!.model, "gpt-oss:20b-cloud"); assert.equal(t0!.max_tokens, 2048); assert.equal(t0!.finish_reason, "length"); assert.equal(t0!.truncated, true);
-    assert.deepEqual(t0!.usage, { prompt_tokens: 300, completion_tokens: 2048, reasoning_tokens: null });
-    assert.equal(t1!.truncated, false); assert.deepEqual(t1!.usage, { prompt_tokens: 320, completion_tokens: 90, reasoning_tokens: 60 });
+    // study session: prompt_tokens withheld (null, key kept); completion / reasoning tokens kept
+    assert.deepEqual(t0!.usage, { prompt_tokens: null, completion_tokens: 2048, reasoning_tokens: null });
+    assert.equal(t1!.truncated, false); assert.deepEqual(t1!.usage, { prompt_tokens: null, completion_tokens: 90, reasoning_tokens: 60 });
     keysets.push(Object.keys(t0!).sort(), Object.keys(t1!).sort());
     assert.ok(!/adaptive|baseline/.test(JSON.stringify(turns(store, s.id))), "no arm value in director_turn");
   }
@@ -149,10 +150,11 @@ test("stream error after partial text: director_turn {truncated:true, error} log
   assert.equal(t.length, 2);
   assert.equal(t[1]!.text, "Half a reply"); assert.equal(t[1]!.truncated, true); assert.equal(t[1]!.error, "stream_incomplete");
   assert.equal(t[1]!.finish_reason, null); assert.equal(t[1]!.model, "gemma4:cloud");
-  // no partial text -> nothing logged (unchanged behaviour)
+  // no partial text: now also logged (see blinding-fix tests below)
   const s2 = new HarnessSession({ userId: "u", backend: { id: "x", paid: false, generate: async () => { throw new Error("offline"); } }, seed: 1, store });
   await assert.rejects(s2.start({ onToken: () => {} }));
-  assert.equal(turns(store, s2.id).length, 0);
+  assert.equal(turns(store, s2.id).length, 1);
+  assert.equal(turns(store, s2.id)[0]!.text, ""); assert.equal(turns(store, s2.id)[0]!.error, "stream_error");
 });
 
 test("Worker error event mid-stream (upstream dropped): readable message + code, partial text was delivered", async () => {

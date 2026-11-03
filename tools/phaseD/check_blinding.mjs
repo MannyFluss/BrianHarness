@@ -7,7 +7,8 @@
 // and no stateNote). The key is kept as-is for sidecar protocol brianharness-sidecar/1 and Phase C replays. So a
 // naive grep for "mode" hits non-study logs; this check instead fails on: any plan / stateNote / mode in a study
 // session, any adaptation / studyMode / studyArm / arm / condition / assignment / schedule / order / seed key, and
-// any "adaptive" / "baseline" string value outside rating.blindGuess (the participant's own guess, a study output).
+// any "adaptive" / "baseline" string value outside rating.blindGuess (the participant's own guess, a study output),
+// and any non-null director_turn.usage.prompt_tokens (prompt size carries the arm-dependent state note).
 // It also lists study sessions without session_start.study.protocol (practice build 1438 -> exclude).
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -30,6 +31,8 @@ for (const f of files) {
   const bad = (line, why) => { leaks++; console.log(`LEAK ${f}:${line}: ${why}`); };
   lines.forEach((e, i) => {
     if (e.type === "director_turn" && ("plan" in e || "stateNote" in e || e.sealed !== true)) bad(i + 1, "director_turn not sealed (plan/stateNote in a study session)");
+    // the prompt includes the arm-dependent state note, so its token count identifies the arm (Nov 3 2026 blinding check)
+    if (e.type === "director_turn" && e.usage && e.usage.prompt_tokens !== null && e.usage.prompt_tokens !== undefined) bad(i + 1, "director_turn.usage.prompt_tokens not null in a study session");
     const visit = (v, path) => {
       if (Array.isArray(v)) return v.forEach((x, j) => visit(x, `${path}[${j}]`));
       if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) {

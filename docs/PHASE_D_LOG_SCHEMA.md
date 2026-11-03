@@ -132,6 +132,26 @@ run with no study fields.
 - `final/session_end.extractorCalls` as before; `fallbackReason: "cap_reached"` in a study session now means the
   per-session budget (or the HTTP ceiling) was exhausted.
 
+## Turn numbering and failed turns
+
+Every Director request logs exactly one `director_turn`, successful or not, so `user_turn` and `director_turn`
+numbers pair 1:1: **`user_turn` k is always followed by `director_turn` k+1** (and the opener is `director_turn` 0).
+`director_turn.turn` = user replies so far; `user_turn.turn` = the 0-based index of that reply.
+
+A failed Director turn (stream dropped after partial text, or a request / stream that failed before the first
+token) logs `director_turn {truncated: true, finish_reason: null, error}` and its number is **consumed, not
+retried**: the app has no regenerate, the person simply writes again, and that message is the next `user_turn`
+(same number as the failed `director_turn`), answered by `director_turn` +1. Example (a drop at turn 6):
+
+```
+user_turn 5 -> director_turn 6 {error:"upstream_incomplete", text:"<partial>"} -> user_turn 6 -> director_turn 7
+```
+
+Turn numbers are therefore unique per record type and never repeat. The failed reply is not kept in the
+Director's transcript, so the next request has two consecutive user messages; the person's two messages
+both stay. Count failed turns with `"error" in director_turn`; a pre-first-token failure has `text: ""` and no
+`firstTokenMs` / `streamed`.
+
 ## Samples
 
 `docs/samples/phaseD_sample_export.jsonl` (a BHExport/Files session file) and `docs/samples/phaseD_sample_upload.json`
@@ -160,15 +180,21 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
   stateNote?: string,                                      // non-study only
   // reply metadata (Addendum 4, builds after 20261102.2031; absent in older logs). Same keys on every
   // director_turn in both arms; null = not reported by the backend (mock, providers without usage)
+  // or withheld (usage.prompt_tokens in study sessions)
   model: string,                                           // model name sent, e.g. "gpt-oss:20b-cloud" (mock: "mock")
   max_tokens: number | null,                               // the max_tokens sent (providers/max-tokens.ts table)
   finish_reason: string | null,                            // "stop" | "length" (hit max_tokens) | provider value; null on a failed stream
-  usage: { prompt_tokens: number | null, completion_tokens: number | null,
+  usage: { prompt_tokens: number | null,                   // ALWAYS null in study sessions (sealed): the prompt includes the
+                                                           // state note, whose length differs by arm; key kept, practice logs the value
+           completion_tokens: number | null,
            reasoning_tokens: number | null },              // Spider Cloud never reports reasoning_tokens -> null
-  truncated: boolean,                                      // finish_reason "length" (app shows "Reply cut off"), or the stream failed after partial text
-  error?: string }                                         // only on a failed stream: "stream_incomplete" | "aborted" | "stream_error";
-                                                           // text = what was shown; the transcript does not keep it and the next
-                                                           // director_turn reuses the same turn number
+  truncated: boolean,                                      // finish_reason "length" (app shows "Reply cut off"), or the turn failed
+  error?: string }                                         // only on a failed turn, after partial text OR before the first token:
+                                                           // a short code, never a message: "stream_incomplete" | "aborted" |
+                                                           // "upstream_incomplete" (Worker error event) | a Worker error code |
+                                                           // "http_<status>" | "stream_error". text = what was shown ("" if nothing),
+                                                           // finish_reason null, firstTokenMs/streamed only if text was shown.
+                                                           // The number is consumed, not retried (see Turn numbering)
 
 // user_turn (turn = 0-based index of this reply; the rating card's turn = user_turn.turn + 1)
 { type: "user_turn", t: string, turn: number, text: string,

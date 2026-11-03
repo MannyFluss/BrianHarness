@@ -58,19 +58,24 @@ export const extractorWarningText = (r: ExtractorFallbackReason) => `Interest AI
 /**
  * director_turn reply metadata (Addendum 4). The same keys on every director_turn in every arm; null = not reported
  * (mock backend, a provider without usage). model: the model name sent (else the backend id).
+ * sealed (study sessions): usage.prompt_tokens is always null. The prompt carries the state note, whose length
+ * differs by arm (adaptive ~4-7 lines, baseline ~2), so its token count would identify the arm; the key stays.
  */
-function replyMeta(backendId: string, g: GenerateResult | undefined) {
+function replyMeta(backendId: string, g: GenerateResult | undefined, sealed: boolean) {
   const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   return {
     model: g?.model ?? backendId.replace(/^[a-z-]+:/, ""),
     max_tokens: n(g?.maxTokens),
     finish_reason: g?.finishReason ?? null,
-    usage: { prompt_tokens: n(g?.usage?.inputTokens), completion_tokens: n(g?.usage?.outputTokens), reasoning_tokens: n(g?.usage?.reasoningTokens) },
+    usage: { prompt_tokens: sealed ? null : n(g?.usage?.inputTokens), completion_tokens: n(g?.usage?.outputTokens), reasoning_tokens: n(g?.usage?.reasoningTokens) },
   };
 }
+/** a short code only (never err.message: an HTTP error message can quote the response body) */
 const errorCode = (err: unknown): string => {
-  const e = err as { code?: unknown; name?: unknown };
-  return typeof e?.code === "string" ? e.code : e?.name === "AbortError" || e?.name === "TimeoutError" ? "aborted" : "stream_error";
+  const e = err as { code?: unknown; name?: unknown; status?: unknown };
+  if (typeof e?.code === "string" && e.code) return e.code;
+  if (e?.name === "AbortError" || e?.name === "TimeoutError") return "aborted";
+  return typeof e?.status === "number" && Number.isInteger(e.status) ? `http_${e.status}` : "stream_error";
 };
 
 export interface DirectorTurnResult {
@@ -221,17 +226,19 @@ export class HarnessSession {
     try {
       gen = await this.backend.generate({ messages, plan, stateNote, onToken: onTokenLogged, signal: opts.signal });
     } catch (err) {
-      // the stream failed after some text was shown: log what the person saw (truncated), then fail the turn as
-      // before (the transcript does not keep it; the next director_turn reuses this turn number)
-      if (partial) {
-        const sealedE = !!this.opts.study;
-        this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : { plan, stateNote }), text: partial.trim(), backend: this.backend.id, genMs: systemClock() - t0, firstTokenMs, streamed: true,
-          ...replyMeta(this.backend.id, { text: "", ...(err as { maxTokens?: number; model?: string }) }), truncated: true, error: errorCode(err) });
-      }
+      // the request / stream failed, after some text was shown (text = what the person saw) or before the first
+      // token (text ""): either way one director_turn {truncated:true, finish_reason:null, error} is logged so the
+      // failure is counted, then the turn fails as before. The transcript does not keep it and the turn number is
+      // consumed, not retried: the person's next message is user_turn <this number>, answered by director_turn +1.
+      const sealedE = !!this.opts.study;
+      const shown = !!partial;
+      this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : { plan, stateNote }), text: partial.trim(), backend: this.backend.id, genMs: systemClock() - t0,
+        ...(shown ? { firstTokenMs, streamed: true as const } : {}),
+        ...replyMeta(this.backend.id, { text: "", ...(err && typeof err === "object" ? { maxTokens: (err as { maxTokens?: number }).maxTokens, model: (err as { model?: string }).model } : {}) }, sealedE), truncated: true, error: errorCode(err) });
       throw err;
     }
     const { text } = gen;
-    const meta = replyMeta(this.backend.id, gen);
+    const meta = replyMeta(this.backend.id, gen, !!this.opts.study);
     const truncated = meta.finish_reason === "length";
     const streamed = firstTokenMs !== undefined;
     if (user && !streamed && text) onToken!(text); // non-streaming backend: one delta with the whole text
