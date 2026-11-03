@@ -69,7 +69,7 @@ export type UploadStatusView = {
  */
 export type FeedbackSendResult = { state: "sent" | "exported" | "queued" | "failed"; queued: boolean; status?: number; reason?: string; export?: ExportResult };
 /** session-log bracket around the Report sheet (Director-approved): open -> sent | closed */
-export type FeedbackLogEvent = { type: "feedback_open" | "feedback_sent" | "feedback_closed"; ts: number; sent?: boolean; report_id?: string };
+export type FeedbackLogEvent = { type: "feedback_open" | "feedback_sent" | "feedback_closed"; ts: number; trigger?: string; sent?: boolean; report_id?: string };
 export type SessionItem = { id: string; title: string; turns: number; startedAt: string | null; active: boolean };
 export type Info = {
   backend: string; paid: boolean; provider: string; model: string | null; dataDir: string; userId: string; platform: string; appName: string;
@@ -177,6 +177,8 @@ export interface EegBridge {
     export(report: unknown): Promise<ExportResult>;
     /** current session id + coarse study state for the report header ({inStudy, index} only) */
     context(): Promise<{ sessionId: string | null; study: { inStudy: boolean; index: number | null } }>;
+    /** one Report-sheet line in the CURRENT session log (feedback_open / feedback_sent / feedback_closed); never starts a session */
+    log?(e: FeedbackLogEvent): Promise<{ ok: boolean }>;
   };
   /** study-log auto-upload to the Spider Cloud Worker (needs the device token) */
   uploads?: {

@@ -4,7 +4,7 @@
  *   -> interest map update (+autosave) -> Director plans -> state note -> backend speaks
  * Used identically by the desktop app (Electron main process) and the sim runner.
  */
-import type { ChatMessage, DirectorPlan, ExtractorFallbackReason, ExtractorOutcomeRecord, FeatureMap, FrameState, LogEvent, RatingRecord, TypingEvent } from "./types.js";
+import type { ChatMessage, DirectorPlan, ExtractorFallbackReason, ExtractorOutcomeRecord, FeatureMap, FeedbackLogInput, FeedbackLogRecord, FrameState, LogEvent, RatingRecord, TypingEvent } from "./types.js";
 import { DIRECTOR_SYSTEM_PROMPT, OPENER_CUE, OPENER_CUE_ID, type GenerateResult, type ModelBackend } from "./backends.js";
 import { OPEN_TOPIC, baselineRotation, planBaselineTurn, planTurn, type DirectorPolicyOptions } from "./director.js";
 import { estimateEngagement, eegQuality, textFeatures, type EegBlendOptions, type EngagementContext } from "./engagement.js";
@@ -442,6 +442,24 @@ export class HarnessSession {
       if (this.opts.study) rec.blindGuess = r.blindGuess === "adaptive" || r.blindGuess === "baseline" || r.blindGuess === "no-idea" ? r.blindGuess : null;
     }
     if (rec.scope === "session") this.sessionRated = rec.value !== null && rec.value !== undefined; // the last session rating decides
+    this.log(rec);
+    return rec;
+  }
+
+  /**
+   * Log one Report-sheet event (feedback_open / feedback_sent / feedback_closed). Like logRating, this writes ONE
+   * log line and touches nothing else: no engagement, frame, interest map, Director, timing or study state.
+   */
+  logFeedback(e: FeedbackLogInput): FeedbackLogRecord | null {
+    const ts = typeof e.ts === "number" && Number.isFinite(e.ts) ? Math.round(e.ts) : this.clock();
+    const base = { t: nowIso(), ts, sessionId: this.id };
+    let rec: FeedbackLogRecord;
+    if (e.type === "feedback_open") rec = { type: "feedback_open", ...base, trigger: typeof e.trigger === "string" && /^[a-z][a-z0-9_-]{0,23}$/.test(e.trigger) ? e.trigger : "other" };
+    else if (e.type === "feedback_sent") {
+      if (typeof e.report_id !== "string" || !/^[0-9a-f-]{36}$/i.test(e.report_id)) return null;
+      rec = { type: "feedback_sent", ...base, report_id: e.report_id.toLowerCase() };
+    } else if (e.type === "feedback_closed") rec = { type: "feedback_closed", ...base, sent: e.sent === true };
+    else return null;
     this.log(rec);
     return rec;
   }

@@ -21,6 +21,11 @@ The sheet has one optional note (the Worker's `summary` gets the first 500 chars
 session or count as time away: the page stays visible, so AWAY_MS never runs. The row only appears when the
 transport has a `feedback` bridge, which means the in-process transport (web and iOS). Electron isn't wired.
 
+**Session log:** the sheet is bracketed in the current session's JSONL by `feedback_open`, then `feedback_sent
+{report_id}` (on Send), then `feedback_closed {sent}`. Details are in docs/PHASE_D_LOG_SCHEMA.md, "Report sheet
+events", with a sample at docs/samples/feedback_events_sample.jsonl. These are the only log changes. A report's
+content never goes into the session log.
+
 ## Flight recorder
 
 A ring buffer of the last **200** events, `{ts, type, data}`, with `ts` in epoch ms. Recording never throws and never

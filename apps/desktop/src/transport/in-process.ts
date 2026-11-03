@@ -559,6 +559,8 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         const h = host?.hud() ?? null; // never starts a session or the host
         return { sessionId: h?.sessionId ?? null, study: { inStudy: !!h?.study, index: h?.study?.index ?? null } };
       },
+      // synchronous up to the append, so open / sent / closed land in call order
+      log: (e) => (host ? host.feedbackEvent(e) : Promise.resolve({ ok: false })),
     },
     uploads: {
       status: async () => (await (await uploadQueue).summary()) as UploadStatusView,

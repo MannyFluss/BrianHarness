@@ -19,6 +19,7 @@ import { useLayoutMode, useVisualViewportHeight } from "./layout";
 import { FeedbackSheet, type FeedbackSheetPhase } from "./components/FeedbackSheet";
 import { assembleReport, isReportShortcut } from "./feedback/report";
 import { flightRecorder, setRecorderStudy, snapshotScreenNow } from "./feedback/recorder";
+import type { FeedbackLogEvent } from "./transport/types";
 
 let nextId = 0;
 const mid = () => `m${++nextId}`;
@@ -177,16 +178,22 @@ export function App() {
   const infoRef = useRef(info);
   infoRef.current = info;
   const canReport = !!bridge().feedback;
+  // session log (Director-approved): feedback_open, then feedback_sent {report_id} on Send, then feedback_closed {sent}
+  const reportSent = useRef(false);
+  const logFeedback = (e: FeedbackLogEvent) => { void bridge().feedback?.log?.(e).catch(() => {}); };
   const openReport = useCallback((trigger: string) => {
     if (!bridge().feedback || reportRef.current) return;
     snapshotScreenNow(); // the screen as it was, before the sheet covers it
     flightRecorder.record("state", { event: "report_open", trigger });
+    reportSent.current = false;
+    logFeedback({ type: "feedback_open", ts: Date.now(), trigger });
     reportRef.current = { trigger };
     setReportPhase({ kind: "idle" });
     setReport({ trigger });
   }, []);
   const closeReport = useCallback(() => {
     if (!reportRef.current) return;
+    logFeedback({ type: "feedback_closed", ts: Date.now(), sent: reportSent.current });
     reportRef.current = null;
     setReport(null);
   }, []);
@@ -197,6 +204,8 @@ export function App() {
     setReportPhase({ kind: "sending" });
     try {
       const doc = await assembleReport({ note, trigger: r.trigger, messages: messagesRef.current, recorder: flightRecorder, bridge: bridge(), info: infoRef.current, ui: uiRef.current });
+      if (!reportSent.current) logFeedback({ type: "feedback_sent", ts: Date.now(), report_id: doc.report_id });
+      reportSent.current = true;
       const result = await fb.send(doc);
       setReportPhase({ kind: "done", result });
     } catch (err) {
@@ -208,6 +217,12 @@ export function App() {
     window.__bhReport = (o) => openReport(o?.source ?? "hook");
     return () => { delete window.__bhReport; };
   }, [openReport]);
+  useEffect(() => {
+    // the page is going away with the sheet open: close it, so feedback_open always gets its feedback_closed
+    const onHide = () => closeReport();
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, [closeReport]);
 
   useEffect(() => {
     if (!pending) return;

@@ -11,6 +11,7 @@ session_start
 director_turn (turn 0, the opener)
 ( user_turn, interest_update, director_turn )  x N user replies
 rating*            (anywhere after a director_turn; turn-scope probes and at most one answered session rating)
+feedback_*         (anywhere after session_start: the in-app Report sheet, see "Report sheet events")
 final
 session_end
 ```
@@ -262,7 +263,40 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
   protocol: number }                                       // uploaded since Worker 2ef027e (optional int 1..100)
 ```
 
+// feedback_open / feedback_sent / feedback_closed (the in-app Report sheet; see "Report sheet events")
+{ type: "feedback_open",   t: string, ts: number, sessionId: string, trigger: "sidebar"|"shortcut"|"shake"|"hook"|string }
+{ type: "feedback_sent",   t: string, ts: number, sessionId: string, report_id: string /* uuid v4, lowercase */ }
+{ type: "feedback_closed", t: string, ts: number, sessionId: string, sent: boolean }
+```
+
 No record carries API keys, device tokens or the Authorization header.
+
+## Report sheet events (Director-approved, Nov 3 2026)
+
+The in-app bug report (docs/FEEDBACK_REPORT_SCHEMA.md) brackets its sheet in the current session's log:
+
+```
+feedback_open -> feedback_closed {sent:false}                               closed without sending (Cancel, X, backdrop, Escape, page unload)
+feedback_open -> feedback_sent {report_id} -> feedback_closed {sent:true}   Send pressed, then the sheet closed
+```
+
+- Every `feedback_open` is followed by `feedback_sent` and/or `feedback_closed` before the next `feedback_open`.
+  `feedback_closed` is written on **every** close, including after a send (`sent:true`). Closing without sending
+  writes `sent:false`.
+- `ts` is epoch ms from the renderer clock (the same clock as `rating.shownAt`). `t` is the ISO write time.
+- `feedback_sent` means Send was pressed. Whether the report reached the Worker or fell back to an export is not
+  logged here; the delivery result stays on the device. `report_id` matches the report's `report_id`, which joins
+  it to `GET /v1/feedback`.
+- **Nothing reads these lines.** Typing features, engagement, the interest map, the Director, turn numbering,
+  ratings and probes, AWAY_MS and the study schedule never use them (test: `feedback-log.test.ts`, identical
+  user_turn features with and without them). The sheet is UI only: the page stays visible, so it doesn't count
+  as time away, and it never starts a chat. Composer `blur`/`focus` typing events while the sheet is open (the
+  note field takes focus) fall inside the open/closed bracket, so analysis can exclude that window.
+- **Blinding:** no arm, plan, mode, prompt size or report content. `check_blinding.mjs` passes on study sessions
+  that contain them, in both arms.
+- No session running (before the first chat): nothing is written, and a session is never started for it.
+- Sample: `docs/samples/feedback_events_sample.jsonl`, a real study-session export with both sequences. Its `ts`
+  values come from a simulated clock, so they're spread out; `t` is the real write time.
 
 ## Upload body (`POST /v1/sessions`)
 

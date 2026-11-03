@@ -9,7 +9,7 @@ import { HarnessSession } from "./session.js";
 import type { HarnessStorage } from "./platform/storage.js";
 import { systemClock, type Clock } from "./platform/env.js";
 import { isFillerOnly, sessionTitle } from "./title.js";
-import type { RatingRecord, TypingEvent } from "./types.js";
+import type { FeedbackLogInput, RatingRecord, TypingEvent } from "./types.js";
 import { STUDY_MIN_USER_TURNS, studySessionRecord, type StudyAssignment, type StudySessionInfo, type StudySessionRecord, type StudyStatus } from "./study.js";
 import { sessionExportName, type ExportFile } from "./zip.js";
 import { randomId } from "./platform/env.js";
@@ -165,6 +165,17 @@ export class HarnessHost {
     this.session.logRating(r);
     await this.cfg.storage?.flush?.();
     return { ok: true };
+  }
+
+  /**
+   * Log a Report-sheet event to the CURRENT session (see FeedbackLogRecord). Never starts a session: with none
+   * running, nothing is written.
+   */
+  async feedbackEvent(e: FeedbackLogInput): Promise<{ ok: boolean }> {
+    if (!this.session) return { ok: false };
+    const rec = this.session.logFeedback(e);
+    if (rec) await this.cfg.storage?.flush?.();
+    return { ok: !!rec };
   }
 
   /** One session's JSONL file (as stored; blinded: contains no mode). */

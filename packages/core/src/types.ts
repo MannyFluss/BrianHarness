@@ -185,6 +185,7 @@ export type LogEvent =
       first_key_before_complete_ms?: number | null;
     }
   | RatingRecord
+  | FeedbackLogRecord
   | { type: "interest_update"; t: string; turn: number; topTopics: Array<[string, number]>; hypothesis: string | null; top1?: string | null }
   /**
    * Session-end interest labels (written just before session_end): the final top-3 guesses as labels, the
@@ -207,3 +208,17 @@ export interface ExtractorOutcomeRecord {
   fallback: boolean;
   fallbackReason?: ExtractorFallbackReason;
 }
+
+/**
+ * In-app bug report sheet (Director-approved session-log events). UI only: these lines never feed features,
+ * engagement, the interest map, timing, ratings or the study schedule, and carry no report content.
+ * Every feedback_open is followed by feedback_sent and/or feedback_closed:
+ *   open -> closed {sent:false}                  (closed without sending; also on pagehide while open)
+ *   open -> sent {report_id} -> closed {sent:true}
+ * t = ISO time, ts = epoch ms (renderer clock, the same clock as rating.shownAt).
+ */
+export type FeedbackLogRecord =
+  | { type: "feedback_open"; t: string; ts: number; sessionId: string; trigger: string }
+  | { type: "feedback_sent"; t: string; ts: number; sessionId: string; report_id: string }
+  | { type: "feedback_closed"; t: string; ts: number; sessionId: string; sent: boolean };
+export type FeedbackLogInput = { type: FeedbackLogRecord["type"]; ts?: number; trigger?: string; report_id?: string; sent?: boolean };
