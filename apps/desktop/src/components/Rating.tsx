@@ -4,6 +4,8 @@ import { cn } from "../lib";
 import { BLIND_CHOICES } from "../rating";
 
 // LearnHarness-style 1-5 tap row: square-ish keys, concentric radii, muted end labels.
+// [data-rating-option] / [data-rating-probe]: the bug-report flight recorder never reads these controls' value,
+// label, checked state or position (feedback/snapshot.ts ratingHidden), in study and practice alike.
 export function ScaleRow({ value, onPick, size = "md" }: { value: number | null; onPick: (v: number) => void; size?: "sm" | "md" }) {
   return (
     <div className="flex flex-col gap-1">
@@ -13,7 +15,7 @@ export function ScaleRow({ value, onPick, size = "md" }: { value: number | null;
             key={v}
             role="radio"
             aria-checked={value === v}
-            data-rating={v}
+            data-rating-option
             onClick={() => onPick(v)}
             className={cn(
               "eeg-tap flex items-center justify-center rounded-[10px] border font-ui tabular-nums transition-colors",

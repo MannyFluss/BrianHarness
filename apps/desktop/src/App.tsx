@@ -19,6 +19,7 @@ import { useLayoutMode, useVisualViewportHeight } from "./layout";
 import { FeedbackSheet, type FeedbackSheetPhase } from "./components/FeedbackSheet";
 import { assembleReport, isReportShortcut } from "./feedback/report";
 import { flightRecorder, setRecorderStudy, snapshotScreenNow } from "./feedback/recorder";
+import { feedbackBracket } from "./feedback/away";
 import type { FeedbackLogEvent } from "./transport/types";
 
 let nextId = 0;
@@ -212,14 +213,18 @@ export function App() {
     snapshotScreenNow(); // the screen as it was, before the sheet covers it
     flightRecorder.record("state", { event: "report_open", trigger });
     reportSent.current = false;
-    logFeedback({ type: "feedback_open", ts: Date.now(), trigger });
+    const openedAt = Date.now();
+    feedbackBracket.open(openedAt);
+    logFeedback({ type: "feedback_open", ts: openedAt, trigger });
     reportRef.current = { trigger };
     setReportPhase({ kind: "idle" });
     setReport({ trigger });
   }, []);
   const closeReport = useCallback(() => {
     if (!reportRef.current) return;
-    logFeedback({ type: "feedback_closed", ts: Date.now(), sent: reportSent.current });
+    const closedAt = Date.now();
+    feedbackBracket.close(closedAt);
+    logFeedback({ type: "feedback_closed", ts: closedAt, sent: reportSent.current });
     reportRef.current = null;
     setReport(null);
   }, []);
@@ -326,7 +331,8 @@ export function App() {
     let hiddenAt = 0;
     const onVis = () => {
       if (document.visibilityState === "hidden") { hiddenAt = Date.now(); return; }
-      if (hiddenAt && Date.now() - hiddenAt >= AWAY_MS) requestNew();
+      // time hidden while the Report sheet was open (e.g. the iOS share sheet of the export fallback) is not away
+      if (hiddenAt && feedbackBracket.awayMs(hiddenAt, Date.now()) >= AWAY_MS) requestNew();
       hiddenAt = 0;
     };
     const onHide = () => {

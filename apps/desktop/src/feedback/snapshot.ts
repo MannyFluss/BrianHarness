@@ -1,6 +1,7 @@
 // "Text version of video": what is on screen right now, from the existing aria-* / data-* labels. Used for the
 // flight recorder's `screen` events and the snapshot taken when Report opens. Study sessions: the HUD and the
-// blinding-check choice are never read; the report builder additionally drops plan/mode fields (flight-recorder.ts).
+// blinding-check choice are never read; the rating UI (1-5 probe + session rating) is never read beyond a generic
+// "rating option" in ANY session; the report builder additionally drops plan/mode/rating fields (flight-recorder.ts).
 import { FEEDBACK_TEXT_CAP } from "@brianharness/core/browser";
 
 export type ScreenControl = { label: string; control: string; value?: string; disabled?: true; pressed?: boolean; checked?: boolean };
@@ -31,8 +32,21 @@ export function controlName(el: Element): string | null {
   return d ? d.slice(5) : t ? cap(t, 80) : null;
 }
 
-/** inside a control whose value must never be recorded during a study session */
-export const studyHidden = (el: Element) => !!el.closest("[aria-label='Blinding check'], [aria-label='Director HUD'], [data-hud]");
+/** the absorption rating UI (per-turn probe, session rating card incl. its 1-5 row, "What hooked you?" and the
+ * blinding check): NEVER read beyond a generic label, in study and practice alike (Researcher blinding check) */
+export const RATING_SCOPE = "[data-rating-probe], [data-rating-option], [data-blind], [aria-label='Blinding check']";
+export const ratingHidden = (el: Element) => !!el.closest(RATING_SCOPE);
+/** the generic stand-in for a control inside the rating UI: no value, name, aria-label, checked/selected state or index */
+export function ratingControl(el: Element): { label: string; control: string } {
+  if (el.closest("[data-blind], [aria-label='Blinding check']")) return { label: "blinding-check option", control: "radio" };
+  if (el.closest("[data-rating-option]") || el.getAttribute("role") === "radio") return { label: "rating option", control: "radio" };
+  const tag = el.tagName.toLowerCase();
+  if (tag === "textarea" || tag === "input") return { label: "rating text field", control: tag };
+  // Skip / Done / the backdrop: generic too (Done's label is fixed, but its disabled state says whether a value was picked)
+  return { label: "rating control", control: el.getAttribute("role") ?? tag };
+}
+/** inside a control whose value must never be recorded during a study session (plus the rating UI, always) */
+export const studyHidden = (el: Element) => ratingHidden(el) || !!el.closest("[aria-label='Director HUD'], [data-hud]");
 
 export function overlaysOf(doc: Document): string[] {
   const o: string[] = [];
@@ -55,7 +69,8 @@ export function screenSnapshot(doc: Document, o: { inStudy: boolean; win?: Windo
   for (const el of doc.querySelectorAll("button, input, textarea, select, [role='radio'], [role='button'], [role='switch'], a[href]")) {
     if (controls.length >= 60) break;
     if (!isVisible(el, win) || (el.classList.contains("fixed") && el.classList.contains("inset-0"))) continue; // backdrops
-    if (o.inStudy && studyHidden(el)) { if (el.getAttribute("role") === "radio") controls.push({ label: "blinding-check option", control: "radio" }); continue; }
+    if (ratingHidden(el)) { controls.push(ratingControl(el)); continue; } // study and practice
+    if (o.inStudy && studyHidden(el)) continue; // the HUD
     const label = controlName(el);
     if (!label) continue;
     const c: ScreenControl = { label, control: el.getAttribute("role") ?? el.tagName.toLowerCase() };
@@ -82,7 +97,7 @@ export function screenSnapshot(doc: Document, o: { inStudy: boolean; win?: Windo
   }
   const notices: string[] = [];
   for (const el of doc.querySelectorAll("[role='status'], [role='alert'], [data-reply-cutoff], [data-reply-failed]")) {
-    if (notices.length >= 12 || !isVisible(el, win) || (o.inStudy && studyHidden(el))) continue;
+    if (notices.length >= 12 || !isVisible(el, win) || ratingHidden(el) || (o.inStudy && studyHidden(el))) continue;
     const t = clean(el.textContent);
     if (t) notices.push(cap(t, 200));
   }

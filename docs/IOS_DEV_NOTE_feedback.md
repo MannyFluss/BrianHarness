@@ -6,7 +6,7 @@ can't be sent is shared as one `.json` through the existing **BHExport** `share`
 logs". The report format is in docs/FEEDBACK_REPORT_SCHEMA.md and the server contract in brianharness-worker
 docs/FEEDBACK.md.
 
-Two optional native asks:
+Two optional native asks, and one question to check on a device (section 3):
 
 ## 1. Shake to report (optional)
 
@@ -43,6 +43,29 @@ window.__BH_APP_INFO__ = { appVersion: "0.4.0", build: "20261103.0940", bundleId
 You could inject it as a `WKUserScript` at document start. The values are CFBundleShortVersionString,
 CFBundleVersion and the bundle id. All of them are optional. Without them, the report still carries `commit` (the
 web build's git commit, baked in at build time), the device (`iPhone`/`iPad`), the OS and the orientation.
+
+## 3. Question: does the BHExport share sheet hide the page? (please check on a device)
+
+The Researcher wants to know whether presenting the share sheet for the export fallback fires `visibilitychange`
+(document `hidden`) or a window `blur` in the WKWebView. That's `BHExport.share`, a `UIActivityViewController`
+shown over the bridge view controller. "Save to Files", AirDrop and Mail are all in-process extensions. "Open in
+<other app>" switches apps.
+
+The repo has no native source, so this can't be settled from the web side. The web side is safe either way:
+
+- The app's only away rule is App.tsx's "hidden for ≥ 20 min (`AWAY_MS`) → session rating, then a new session".
+  Time hidden between `feedback_open` and `feedback_closed` no longer counts (`feedback/away.ts`).
+- Nothing listens to window `blur` for accounting. A composer blur is only a logged typing event and isn't a feature.
+
+What would help, on an iPhone and an iPad:
+
+1. Make the Report send fail (the Worker isn't deployed, so the export fallback runs now), then Send.
+2. Pick "Save to Files", then cancel the sheet. Repeat with "Open in…" another app, then come back.
+3. In Safari Web Inspector, log `document.visibilityState` and `visibilitychange`, `pagehide`, `blur` and `focus`
+   events, plus `applicationWillResignActive` / `DidEnterBackground` if handy.
+
+If any of them fire, tell us which. No code change is needed, and `pagehide` while the sheet is open already closes
+it (`feedback_closed`).
 
 ## What the web does natively (FYI, no change)
 

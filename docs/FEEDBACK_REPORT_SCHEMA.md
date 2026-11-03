@@ -34,7 +34,7 @@ blocks the UI. It hooks into two layers only:
 | type | Source | `data` |
 |---|---|---|
 | `screen` | DOM snapshot, debounced 600 ms after a mutation, and once when the sheet opens | `screen`, `overlays[]`, `layout`, `busy`, `title` (null in study), `controls[]` (≤60 labelled controls with `control`, `label`, `pressed`/`disabled` when set), `messages[]` (`role`, `text` ≤500 chars, `cutOff`/`failed`), `notices[]`. Values of password and secret-looking inputs read `[hidden]`. |
-| `tap` | click capture on **named** controls only (`data-*` hooks or an aria-label) | `control`, `label`. Blinding-check options are recorded as `blinding-check option`. |
+| `tap` | click capture on **named** controls only (`data-*` hooks or an aria-label) | `name`, `control`, `screen`. Rating UI controls are recorded generically, in every session (see "Absorption ratings" below). |
 | `chat` | the model-backend wrapper (`recordingBackend`), one per generate() call | `backend`, `model`, `max_tokens`, `status` (HTTP, null for mock), `ms`, `finish_reason`, `usage {prompt_tokens, completion_tokens, reasoning_tokens}`, `truncated` (finish_reason `length`, or a failure after part of the reply streamed: the director_turn rule), `error` (`{code, message}`; `{code}` in study), `streamed`, `chars` |
 | `error` | stream errors (`source: "stream"`), `window.onerror`, `unhandledrejection`, rejected native plugin calls (`source: "native"`, `plugin`, `method`) | `source`, `code`, `message` (redacted, ≤300 chars; **never in study**), `status?`, `partial?`, `where?` |
 | `state` | transport | `backend` (the backend built), `provider` (provider change), `mock_fallback`, `report_open`, `feedback_delivery` (the last send's result) |
@@ -98,12 +98,37 @@ The client budget is **100 KB** of serialized JSON (the Worker accepts 256 KB). 
 - The client also runs the session-upload secret pre-check (`findUploadSecret`) on the final bytes. A hit marks
   the report needs-export and never sends it. A redacted report passes the check (test: `flight-recorder.test.ts`).
 
+## Absorption ratings (every report, study and practice)
+
+The 1–5 absorption ratings are study outputs, so no report carries a rating value, in any session. That covers the
+per-turn probe (`[data-rating-probe='turn']`) and the session rating card (`[data-rating-probe='session']`, with
+its 1–5 row `[data-rating-option]`, "What hooked you?" and the blinding check `[data-blind]`).
+
+- **UI layer** (`feedback/snapshot.ts` `ratingHidden` / `ratingControl`, also part of `studyHidden`): every control
+  inside the rating UI is recorded as a generic label and `control` only. The labels are `rating option`,
+  `blinding-check option`, `rating text field` and `rating control` (Skip / Done). There's no value, name, text,
+  aria-label, checked/selected/pressed/disabled state or index. All five options look the same, so their order
+  says nothing. Picking an option doesn't change the snapshot, so it doesn't even add a `screen` event. Notices
+  inside the rating UI aren't read. Keyboard Enter/Space on a rating button reaches the recorder as the same click.
+  No keydown or focus events are recorded.
+- **Core backstop** (`ratingScrubEvent`, at record time and again at build time): it drops `rating`, `ratings`,
+  `absorption`, `hooked` and `blindGuess` keys. Any tap or control named with a 1–5 digit on a rating screen
+  becomes `rating option`. Generic rating controls are cut back to `{label|name, control, screen}`.
+- **Ratings reach the recorder by no other path.** `rate()` records nothing, a failed `rate()` is only
+  `console.warn`ed, and the overlay names (`turn-probe`, `session-rating`) carry no value.
+- `tools/phaseD/check_blinding.mjs` checks every report it finds: a `feedback_report` line, or an exported
+  `bh-feedback-*.json`. It flags rating keys, a 1–5 digit as a tap name or radio label, any state on a generic
+  rating control, and checked radios on a rating screen.
+- Tests: `apps/desktop/test/feedback-rating.test.ts` renders the real `Rating.tsx` markup, rates the probe and the
+  session rating (with the blinding check and "What hooked you?"), opens Report, and checks the report in study
+  and practice.
+
 ## Study safety
 
 When `study.inStudy` is true, the report is passed through `studySafe` after redaction:
 
 - **Dropped keys:** `plan`, `stateNote`, `mode`, `hypothesis`, `topTopics`, `topStyles`, `interestMap`,
-  `blindGuess`, `adaptation`, `arm`, `condition`, `assignment`, `schedule`, `order` and `seed`.
+  `blindGuess`, `adaptation`, `arm`, `condition`, `assignment`, `schedule`, `scheduleHash`, `order` and `seed`.
 - **Nulled keys** (they stay in place, so both arms have the same shape): `usage.prompt_tokens`, `input_tokens`,
   `total_tokens`, `cached_tokens`, and every prompt, state-note, system-prompt or messages size (`*_chars`,
   `*_len`, `*_size`, `*_bytes`, `*_tokens`). The adaptive Director prompt carries the plan and state note, so its
@@ -122,8 +147,8 @@ When `study.inStudy` is true, the report is passed through `studySafe` after red
   `hud.study`, and the transport probing the host's session, so the first turn is covered too), the recorder
   stores only scrubbed events, so the raw text never sits in memory. The builder scrubs every event again, which
   covers events recorded before the flag flipped.
-- **Study state** is `{inStudy, index}` only. The conversation title is null. The blinding check's options are
-  anonymized in `screen` and `tap` events.
+- **Study state** is `{inStudy, index}` only. The conversation title is null. The HUD is never read, and its taps
+  aren't recorded. Rating and blinding-check controls are generic in every session (above).
 - **Kept:** `completion_tokens`, `reasoning_tokens`, `ms`, `chars` and `finish_reason`. Both arms produce these
   from the same chat path, and they are already in director_turn.
 

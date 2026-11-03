@@ -159,6 +159,30 @@ try {
     const fb = fbLines(await sessionLog(page));
     check(fb.map((e) => e.type).join(">") === "feedback_open>feedback_sent>feedback_closed" && fb[1]?.report_id === report.report_id && fb[2]?.sent === true, `session log: ${fb.map((e) => e.type + (e.sent !== undefined ? `{sent:${e.sent}}` : "")).join(" -> ")}`);
     summary.iphone = { report_id: report.report_id, bytes: report.payload.header.counts.bytes, events: report.payload.events.length, log: fb };
+    // session rating (New chat -> "Overall, how absorbed were you?"): rate 4, then report again -> no rating value
+    await page.click("button[aria-label='Open sidebar']");
+    await page.getByRole("button", { name: /new chat/i }).first().click();
+    await page.waitForSelector("[data-rating-probe='session'] [data-rating-option]", { timeout: 5000 });
+    await page.locator("[data-rating-probe='session'] [data-rating-option]").nth(3).click();
+    await page.fill("[data-rating-probe='session'] textarea", "tide pools hooked me");
+    await page.waitForTimeout(700); // let the screen recorder snapshot the checked card
+    await page.screenshot({ path: join(OUT, "08-session-rating-iphone.png") });
+    await page.evaluate(() => window.__bhReport({ source: "hook" })); // the sheet over the rating card
+    await page.waitForSelector("[role='dialog'][aria-label='Report a problem']", { timeout: 5000 });
+    await page.click("[data-feedback-send]");
+    await page.waitForSelector("[data-feedback-status][data-state='exported']", { timeout: 15_000 });
+    const shared2 = await page.evaluate(() => window.__shared);
+    const r2 = JSON.parse(shared2[1][0].data ?? shared2[1][0].content);
+    writeFileSync(join(OUT, "report-with-session-rating.json"), JSON.stringify(r2, null, 2) + "\n");
+    const b2 = JSON.stringify(r2.payload.events);
+    const ratingScreens = r2.payload.events.filter((e) => e.type === "screen" && e.data.overlays?.includes("session-rating"));
+    const ratingCtl = ratingScreens.flatMap((e) => e.data.controls).filter((c) => /^(?:rating option|rating control|rating text field|blinding-check option)$/.test(c.label));
+    const ratingTaps = r2.payload.events.filter((e) => e.type === "tap" && e.data.screen === "session-rating");
+    check(ratingScreens.length >= 1 && ratingCtl.filter((c) => c.label === "rating option").length === 5 && ratingCtl.every((c) => Object.keys(c).sort().join() === "control,label")
+      && ratingTaps.length >= 1 && ratingTaps.every((e) => /^(?:rating option|rating control|rating text field)$/.test(e.data.name) && Object.keys(e.data).sort().join() === "control,name,screen")
+      && !/"checked"|"selected"|"(?:name|label)":"\s*[1-5]\s*"|tide pools hooked|Absorption|not at all|completely|absorbed/.test(b2),
+      `rating: the session-rating card is in the report only as generic controls (${ratingScreens.length} screen, ${ratingCtl.length} generic controls, taps ${ratingTaps.map((e) => e.data.name).join(", ")}; no value / checked / label / hooked text)`);
+    await page.click("[data-feedback-done]");
     check(!errs.length, `no page errors (${errs.join("; ")})`);
     await ctx.close();
   }

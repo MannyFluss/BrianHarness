@@ -2,7 +2,7 @@
 // named controls, window errors. The transport adds chat / backend-state / native-plugin events (in-process.ts).
 // Hooks only read the DOM: they never change what the user sees, the study, timing or the session log.
 import { FlightRecorder } from "@brianharness/core/browser";
-import { controlName, screenSnapshot, studyHidden, overlaysOf } from "./snapshot";
+import { controlName, ratingControl, ratingHidden, screenSnapshot, studyHidden, overlaysOf } from "./snapshot";
 
 export const flightRecorder = new FlightRecorder();
 
@@ -28,11 +28,13 @@ export function installTapRecorder(doc: Document, rec: FlightRecorder = flightRe
   const onClick = (e: MouseEvent) => {
     const el = (e.target as Element | null)?.closest?.(TAPPABLE);
     if (!el) return;
-    if (inStudy && studyHidden(el)) { rec.record("tap", { name: "blinding-check option", control: "radio", screen: overlaysOf(doc).at(-1) ?? "chat" }); return; }
-    if (el.closest("[data-blind]")) { rec.record("tap", { name: "blinding-check option", control: "radio", screen: overlaysOf(doc).at(-1) ?? "chat" }); return; }
+    const screen = overlaysOf(doc).at(-1) ?? "chat";
+    // rating UI (probe + session rating + blinding check): a generic name only, in study AND practice
+    if (ratingHidden(el)) { const g = ratingControl(el); rec.record("tap", { name: g.label, control: g.control, screen }); return; }
+    if (inStudy && studyHidden(el)) return; // the HUD
     const name = controlName(el);
     if (!name) return;
-    rec.record("tap", { name, control: el.getAttribute("role") ?? el.tagName.toLowerCase(), screen: overlaysOf(doc).at(-1) ?? "chat" });
+    rec.record("tap", { name, control: el.getAttribute("role") ?? el.tagName.toLowerCase(), screen });
   };
   doc.addEventListener("click", onClick, true);
   return () => doc.removeEventListener("click", onClick, true);

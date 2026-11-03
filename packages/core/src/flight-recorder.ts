@@ -47,7 +47,8 @@ export class FlightRecorder {
   record(type: FlightEventType, data: Record<string, unknown> = {}): void {
     try {
       const raw: FlightEvent = { ts: this.o.now?.() ?? Date.now(), type, data };
-      const e = this.study ? studyScrubEvent(raw) : raw;
+      const r = ratingScrubEvent(raw); // always (study and practice): no absorption-rating value, label or state
+      const e = this.study ? studyScrubEvent(r) : r;
       this.buf.push(e);
       if (this.buf.length > this.capacity) this.buf.splice(0, this.buf.length - this.capacity);
       for (const l of this.listeners) try { l(e); } catch { /* ignore */ }
@@ -132,9 +133,47 @@ export function redactDeep<T>(v: T, depth = 0): T {
   return null as T;
 }
 
+// ---------------------------------------------------------------- absorption ratings (always, study or not)
+/**
+ * The 1-5 absorption ratings (per-turn probe, session rating) and the blinding check are study OUTPUTS: a report must
+ * never carry a rating value, which option was checked, or the option's label / index (Researcher blinding check,
+ * Nov 3 2026). The UI layer already records rating controls as a generic "rating option" (apps/desktop
+ * feedback/snapshot.ts ratingControl); this is the core-side backstop, applied at record time and at report build.
+ */
+export const RATING_GENERIC_LABELS = new Set(["rating option", "blinding-check option", "rating control", "rating text field"]);
+const RATING_DROP_KEYS = /^(?:rating|ratings|ratingvalue|absorption|hooked|blindguess)$/i;
+const RATING_SCREENS = new Set(["turn-probe", "session-rating"]);
+const DIGIT_LABEL = /^\s*[1-5]\s*$/;
+function dropRatingKeys(v: unknown, depth = 0): unknown {
+  if (depth > 12 || v === null || typeof v !== "object") return v;
+  if (Array.isArray(v)) return v.map((x) => dropRatingKeys(x, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v as Record<string, unknown>)) if (!RATING_DROP_KEYS.test(k.replace(/[_-]/g, ""))) out[k] = dropRatingKeys(x, depth + 1);
+  return out;
+}
+/** a control / tap inside the rating UI -> {label|name, control} only; idempotent, never throws */
+export function ratingScrubEvent(e: FlightEvent): FlightEvent {
+  try {
+    const d = dropRatingKeys(e.data ?? {}) as Record<string, any>;
+    const overlays: unknown[] = Array.isArray(d.overlays) ? d.overlays : [];
+    const onRating = RATING_SCREENS.has(String(d.screen)) || overlays.some((o) => RATING_SCREENS.has(String(o)));
+    const generic = (label: unknown, control: unknown) => RATING_GENERIC_LABELS.has(String(label)) || (onRating && control === "radio" && DIGIT_LABEL.test(String(label)));
+    if (e.type === "tap" && generic(d.name, d.control)) {
+      const name = RATING_GENERIC_LABELS.has(String(d.name)) ? d.name : "rating option";
+      return { ts: e.ts, type: e.type, data: { name, control: typeof d.control === "string" ? d.control : "radio", ...(typeof d.screen === "string" ? { screen: d.screen } : {}) } };
+    }
+    if (e.type === "screen" && Array.isArray(d.controls)) {
+      d.controls = d.controls.map((c: any) => (c && generic(c.label, c.control) ? { label: RATING_GENERIC_LABELS.has(String(c.label)) ? c.label : "rating option", control: typeof c.control === "string" ? c.control : "radio" } : c));
+    }
+    return { ts: e.ts, type: e.type, data: d };
+  } catch {
+    return { ts: e.ts, type: e.type, data: {} };
+  }
+}
+
 // ---------------------------------------------------------------- study safety
 /** keys that could describe the Director's plan / the arm; dropped from every event during a study session */
-const STUDY_DROP_KEYS = /^(?:plan|statenote|mode|hypothesis|toptopics|topstyles|interestmap|blindguess|adaptation|studymode|studyarm|arm|condition|assignment|schedule|order|seed)$/i;
+const STUDY_DROP_KEYS = /^(?:plan|statenote|mode|hypothesis|toptopics|topstyles|interestmap|blindguess|adaptation|studymode|studyarm|arm|condition|assignment|schedule|schedulehash|order|seed)$/i;
 const ARM_VALUE = /^\s*(?:adaptive|baseline|explore|exploit|relax)\s*$/i;
 /**
  * prompt / state-note SIZE fields: the adaptive arm's Director prompt carries the plan + state note, so its size
@@ -376,7 +415,8 @@ export function buildFeedbackReport(
   const reportId = o.reportId ?? uuidV4();
   // study: every event study-scrubbed again (events recorded before the flag was set, e.g. a practice chat earlier
   // in the buffer, get the same treatment): no raw error text, no prompt sizes, no plan / mode
-  const srcEvents = study.inStudy ? input.events.map(studyScrubEvent) : input.events;
+  // always: the rating backstop (no rating value / checked option / label, study or practice)
+  const srcEvents = input.events.map((e) => (study.inStudy ? studyScrubEvent(ratingScrubEvent(e)) : ratingScrubEvent(e)));
   let events = safe(srcEvents.map((e) => ({ ts: e.ts, type: e.type, data: capTexts(e.data, FEEDBACK_TEXT_CAP) })));
   const recorded = input.events.length;
   let turns = safe(input.chatTurns.slice(-FEEDBACK_CHAT_TURNS).map((t) => {
