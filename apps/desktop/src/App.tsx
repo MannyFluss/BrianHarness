@@ -17,7 +17,7 @@ import { shouldOfferAtLaunch, type AppleAuthView } from "./transport/apple-auth"
 import { useTypingTelemetry } from "./telemetry";
 import { useLayoutMode, useVisualViewportHeight } from "./layout";
 import { FeedbackSheet, type FeedbackSheetPhase } from "./components/FeedbackSheet";
-import { assembleReport, isReportShortcut } from "./feedback/report";
+import { assembleReport, isReportShortcut, reportAllowed } from "./feedback/report";
 import { flightRecorder, setRecorderStudy, snapshotScreenNow } from "./feedback/recorder";
 import { feedbackBracket } from "./feedback/away";
 import type { FeedbackLogEvent } from "./transport/types";
@@ -241,7 +241,11 @@ export function App() {
   const reportSent = useRef(false);
   const logFeedback = (e: FeedbackLogEvent) => { void bridge().feedback?.log?.(e).catch(() => {}); };
   const openReport = useCallback((trigger: string) => {
-    if (!bridge().feedback || reportRef.current) return;
+    if (!reportAllowed({ canReport: !!bridge().feedback, reportOpen: !!reportRef.current, ratingCardOpen: !!cardRef.current, turnProbeOpen: !!probeRef.current })) {
+      // a rating step is showing: blocked, nothing in the session log; the flight recorder notes only the trigger
+      if (bridge().feedback && !reportRef.current) flightRecorder.record("state", { event: "report_blocked", trigger });
+      return;
+    }
     snapshotScreenNow(); // the screen as it was, before the sheet covers it
     flightRecorder.record("state", { event: "report_open", trigger });
     reportSent.current = false;

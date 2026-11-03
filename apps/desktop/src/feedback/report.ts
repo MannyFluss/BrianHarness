@@ -14,6 +14,15 @@ export function isReportShortcut(e: Pick<KeyboardEvent, "key" | "metaKey" | "ctr
   return (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && String(e.key).toLowerCase() === "r";
 }
 
+/**
+ * The Report sheet never opens over a rating step (the session rating card, or the per-turn probe whose
+ * answer latency is measured): every trigger (Report row, Cmd/Ctrl+Shift+R, shake / window.__bhReport) is a
+ * no-op while one is showing. Nothing goes to the session log for a blocked attempt.
+ */
+export function reportAllowed(s: { ratingCardOpen: boolean; turnProbeOpen: boolean; reportOpen: boolean; canReport: boolean }): boolean {
+  return s.canReport && !s.reportOpen && !s.ratingCardOpen && !s.turnProbeOpen;
+}
+
 /** the last 6 chat bubbles as the user saw them */
 export function chatTurnsOf(messages: ChatMsg[], n = FEEDBACK_CHAT_TURNS): FeedbackChatTurn[] {
   return messages.slice(-n).map((m) => ({

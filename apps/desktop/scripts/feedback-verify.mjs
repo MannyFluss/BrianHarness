@@ -112,6 +112,29 @@ const sessionLog = (page) => page.evaluate(async () => {
 });
 const fbLines = (raw) => raw.split(/\\n|\n/).map((l) => l.replace(/\\"/g, '"')).filter((l) => /"type":"feedback_/.test(l)).map((l) => JSON.parse(l.slice(l.indexOf("{"), l.lastIndexOf("}") + 1)));
 
+// Researcher (bc25214): the Report sheet never opens over a rating step. All three triggers -- shake (native ->
+// window.__bhReport({source:"shake"})), Cmd/Ctrl+Shift+R and the sidebar Report row -- are no-ops while the session
+// rating card or the per-turn probe shows, and nothing reaches the session log for them.
+const SHEET = "[role='dialog'][aria-label='Report a problem']";
+async function triggersBlocked(page, what) {
+  const before = fbLines(await sessionLog(page)).length;
+  const tried = [];
+  await page.evaluate(() => window.__bhReport({ source: "shake" })); tried.push("shake");
+  await page.keyboard.press("Meta+Shift+R"); await page.keyboard.press("Control+Shift+R"); tried.push("Cmd/Ctrl+Shift+R");
+  // the Report row: a real click when it is on screen and not covered, else a DOM click (the drawer is closed / covered)
+  const row = page.locator("[data-feedback-row]").first();
+  let how = "absent";
+  if (await row.count()) {
+    try { await row.click({ timeout: 1500, trial: true }); await row.click({ timeout: 1500 }); how = "click"; }
+    catch { await row.evaluate((el) => el.click()); how = "dom-click"; }
+  }
+  tried.push(`Report row (${how})`);
+  await page.waitForTimeout(400);
+  const open = await page.locator(SHEET).count();
+  const after = fbLines(await sessionLog(page)).length;
+  check(open === 0 && after === before && how !== "absent", `report guard (${what}): ${tried.join(", ")} -> no sheet (${open}), session log unchanged (${before} -> ${after} feedback_* lines)`);
+}
+
 const browser = await pw.chromium.launch({ executablePath: chrome, args: ["--no-sandbox"] });
 const summary = {};
 try {
@@ -167,8 +190,12 @@ try {
     await page.fill("[data-rating-probe='session'] textarea", "tide pools hooked me");
     await page.waitForTimeout(700); // let the screen recorder snapshot the checked card
     await page.screenshot({ path: join(OUT, "08-session-rating-iphone.png") });
-    await page.evaluate(() => window.__bhReport({ source: "hook" })); // the sheet over the rating card
-    await page.waitForSelector("[role='dialog'][aria-label='Report a problem']", { timeout: 5000 });
+    await triggersBlocked(page, "session rating card open");
+    check(await page.locator("[data-rating-probe='session']").count() === 1, "report guard: the rating card is still showing, untouched");
+    await page.click("[data-rating-probe='session'] [data-rating-done]");
+    await page.waitForSelector("[data-rating-probe='session']", { state: "detached", timeout: 5000 });
+    await page.evaluate(() => window.__bhReport({ source: "hook" })); // card closed: Report works again
+    await page.waitForSelector(SHEET, { timeout: 5000 });
     await page.click("[data-feedback-send]");
     await page.waitForSelector("[data-feedback-status][data-state='exported']", { timeout: 15_000 });
     const shared2 = await page.evaluate(() => window.__shared);
@@ -177,7 +204,11 @@ try {
     const b2 = JSON.stringify(r2.payload.events);
     const ratingScreens = r2.payload.events.filter((e) => e.type === "screen" && e.data.overlays?.includes("session-rating"));
     const ratingCtl = ratingScreens.flatMap((e) => e.data.controls).filter((c) => /^(?:rating option|rating control|rating text field|blinding-check option)$/.test(c.label));
-    const ratingTaps = r2.payload.events.filter((e) => e.type === "tap" && e.data.screen === "session-rating");
+    // (the blocked Report-row tap on the rating screen is a generic tap, not rating data)
+    const ratingTaps = r2.payload.events.filter((e) => e.type === "tap" && e.data.screen === "session-rating" && e.data.name !== "Report a problem");
+    const blocked = r2.payload.events.filter((e) => e.type === "state" && e.data.event === "report_blocked");
+    check(blocked.length >= 3 && blocked.every((e) => Object.keys(e.data).sort().join() === "event,trigger") && ["shake", "shortcut", "sidebar"].every((t) => blocked.some((e) => e.data.trigger === t)),
+      `report guard: flight recorder notes only {event:"report_blocked", trigger} (${blocked.map((e) => e.data.trigger).join(", ")})`);
     check(ratingScreens.length >= 1 && ratingCtl.filter((c) => c.label === "rating option").length === 5 && ratingCtl.every((c) => Object.keys(c).sort().join() === "control,label")
       && ratingTaps.length >= 1 && ratingTaps.every((e) => /^(?:rating option|rating control|rating text field)$/.test(e.data.name) && Object.keys(e.data).sort().join() === "control,name,screen")
       && !/"checked"|"selected"|"(?:name|label)":"\s*[1-5]\s*"|tide pools hooked|Absorption|not at all|completely|absorbed/.test(b2),
@@ -215,6 +246,18 @@ try {
     await page.waitForTimeout(300);
     const fb = fbLines(await sessionLog(page));
     check(fb.map((e) => e.type).join(">") === "feedback_open>feedback_closed>feedback_open>feedback_sent>feedback_closed" && fb[1]?.sent === false && fb[4]?.sent === true, `session log: ${fb.map((e) => e.type + (e.sent !== undefined ? `{sent:${e.sent}}` : "")).join(" -> ")}`);
+    // per-turn probe showing: all three triggers blocked; after Skip, Report opens again
+    await page.evaluate(() => window.__eegDemo.probe());
+    await page.waitForSelector("[data-rating-probe='turn']", { timeout: 5000 });
+    await triggersBlocked(page, "turn probe open");
+    await page.click("[data-rating-probe='turn'] button[aria-label='Skip']");
+    await page.waitForSelector("[data-rating-probe='turn']", { state: "detached", timeout: 5000 });
+    await page.keyboard.press("Meta+Shift+R");
+    await page.waitForSelector(SHEET, { timeout: 5000 });
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(SHEET, { state: "detached", timeout: 5000 });
+    const fb2 = fbLines(await sessionLog(page));
+    check(fb2.length === fb.length + 2 && fb2.at(-2)?.type === "feedback_open" && fb2.at(-2)?.trigger === "shortcut", `report guard: after the probe, Cmd+Shift+R opens the sheet again (log +${fb2.length - fb.length})`);
     summary.ipad = { report_id: r.report_id, bytes: Buffer.byteLength(body), log: fb };
     check(!errs.length, `no page errors (${errs.join("; ")})`);
     await ctx.close();
