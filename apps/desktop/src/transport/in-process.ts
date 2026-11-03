@@ -156,6 +156,8 @@ type WebSettings = {
   extractorPromptVersion?: "v1" | "v2";
   /** Spider Cloud Worker origin (advanced settings; default https://api.strangeriver.org) */
   spiderCloudUrl?: string;
+  /** set by an explicit picker choice (providers.select); without it the default provider is resolved at load */
+  providerChosen?: boolean;
 };
 const SETTINGS_KEY = "settings";
 export const SPIDER_NO_CORS = "Spider Cloud needs the native app: the Worker sends no CORS headers for browsers.";
@@ -197,7 +199,10 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         fetchImpl: rawFetch,
         baseUrl: async () => normalizeSpiderUrl((await loadSettings()).spiderCloudUrl),
         deviceLabel: deviceLabelFor(platform),
-        onTokenSaved: () => void uploadQueue.then((q) => q.flush()).catch(() => {}), // same kick as a pasted token
+        onTokenSaved: () => {
+          void uploadQueue.then((q) => q.flush()).catch(() => {}); // same kick as a pasted token
+          void resetDefaultBackend();
+        },
       })
     : null;
   const fetchImpl: typeof fetch = apple ? apple.wrapFetch(rawFetch) : rawFetch;
@@ -217,7 +222,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
     return { storage: await KVHarnessStorage.open(kv) };
   })();
 
-  const loadSettings = async (): Promise<WebSettings> => {
+  const loadStoredSettings = async (): Promise<WebSettings> => {
     try {
       const raw = await settingsKV.get(SETTINGS_KEY);
       return { provider: "mock", ...(raw ? (JSON.parse(raw) as Partial<WebSettings>) : {}) };
@@ -225,8 +230,24 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       return { provider: "mock" };
     }
   };
+  /**
+   * Demo default (Nov 3 2026, launch/routing only): with no explicit picker choice, a stored Spider Cloud token
+   * (pasted or Sign in with Apple) in the native app means Spider Cloud with its default model, never Mock.
+   * No model-list fetch is involved, so a slow or failing /v1/models can't delay or change the choice.
+   */
+  const loadSettings = async (): Promise<WebSettings> => {
+    const s = await loadStoredSettings();
+    if (s.provider !== "mock" || s.providerChosen || !nativeFetch) return s;
+    const token = await readApiKey(credentials, SPIDER_CREDENTIAL_ID).catch(() => null);
+    return token ? { ...s, provider: "spider-cloud", model: undefined } : s;
+  };
+  /** the Spider token changed: drop a backend built from the resolved default so the next session uses the new one */
+  const resetDefaultBackend = async () => {
+    const s = await loadStoredSettings();
+    if (!s.providerChosen) backend = null;
+  };
   const saveSettings = async (s: Partial<WebSettings>) => {
-    const next = { ...(await loadSettings()), ...s };
+    const next = { ...(await loadStoredSettings()), ...s };
     await settingsKV.set(SETTINGS_KEY, JSON.stringify(next));
     return next;
   };
@@ -573,7 +594,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       async select(provider: ProviderId, model?: string | null) {
         const s = await loadSettings();
         const next = await build({ ...s, provider: provider as ProviderKind, model: model ?? undefined }); // throws -> UI shows it
-        await saveSettings({ provider: provider as ProviderKind, model: model ?? undefined });
+        await saveSettings({ provider: provider as ProviderKind, model: model ?? undefined, providerChosen: true });
         backend = next;
         host?.setBackend(next);
         rec?.record("state", { event: "provider", provider, model: model ?? null });
@@ -584,7 +605,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         if (!k) throw new Error("empty API key");
         await credentials.modify(provider, async () => ({ type: "api_key", key: k }));
         if (provider === SPIDER_CREDENTIAL_ID) void uploadQueue.then((q) => q.flush()).catch(() => {}); // a new token resumes a 401 pause
-        if (provider === SPIDER_CREDENTIAL_ID) apple?.noteSlotChanged();
+        if (provider === SPIDER_CREDENTIAL_ID) { apple?.noteSlotChanged(); await resetDefaultBackend(); }
         return { ok: true };
       },
       async setEndpoint(provider, url) {
@@ -601,7 +622,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       },
       async logout(provider: KeyProvider) {
         await credentials.delete(provider);
-        if (provider === SPIDER_CREDENTIAL_ID) apple?.noteSlotChanged();
+        if (provider === SPIDER_CREDENTIAL_ID) { apple?.noteSlotChanged(); await resetDefaultBackend(); }
         return { ok: true };
       },
       async login() {
