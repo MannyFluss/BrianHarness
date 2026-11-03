@@ -134,8 +134,9 @@ run with no study fields.
 
 ## Turn numbering and failed turns
 
-Every Director request logs exactly one `director_turn`, successful or not, so `user_turn` and `director_turn`
-numbers pair 1:1: **`user_turn` k is always followed by `director_turn` k+1** (and the opener is `director_turn` 0).
+Every Director turn logs exactly one `director_turn`, successful or not, so `user_turn` and `director_turn`
+numbers pair 1:1 (a turn is one Director request, or two when an empty completion is retried: see Addendum 4; the
+retry is recorded on the same `director_turn` as `empty_retries: 1` / `empty_retry_ms`, never as its own record): **`user_turn` k is always followed by `director_turn` k+1** (and the opener is `director_turn` 0).
 `director_turn.turn` = user replies so far; `user_turn.turn` = the 0-based index of that reply.
 
 A failed Director turn (stream dropped after partial text, or a request / stream that failed before the first
@@ -194,10 +195,17 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
                                                            // fixed hidden user message OPENER_CUE = "(session start)" (packages/core/src/backends.ts),
                                                            // byte-identical in both arms; never rendered, never a user_turn, cue text never logged
   opener_cue_id: string | null,                            // "oc1-075ffc54" (version + first 8 hex of sha256(cue)) when opener_cue, else null
+  // empty completion detection (Addendum 4, empty-opener amendment; absent in older logs). Same keys on every director_turn
+  empty_retries: 0 | 1,                                    // 1 = the first reply was an empty completion (finish_reason "stop", no text,
+                                                           // completion_tokens 0 or unreported) and the identical request was sent once more
+  empty_retry_ms: number | null,                           // ms from request start to the end of that empty first attempt, else null;
+                                                           // genMs and firstTokenMs are measured from the FIRST attempt, so they include it
   error?: string }                                         // only on a failed turn, after partial text OR before the first token:
                                                            // a short code, never a message: "stream_incomplete" | "aborted" |
                                                            // "upstream_incomplete" (Worker error event) | a Worker error code |
-                                                           // "http_<status>" | "stream_error". text = what was shown ("" if nothing),
+                                                           // "http_<status>" | "stream_error" |
+                                                           // "empty_completion" (an empty reply: finish "stop" or none, no text, 0/unreported
+                                                           // completion tokens, incl. a 200 with an empty body; retried once, empty again). text = what was shown ("" if nothing),
                                                            // finish_reason null, firstTokenMs/streamed only if text was shown.
                                                            // The number is consumed, not retried (see Turn numbering)
 
@@ -290,3 +298,14 @@ empty assistant message that stayed in the transcript as `assistant ""`). Those 
 Fix: the opener request ends with the fixed user message `OPENER_CUE` (see `opener_cue`, `opener_cue_id` above). Only the
 model input changes. Plans, state notes, the transcript, user_turn, features and the user-latency window
 (`promptShownAt`, set when the renderer finished showing the opener) keep their definitions.
+
+Detection: every turn (not only the opener). An empty completion (no text, `finish_reason` "stop" or none, completion
+tokens 0 or unreported; this includes an HTTP 200 with an empty body) is retried once inside the same turn (same
+request; the retry is not a turn of its own and gets no number: it is logged on that turn's single `director_turn`
+as `empty_retries: 1` (= 2 attempts; the first attempt's error is always "empty_completion", the only retried case)
+and `empty_retry_ms`. A separate record per attempt would leave a `director_turn` with no `user_turn` before it, shift
+the opener off turn 0, and change the plan, which is computed from the turn number, so the retry would not be the
+same request). If the retry is empty too, the turn is logged as `director_turn {text:"",
+truncated:true, error:"empty_completion", empty_retries:1}` (study: `usage.prompt_tokens` null as always) and fails with
+the app's existing error message; like any failed turn its number is consumed (see Turn numbering). Nothing is put in
+the transcript and no Director text is made up. A retry is one more chat request against the device cap.

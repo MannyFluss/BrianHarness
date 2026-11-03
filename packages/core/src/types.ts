@@ -147,13 +147,18 @@ export type LogEvent =
       /** finish_reason "length" (the app shows "reply cut off"), or the turn failed (error set) */
       truncated?: boolean;
       /** only on a failed turn (after partial text, or before the first token with text ""): a short code, e.g.
-       *  "stream_incomplete" | "aborted" | "upstream_incomplete" | "http_<status>" | "stream_error" (never a message) */
+       *  "stream_incomplete" | "aborted" | "upstream_incomplete" | "http_<status>" | "stream_error" (never a message),
+       *  or "empty_completion" (an empty reply, retried once and empty again; text "") */
       error?: string;
       /** Addendum 4 (empty opener fix): true on the opener (no user message yet), sent with the fixed hidden user cue
        * OPENER_CUE (same bytes in every arm; never rendered, never a user_turn, cue text never logged) */
       opener_cue?: boolean;
       /** OPENER_CUE_ID ("oc1-" + 8 hex of sha256(cue)) when opener_cue, else null */
       opener_cue_id?: string | null;
+      /** Addendum 4 (empty completion detection): 1 when the first reply was an empty completion and was retried once */
+      empty_retries?: number;
+      /** ms from request start to the end of the empty first attempt (genMs/firstTokenMs include it), else null */
+      empty_retry_ms?: number | null;
     }
   | {
       type: "user_turn";

@@ -71,6 +71,9 @@ function replyMeta(backendId: string, g: GenerateResult | undefined, sealed: boo
   };
 }
 /** a short code only (never err.message: an HTTP error message can quote the response body) */
+/** an upstream that did not run the model: no visible text, finish "stop" or none, 0 (or unreported) completion tokens.
+ *  Covers the live empty done chunk and a 200 with an empty body; never a "length" cut-off or a reply with tokens. */
+const isEmptyCompletion = (g: GenerateResult) => !g.text.trim() && (g.finishReason === "stop" || g.finishReason == null) && (g.usage?.outputTokens ?? 0) === 0;
 const errorCode = (err: unknown): string => {
   const e = err as { code?: unknown; name?: unknown; status?: unknown };
   if (typeof e?.code === "string" && e.code) return e.code;
@@ -227,8 +230,16 @@ export class HarnessSession {
     let partial = "";
     const onTokenLogged = onToken ? (d: string) => { if (d) partial += d; onToken(d); } : undefined;
     let gen: GenerateResult;
+    // empty completion (stop, no content, 0 completion tokens): retried once in this same turn (turn number unchanged);
+    // empty again -> a truncated director_turn {error:"empty_completion"} and the turn fails (the app's error state)
+    let emptyRetryMs: number | null = null;
+    const retryMeta = () => ({ empty_retries: emptyRetryMs === null ? 0 : 1, empty_retry_ms: emptyRetryMs }); // same keys on every director_turn
     try {
       gen = await this.backend.generate({ messages, plan, stateNote, onToken: onTokenLogged, signal: opts.signal });
+      if (isEmptyCompletion(gen)) {
+        emptyRetryMs = systemClock() - t0;
+        gen = await this.backend.generate({ messages, plan, stateNote, onToken: onTokenLogged, signal: opts.signal });
+      }
     } catch (err) {
       // the request / stream failed, after some text was shown (text = what the person saw) or before the first
       // token (text ""): either way one director_turn {truncated:true, finish_reason:null, error} is logged so the
@@ -238,8 +249,14 @@ export class HarnessSession {
       const shown = !!partial;
       this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : { plan, stateNote }), text: partial.trim(), backend: this.backend.id, genMs: systemClock() - t0,
         ...(shown ? { firstTokenMs, streamed: true as const } : {}),
-        ...replyMeta(this.backend.id, { text: "", ...(err && typeof err === "object" ? { maxTokens: (err as { maxTokens?: number }).maxTokens, model: (err as { model?: string }).model } : {}) }, sealedE), truncated: true, error: errorCode(err), ...cueMeta });
+        ...replyMeta(this.backend.id, { text: "", ...(err && typeof err === "object" ? { maxTokens: (err as { maxTokens?: number }).maxTokens, model: (err as { model?: string }).model } : {}) }, sealedE), truncated: true, error: errorCode(err), ...cueMeta, ...retryMeta() });
       throw err;
+    }
+    if (isEmptyCompletion(gen)) {
+      const sealedE = !!this.opts.study;
+      this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : { plan, stateNote }), text: "", backend: this.backend.id, genMs: systemClock() - t0,
+        ...replyMeta(this.backend.id, gen, sealedE), truncated: true, error: "empty_completion", ...cueMeta, ...retryMeta() });
+      throw Object.assign(new Error("The reply came back empty. Please try again."), { code: "empty_completion" });
     }
     const { text } = gen;
     const meta = replyMeta(this.backend.id, gen, !!this.opts.study);
@@ -250,7 +267,7 @@ export class HarnessSession {
     this.plans.push(plan);
     this.transcript.push({ role: "assistant", content: text });
     const sealed = !!this.opts.study;
-    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealed ? { sealed } : { plan, stateNote }), text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}), ...meta, truncated, ...cueMeta });
+    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealed ? { sealed } : { plan, stateNote }), text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}), ...meta, truncated, ...cueMeta, ...retryMeta() });
     // server-side defaults; the renderer overrides both via markShown() with what it displayed
     this.promptShownAt = this.clock();
     this.promptFirstTokenAt = streamed ? firstTokenClock : undefined;
