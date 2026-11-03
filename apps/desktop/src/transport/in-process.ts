@@ -160,6 +160,11 @@ type WebSettings = {
   providerChosen?: boolean;
 };
 const SETTINGS_KEY = "settings";
+/**
+ * Model for the resolved default (stored token, no picker choice): gpt-oss:20b-cloud, the route verified live
+ * (max_tokens 2048, opener cue, composer lock). The picker's model list and SPIDER_CLOUD_DEFAULT_MODEL are unchanged.
+ */
+export const SPIDER_APP_DEFAULT_MODEL = "gpt-oss:20b-cloud";
 export const SPIDER_NO_CORS = "Spider Cloud needs the native app: the Worker sends no CORS headers for browsers.";
 
 function guessPlatform() {
@@ -232,14 +237,14 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
   };
   /**
    * Demo default (Nov 3 2026, launch/routing only): with no explicit picker choice, a stored Spider Cloud token
-   * (pasted or Sign in with Apple) in the native app means Spider Cloud with its default model, never Mock.
+   * (pasted or Sign in with Apple) in the native app means Spider Cloud with SPIDER_APP_DEFAULT_MODEL, never Mock.
    * No model-list fetch is involved, so a slow or failing /v1/models can't delay or change the choice.
    */
   const loadSettings = async (): Promise<WebSettings> => {
     const s = await loadStoredSettings();
     if (s.provider !== "mock" || s.providerChosen || !nativeFetch) return s;
     const token = await readApiKey(credentials, SPIDER_CREDENTIAL_ID).catch(() => null);
-    return token ? { ...s, provider: "spider-cloud", model: undefined } : s;
+    return token ? { ...s, provider: "spider-cloud", model: SPIDER_APP_DEFAULT_MODEL } : s;
   };
   /** the Spider token changed: drop a backend built from the resolved default so the next session uses the new one */
   const resetDefaultBackend = async () => {

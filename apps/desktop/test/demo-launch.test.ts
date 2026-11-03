@@ -1,5 +1,5 @@
-// Demo launch routing (Nov 3 2026): a stored Spider Cloud token in the native app means Spider Cloud with its
-// default model on a fresh install (never Mock), the model list never gates it, an explicit picker choice wins,
+// Demo launch routing (Nov 3 2026): a stored Spider Cloud token in the native app means Spider Cloud with
+// gpt-oss:20b-cloud (the live-verified route) on a fresh install (never Mock), the model list never gates it, an explicit picker choice wins,
 // signing in mid-launch switches the next chat, plain chat never uploads as a study session, and the
 // study_start upload is unchanged. Fake fetch only; the token below is a fake literal.
 import { test } from "node:test";
@@ -12,7 +12,7 @@ const enc = new TextEncoder();
 const sse = (parts: string[]) => new Response(new ReadableStream({ start(c) { for (const p of parts) c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: p } }] })}\n\n`)); c.enqueue(enc.encode("data: [DONE]\n\n")); c.close(); } }), { status: 200, headers: { "content-type": "text/event-stream" } });
 
 function worker(models: "ok" | "fail" | "hang" = "ok") {
-  const log: Array<{ path: string; model?: string; kind?: string }> = [];
+  const log: Array<{ path: string; model?: string; kind?: string; max_tokens?: number }> = [];
   const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const u = new URL(String(input));
     const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
@@ -25,7 +25,7 @@ function worker(models: "ok" | "fail" | "hang" = "ok") {
     }
     if (u.pathname === "/v1/chat/completions") {
       const body = JSON.parse(String(init?.body));
-      log.push({ path: u.pathname, model: body.model });
+      log.push({ path: u.pathname, model: body.model, max_tokens: body.max_tokens });
       return body.stream ? sse(["Hey ", "there, ", "what's up?"]) : json({ choices: [{ message: { content: "Hey there, what's up?" } }] });
     }
     if (u.pathname === "/v1/sessions") { log.push({ path: u.pathname, kind: JSON.parse(String(init?.body)).kind }); return json({ id: "x" }, 201); }
@@ -44,27 +44,28 @@ function app(opts: { models?: "ok" | "fail" | "hang"; native?: boolean; kv?: { s
   return { t, w, kv };
 }
 
-test("demo launch: fresh install with a stored token -> Spider Cloud default model, streamed opener, no Mock", async () => {
+test("demo launch: fresh install with a stored token -> Spider Cloud gpt-oss:20b-cloud, streamed opener, no Mock", async () => {
   const { t: first, kv } = app();
   await first.providers.setApiKey("spider", TOKEN); // e.g. Keychain token carried over a TestFlight update
   const { t, w } = app({ kv });
   const info = await t.info();
-  assert.equal(info.backend, "spider-cloud:gemma4:cloud");
+  assert.equal(info.backend, "spider-cloud:gpt-oss:20b-cloud");
   const toks: string[] = [];
   const d = await t.newSession((tok) => toks.push(tok));
   assert.equal(d.director.text, "Hey there, what's up?");
   assert.ok(toks.length >= 3, "streamed");
-  assert.ok(w.log.some((l) => l.path === "/v1/chat/completions" && l.model === "gemma4:cloud"));
+  assert.ok(w.log.some((l) => l.path === "/v1/chat/completions" && l.model === "gpt-oss:20b-cloud"));
+  assert.ok(w.log.filter((l) => l.path === "/v1/chat/completions").every((l) => l.max_tokens === 2048), "gpt-oss per-model max_tokens");
   assert.ok(!w.log.some((l) => l.path === "/v1/models"), "the model list is not on the launch path");
 });
 
 for (const models of ["fail", "hang"] as const) {
-  test(`demo launch: model list ${models} -> chat still on Spider Cloud default model`, async () => {
+  test(`demo launch: model list ${models} -> chat still on Spider Cloud gpt-oss:20b-cloud`, async () => {
     const { t, w } = app({ models });
     await t.providers.setApiKey("spider", TOKEN);
     const d = await t.newSession();
     assert.equal(d.director.text, "Hey there, what's up?");
-    assert.ok(w.log.some((l) => l.path === "/v1/chat/completions" && l.model === "gemma4:cloud"));
+    assert.ok(w.log.some((l) => l.path === "/v1/chat/completions" && l.model === "gpt-oss:20b-cloud"));
   });
 }
 
@@ -74,7 +75,7 @@ test("demo launch: no token -> Mock (unchanged); a token saved before the first 
   await t.providers.setApiKey("spider", TOKEN); // same reset as BHAppleAuth onTokenSaved
   const d = await t.newSession();
   assert.equal(d.director.text, "Hey there, what's up?");
-  assert.equal((await t.info()).backend, "spider-cloud:gemma4:cloud");
+  assert.equal((await t.info()).backend, "spider-cloud:gpt-oss:20b-cloud");
   assert.ok(w.log.some((l) => l.path === "/v1/chat/completions"));
 });
 
