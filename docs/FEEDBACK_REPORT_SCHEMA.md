@@ -111,13 +111,14 @@ its 1–5 row `[data-rating-option]`, "What hooked you?" and the blinding check 
   says nothing. Picking an option doesn't change the snapshot, so it doesn't even add a `screen` event. Notices
   inside the rating UI aren't read. Keyboard Enter/Space on a rating button reaches the recorder as the same click.
   No keydown or focus events are recorded.
-- **Core backstop** (`ratingScrubEvent`, at record time and again at build time): it drops `rating`, `ratings`,
-  `absorption`, `hooked` and `blindGuess` keys. Any tap or control named with a 1–5 digit on a rating screen
-  becomes `rating option`. Generic rating controls are cut back to `{label|name, control, screen}`.
+- **Core backstop** (`ratingScrubEvent`, at record time and again at build time): it drops every key that starts
+  with `rating`, `absorption`, `hooked` or `blind_guess`/`blindGuess` (case-insensitive prefix, so `absorption_value`
+  too). Any tap or control named with a 1–5 digit on a rating screen becomes `rating option`, whatever its control
+  type (radio, button, ...), with its state stripped. Generic rating controls are cut back to `{label|name, control, screen}`.
 - **Ratings reach the recorder by no other path.** `rate()` records nothing, a failed `rate()` is only
   `console.warn`ed, and the overlay names (`turn-probe`, `session-rating`) carry no value.
 - `tools/phaseD/check_blinding.mjs` checks every report it finds: a `feedback_report` line, or an exported
-  `bh-feedback-*.json`. It flags rating keys, a 1–5 digit as a tap name or radio label, any state on a generic
+  `bh-feedback-*.json`. It flags rating keys (same prefixes), a 1–5 digit as a tap name or radio label, any state on a generic
   rating control, and checked radios on a rating screen.
 - Tests: `apps/desktop/test/feedback-rating.test.ts` renders the real `Rating.tsx` markup, rates the probe and the
   session rating (with the blinding check and "What hooked you?"), opens Report, and checks the report in study

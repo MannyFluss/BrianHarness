@@ -219,8 +219,9 @@ test("away time: hidden time inside the feedback bracket (e.g. the iOS share she
   const b = new FeedbackBracket();
   const t0 = 1_000_000;
   b.open(t0); // Report opened
-  // share sheet: hidden for 25 min while the sheet is still open -> 0 ms away
-  assert.equal(b.awayMs(t0 + 1000, t0 + 1000 + 25 * 60_000), 0);
+  // share sheet: hidden for 25 min while the sheet is still open -> credit capped at 10 min (Researcher cap) -> 15 min away
+  assert.equal(b.awayMs(t0 + 1000, t0 + 1000 + 25 * 60_000), 15 * 60_000);
+  assert.equal(b.awayMs(t0 + 1000, t0 + 1000 + 5 * 60_000), 0);
   b.close(t0 + 26 * 60_000);
   // hidden 1 min before closing the sheet, then 30 min after: only the 30 min count
   assert.equal(b.awayMs(t0 + 25 * 60_000, t0 + 56 * 60_000), 30 * 60_000);

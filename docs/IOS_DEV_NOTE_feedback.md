@@ -54,7 +54,9 @@ shown over the bridge view controller. "Save to Files", AirDrop and Mail are all
 The repo has no native source, so this can't be settled from the web side. The web side is safe either way:
 
 - The app's only away rule is App.tsx's "hidden for ≥ 20 min (`AWAY_MS`) → session rating, then a new session".
-  Time hidden between `feedback_open` and `feedback_closed` no longer counts (`feedback/away.ts`).
+  Time hidden between `feedback_open` and `feedback_closed` no longer counts (`feedback/away.ts`), up to
+  `FEEDBACK_AWAY_CREDIT_MAX_MS` (10 min) per hidden span: a sheet left open in the background still ends the session
+  (3 h hidden = 2 h 50 min away). The sheet is not auto-closed.
 - Nothing listens to window `blur` for accounting. A composer blur is only a logged typing event and isn't a feature.
 
 What would help, on an iPhone and an iPad:

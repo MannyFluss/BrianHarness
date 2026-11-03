@@ -24,7 +24,7 @@ const walk = (p) => { if (statSync(p).isDirectory()) for (const f of readdirSync
 const REPORT_SCHEMA = "brianharness-feedback/1";
 function isReportFile(p) { if (!p.endsWith(".json")) return false; try { return JSON.parse(readFileSync(p, "utf8"))?.schema === REPORT_SCHEMA; } catch { return false; } }
 const isReport = (e) => e?.type === "feedback_report" || e?.schema === REPORT_SCHEMA;
-const RATING_KEYS = /^(?:rating|ratings|rating[_-]?value|absorption|hooked|blind[_-]?guess)$/i;
+const RATING_KEYS = /^(?:rating|absorption|hooked|blind[_-]?guess)/i; // by prefix (absorption_value too), as ratingScrubEvent
 const GENERIC = new Set(["rating option", "blinding-check option", "rating control", "rating text field"]);
 const DIGIT = /^\s*[1-5]\s*$/;
 const STATE_KEYS = ["value", "checked", "pressed", "selected", "index", "disabled", "aria-label", "ariaLabel"];
