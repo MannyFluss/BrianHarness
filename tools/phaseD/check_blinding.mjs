@@ -63,6 +63,8 @@ for (const f of files) {
   if (standalone) { reports++; }
   if (!standalone && typeof start.study.protocol !== "number") { practice++; console.log(`PRACTICE ${f}: study session without protocol (build 1438) -> exclude`); }
   const bad = (line, why) => { leaks++; console.log(`LEAK ${f}:${line}: ${why}`); };
+  // plain-chat profile (Nov 3 2026): profile is logged on NON-study session_start only; a study session never has it
+  lines.forEach((e, i) => { if (e && typeof e === "object" && "profile" in e) bad(i + 1, `profile field in a study session (${e.type})`); });
   lines.forEach((e, i) => {
     if (e.type === "director_turn" && ("plan" in e || "stateNote" in e || e.sealed !== true)) bad(i + 1, "director_turn not sealed (plan/stateNote in a study session)");
     // the prompt includes the arm-dependent state note, so its token count identifies the arm (Nov 3 2026 blinding check)

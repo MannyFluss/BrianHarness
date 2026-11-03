@@ -9,6 +9,10 @@ import {
 } from "@brianharness/core/browser";
 import { createInProcessTransport } from "../src/transport/in-process.ts";
 
+// Plain chat (Nov 3 2026) builds no tagger: this suite exercises the Director-profile path, which a non-study session
+// only takes when the study assignment errors (secure store unreadable). Keychain reads throw here on purpose.
+const brokenSecret = { get: async () => { throw new Error("secure store unavailable (test)"); }, set: async () => { throw new Error("secure store unavailable (test)"); }, remove: async () => {}, keys: async () => [] };
+
 const CLOUD = "https://fake-ollama-cloud.test";
 const TURNS = ["my sourdough starter bubbled over again", "the crumb on this loaf is so open", "i fed it rye flour this time",
   "work was fine i guess", "anyway the oven spring was wild", "i want to try a 80 percent hydration dough"];
@@ -43,7 +47,7 @@ async function run(opts: { provider: "mock" | "ollama-cloud" | "openai"; extract
     let exported: ExportFile[] = [];
     const settingsKV = opts.settingsKV ?? new MemoryKV();
     const t = createInProcessTransport({
-      storageKV: new MemoryKV(), settingsKV, credentials: new KVCredentialStore(new MemoryKV()), fetchImpl: f, streaming: false,
+      storageKV: new MemoryKV(), settingsKV, secretKV: brokenSecret, credentials: new KVCredentialStore(new MemoryKV()), fetchImpl: f, streaming: false,
       ollamaCloudUrl: CLOUD, platform: "test", download: (files) => ((exported = files), true),
     });
     if (opts.key !== false) await t.providers.setApiKey("ollama-cloud", "fake-ollama-key");

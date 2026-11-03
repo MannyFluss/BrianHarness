@@ -5,6 +5,10 @@ import assert from "node:assert/strict";
 import { EXTRACTOR_SYSTEM_PROMPT_V2, KVCredentialStore, MemoryKV, type ExportFile } from "@brianharness/core/browser";
 import { createInProcessTransport, SPIDER_NO_CORS } from "../src/transport/in-process.ts";
 
+// Plain chat (Nov 3 2026) builds no tagger: the extractor test exercises the Director-profile path, which a non-study
+// session only takes when the study assignment errors (secure store unreadable). Keychain reads throw there on purpose.
+const brokenSecret = { get: async () => { throw new Error("secure store unavailable (test)"); }, set: async () => { throw new Error("secure store unavailable (test)"); }, remove: async () => {}, keys: async () => [] };
+
 const TOKEN = "bhd_fake_device_token_1234";
 const TURNS = ["my sourdough starter bubbled over again", "the crumb on this loaf is so open", "i fed it rye flour this time",
   "work was fine i guess", "anyway the oven spring was wild", "i want to try a 80 percent hydration dough"];
@@ -33,12 +37,12 @@ function fakeWorker(mode: "ok" | "401" | "429" = "ok") {
   return { f, log };
 }
 
-async function app(mode: "ok" | "401" | "429" = "ok", native = true) {
+async function app(mode: "ok" | "401" | "429" = "ok", native = true, directorProfile = false) {
   const w = fakeWorker(mode);
   const credKV = new MemoryKV();
   let exported: ExportFile[] = [];
   const t = createInProcessTransport({
-    storageKV: new MemoryKV(), settingsKV: new MemoryKV(), credentials: new KVCredentialStore(credKV), fetchImpl: w.f, nativeFetch: native, streaming: true,
+    storageKV: new MemoryKV(), settingsKV: new MemoryKV(), ...(directorProfile ? { secretKV: brokenSecret } : {}), credentials: new KVCredentialStore(credKV), fetchImpl: w.f, nativeFetch: native, streaming: true,
     platform: "test", download: (files) => ((exported = files), true),
   });
   return { t, w, credKV, exported: () => exported };
@@ -64,7 +68,7 @@ test("spider cloud app: token stored at credentials/spider, picker lists /v1/mod
 });
 
 test("spider cloud app: extractor calls gemma4:cloud through the Worker at turn 6; final says llm-extract", async () => {
-  const { t, w, exported } = await app();
+  const { t, w, exported } = await app("ok", true, true);
   await t.providers.setApiKey("spider", TOKEN);
   await t.providers.select("spider-cloud", "gpt-oss:20b-cloud");
   await t.newSession();

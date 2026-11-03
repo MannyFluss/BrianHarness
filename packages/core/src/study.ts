@@ -219,7 +219,18 @@ export function recoverNextIndex(records: StudySessionRecord[], scheduleHash: st
   return mine.some((r) => r.index === h && r.valid) ? h + 1 : h;
 }
 
+/**
+ * Why the last assign() returned null. Only "off" (study not started / stopped) and "finished" (all sessions done)
+ * let a session run as plain chat; "error" / "lost" keep today's behaviour (Director prompt, no study fields).
+ */
+export type StudyNoneReason = "off" | "finished" | "lost" | "error";
+
 export class StudyController {
+  private lastNone: StudyNoneReason | null = null;
+  /** why the most recent assign() returned null (null = it returned an assignment, or assign was never called) */
+  noStudyReason(): StudyNoneReason | null {
+    return this.lastNone;
+  }
   constructor(
     private secret: SecretStore,
     /** LEGACY progress location (settings KV, builds <= E): read once, migrated into the secure store, removed */
@@ -351,10 +362,13 @@ export class StudyController {
    * null = study off, finished, or the secure store failed (the session then runs adaptive, unlogged).
    */
   async assign(sessionId: string, last: (sessionId: string) => number | StudySessionInfo): Promise<StudyAssignment | null> {
-    try { await this.ensureProtocol(); } catch { return null; }
+    this.lastNone = "error"; // until the outcome below is known (an exception counts as an error, never "off")
+    const none = (r: StudyNoneReason) => { this.lastNone = r; return null; };
+    try { await this.ensureProtocol(); } catch { return none("error"); }
     let p: Progress;
-    try { p = await this.progress(); } catch { return null; } // secure store failed: no study fields
-    if (!p.enabled || p.lost) return null;
+    try { p = await this.progress(); } catch { return none("error"); } // secure store failed: no study fields
+    if (p.lost) return none("lost");
+    if (!p.enabled) return none("off");
     let index = p.next;
     let next = p.next;
     let reissueOf: string | undefined;
@@ -373,15 +387,16 @@ export class StudyController {
     } else {
       next = index + 1;
     }
-    if (index > STUDY_SESSIONS) return null;
+    if (index > STUDY_SESSIONS) return none("finished");
     let sch: Awaited<ReturnType<StudyController["schedule"]>>;
     try {
       sch = await this.schedule();
     } catch {
-      return null;
+      return none("error");
     }
-    if (!sch) return null;
-    try { await this.saveProgress({ enabled: true, next, last: { sessionId, index } }); } catch { return null; } // never hand out an index we could not record
+    if (!sch) return none("error");
+    try { await this.saveProgress({ enabled: true, next, last: { sessionId, index } }); } catch { return none("error"); } // never hand out an index we could not record
+    this.lastNone = null;
     return {
       study: STUDY_ID, index, total: STUDY_SESSIONS, scheduleHash: await sha256Hex(sch.raw), adaptation: sch.s.order[index - 1]!, protocol: sch.s.protocol ?? STUDY_PROTOCOL_VERSION,
       ...(reissueOf ? { reissueOf } : {}), ...(manual !== null ? { manualReissue: true as const, ...(p.manualReissueReason ? { reissueReason: p.manualReissueReason } : {}) } : {}),

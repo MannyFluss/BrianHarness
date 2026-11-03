@@ -10,7 +10,7 @@ import type { HarnessStorage } from "./platform/storage.js";
 import { systemClock, type Clock } from "./platform/env.js";
 import { isFillerOnly, sessionTitle } from "./title.js";
 import type { FeedbackLogInput, RatingRecord, TypingEvent } from "./types.js";
-import { STUDY_MIN_USER_TURNS, studySessionRecord, type StudyAssignment, type StudySessionInfo, type StudySessionRecord, type StudyStatus } from "./study.js";
+import { STUDY_MIN_USER_TURNS, studySessionRecord, type StudyNoneReason, type StudyAssignment, type StudySessionInfo, type StudySessionRecord, type StudyStatus } from "./study.js";
 import { sessionExportName, type ExportFile } from "./zip.js";
 import { randomId } from "./platform/env.js";
 import type { TopicTagger, TopicTaggerSpec } from "./tagger.js";
@@ -49,7 +49,7 @@ export class HarnessHost {
       seed?: () => number;
       clock?: Clock;
       /** Phase D blinded study (StudyController); absent = every session adaptive, no study fields */
-      study?: { assign(sessionId: string, last: (id: string) => number | StudySessionInfo): Promise<StudyAssignment | null>; status?(): Promise<StudyStatus> };
+      study?: { assign(sessionId: string, last: (id: string) => number | StudySessionInfo): Promise<StudyAssignment | null>; status?(): Promise<StudyStatus>; noStudyReason?(): StudyNoneReason | null };
       /** called after a session ended (new chat, app exit): e.g. iOS BHExport.saveToDocuments */
       onSessionEnd?: (sessionId: string) => void | Promise<void>;
     },
@@ -79,13 +79,23 @@ export class HarnessHost {
     }
     const sessionId = this.cfg.storage?.newSessionId() ?? `mem-${randomId(6)}`;
     let study: StudyAssignment | null = null;
+    // the chat profile is chosen ONCE, here: plain = no study assignment because there is no study (no controller,
+    // study off, or all sessions done). An assignment error / lost progress never yields plain (it keeps the
+    // Director prompt, as before); a controller that cannot say why it returned null is treated the same way.
+    let plain = false;
     try {
-      study = (await this.cfg.study?.assign(sessionId, (id) => this.sessionInfo(id))) ?? null;
+      const sc = this.cfg.study;
+      study = (await sc?.assign(sessionId, (id) => this.sessionInfo(id))) ?? null;
+      if (!study) {
+        const why = sc ? (sc.noStudyReason?.() ?? null) : "off";
+        plain = why === "off" || why === "finished";
+      }
     } catch (err) {
       console.warn("[brianharness] study assignment failed; this session runs adaptive, unlogged:", (err as Error).message);
     }
     this.session = new HarnessSession({
       sessionId,
+      ...(plain ? { profile: "plain" as const } : {}),
       ...(study ? { adaptation: study.adaptation, study: { id: study.study, index: study.index, total: study.total, scheduleHash: study.scheduleHash, protocol: study.protocol, ...(study.reissueOf ? { reissueOf: study.reissueOf } : {}), ...(study.manualReissue ? { manualReissue: true as const } : {}), ...(study.reissueReason ? { reissueReason: study.reissueReason } : {}), ...(study.progressRecovered ? { progressRecovered: true as const } : {}) } } : {}),
       userId: this.cfg.userId,
       backend: await this.cfg.backend(),
@@ -93,6 +103,7 @@ export class HarnessHost {
       logRawEvents: this.cfg.logRawEvents ?? true,
       seed: this.cfg.seed ? this.cfg.seed() : this.clock() % 100000,
       ...(await (async () => {
+        if (plain) return {}; // plain chat tags nothing: no tagger / extractor is built for it
         const c = await this.sessionTagger({ study: !!study });
         return { tagger: c.tagger, ...(c.fallback ? { taggerFallback: c.fallback } : {}) };
       })()),

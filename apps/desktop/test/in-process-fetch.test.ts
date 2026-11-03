@@ -5,6 +5,10 @@ import assert from "node:assert/strict";
 import { KVCredentialStore, MemoryKV } from "@brianharness/core/browser";
 import { createInProcessTransport } from "../src/transport/in-process.ts";
 
+// Plain chat (Nov 3 2026) builds no tagger: the tagger check exercises the Director-profile path, which a non-study
+// session only takes when the study assignment errors (secure store unreadable). Keychain reads throw there on purpose.
+const brokenSecret = { get: async () => { throw new Error("secure store unavailable (test)"); }, set: async () => { throw new Error("secure store unavailable (test)"); }, remove: async () => {}, keys: async () => [] };
+
 test("fetchImpl reaches detection, all backends and the Ollama tagger", async () => {
   const calls: string[] = [];
   const fakeFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -25,7 +29,7 @@ test("fetchImpl reaches detection, all backends and the Ollama tagger", async ()
   try {
     const kv = new MemoryKV();
     const t = createInProcessTransport({
-      storageKV: new MemoryKV(), settingsKV: kv, credentials: new KVCredentialStore(new MemoryKV()),
+      storageKV: new MemoryKV(), settingsKV: kv, secretKV: brokenSecret, credentials: new KVCredentialStore(new MemoryKV()),
       fetchImpl: fakeFetch, tagger: { kind: "ollama", model: "fake:1b" }, platform: "test",
     });
     await t.providers.setEndpoint!("ollama", "http://192.168.0.114:11434");

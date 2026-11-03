@@ -120,6 +120,8 @@ export type LogEvent =
       userId: string;
       backend: string;
       sources: string[];
+      /** plain chat (no study assignment at session start). Never present on a study session (not even "study"). */
+      profile?: "plain";
       /** blinded study session: index (1..total) + sha256 of the sealed schedule. NEVER the mode. */
       study?: { id: string; index: number; total: number; scheduleHash: string };
     }

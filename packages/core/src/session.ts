@@ -5,7 +5,7 @@
  * Used identically by the desktop app (Electron main process) and the sim runner.
  */
 import type { ChatMessage, DirectorPlan, ExtractorFallbackReason, ExtractorOutcomeRecord, FeatureMap, FeedbackLogInput, FeedbackLogRecord, FrameState, LogEvent, RatingRecord, TypingEvent } from "./types.js";
-import { DIRECTOR_SYSTEM_PROMPT, OPENER_CUE, OPENER_CUE_ID, type GenerateResult, type ModelBackend } from "./backends.js";
+import { DIRECTOR_SYSTEM_PROMPT, OPENER_CUE, PLAIN_SYSTEM_PROMPT, OPENER_CUE_ID, type GenerateResult, type ModelBackend } from "./backends.js";
 import { OPEN_TOPIC, baselineRotation, planBaselineTurn, planTurn, type DirectorPolicyOptions } from "./director.js";
 import { estimateEngagement, eegQuality, textFeatures, type EegBlendOptions, type EngagementContext } from "./engagement.js";
 import { InterestMap } from "./interest-map.js";
@@ -44,6 +44,13 @@ export interface HarnessSessionOptions {
   adaptation?: Adaptation;
   /** blinded study session: logged in session_start; plans / state notes are sealed in the log */
   study?: { id: string; index: number; total: number; scheduleHash: string; protocol?: number; reissueOf?: string; manualReissue?: true; reissueReason?: string; progressRecovered?: true };
+  /**
+   * "plain": a chat session with NO study assignment (HarnessHost.newSession decides once, at session start; never
+   * re-evaluated, never set because of an error). Plain = PLAIN_SYSTEM_PROMPT, no plan / state note, no topic tagging,
+   * no interest-map writes. Logged as profile:"plain" on session_start only. Ignored when `study` is set: a study
+   * session never has a profile field and its requests are byte-identical to 601300f.
+   */
+  profile?: "plain";
   /** the app wanted llm-extract but could not build one (no key / mock or local model): logged as the fallback reason */
   taggerFallback?: "no_key" | "mock_or_local";
   /** called once per session per reason when the extractor is unavailable (Electron / sidecar: stderr) */
@@ -155,6 +162,8 @@ export class HarnessSession {
   private rng: Rng;
   private clock: () => number;
   private readonly baseline: boolean;
+  /** plain-chat profile (fixed at construction; see HarnessSessionOptions.profile) */
+  readonly plain: boolean;
   private rotation: string[] = [];
 
   constructor(private opts: HarnessSessionOptions) {
@@ -164,6 +173,7 @@ export class HarnessSession {
     this.id = opts.sessionId ?? opts.store?.newSessionId() ?? `mem-${randomId(6)}`;
     this.map = opts.map ?? opts.store?.loadMap(opts.userId) ?? InterestMap.fresh(opts.userId);
     this.baseline = opts.adaptation === "baseline";
+    this.plain = opts.profile === "plain" && !opts.study && !opts.adaptation;
     if (this.baseline) {
       // ledger off: a shadow copy takes this session's updates (logged as usual), the saved map is untouched
       this.map = InterestMap.fromJSON(JSON.parse(JSON.stringify(this.map.toJSON())));
@@ -192,7 +202,7 @@ export class HarnessSession {
     for (const s of this.sources) await s.start?.();
     this.checkExtractorWarning(); // started without an extractor (no key / mock or local model)
     const st = this.opts.study;
-    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash, ...(st.protocol !== undefined ? { protocol: st.protocol } : {}) }, ...(st.reissueOf ? { reissueOf: st.reissueOf } : {}), ...(st.manualReissue ? { manualReissue: true } : {}), ...(st.reissueReason ? { reissueReason: st.reissueReason } : {}), ...(st.progressRecovered ? { progressRecovered: true } : {}) } : {}) });
+    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(this.plain ? { profile: "plain" as const } : {}), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash, ...(st.protocol !== undefined ? { protocol: st.protocol } : {}) }, ...(st.reissueOf ? { reissueOf: st.reissueOf } : {}), ...(st.manualReissue ? { manualReissue: true } : {}), ...(st.reissueReason ? { reissueReason: st.reissueReason } : {}), ...(st.progressRecovered ? { progressRecovered: true } : {}) } : {}) });
     return this.directorTurn(opts);
   }
 
@@ -207,6 +217,7 @@ export class HarnessSession {
   }
 
   private async directorTurn(opts: TurnOptions = {}): Promise<DirectorTurnResult> {
+    if (this.plain) return this.plainTurn(opts);
     const plan = this.baseline ? planBaselineTurn(this.turn, this.plans, this.rotation, this.opts.policy) : planTurn(this.turn, this.map, this.frame, this.plans, this.rng, this.opts.policy);
     const stateNote = this.baseline ? buildBaselineStateNote(plan) : buildStateNote(this.frame, this.map, plan);
     // opener (no user message yet): a fixed hidden user cue, same in every arm (backends.ts OPENER_CUE)
@@ -217,6 +228,27 @@ export class HarnessSession {
       { role: "system", content: stateNote },
       ...(openerCue ? [{ role: "user" as const, content: OPENER_CUE }] : []),
     ];
+    return this.generateTurn(messages, plan, stateNote, openerCue, opts);
+  }
+
+  /**
+   * Plain chat: ONE leading system message (PLAIN_SYSTEM_PROMPT), the transcript, and the opener cue on turn 0, so
+   * the latest user message is always the last message. No plan, no state note (nothing trails the user turn).
+   * The opener cue and the empty-completion retry are the shared generateTurn path, unchanged.
+   */
+  private plainTurn(opts: TurnOptions): Promise<DirectorTurnResult> {
+    const openerCue = !this.transcript.some((m) => m.role === "user");
+    const messages: ChatMessage[] = [
+      { role: "system", content: PLAIN_SYSTEM_PROMPT },
+      ...this.transcript,
+      ...(openerCue ? [{ role: "user" as const, content: OPENER_CUE }] : []),
+    ];
+    // backends take a plan (the Mock composes from it); plain passes a fixed open one that is never logged or stored
+    const plan: DirectorPlan = { turn: this.turn, mode: "relax", topic: OPEN_TOPIC, style: "open", reason: "plain chat" };
+    return this.generateTurn(messages, plan, "", openerCue, opts);
+  }
+
+  private async generateTurn(messages: ChatMessage[], plan: DirectorPlan, stateNote: string, openerCue: boolean, opts: TurnOptions): Promise<DirectorTurnResult> {
     const cueMeta = { opener_cue: openerCue, opener_cue_id: openerCue ? OPENER_CUE_ID : null }; // same keys on every director_turn
     const t0 = systemClock();
     let firstTokenMs: number | undefined;
@@ -256,14 +288,14 @@ export class HarnessSession {
       // consumed, not retried: the person's next message is user_turn <this number>, answered by director_turn +1.
       const sealedE = !!this.opts.study;
       const shown = !!partial;
-      this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : { plan, stateNote }), text: partial.trim(), backend: this.backend.id, genMs: systemClock() - t0,
+      this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : this.plain ? {} : { plan, stateNote }), text: partial.trim(), backend: this.backend.id, genMs: systemClock() - t0,
         ...(shown ? { firstTokenMs, streamed: true as const } : {}),
         ...replyMeta(this.backend.id, { text: "", ...(err && typeof err === "object" ? { maxTokens: (err as { maxTokens?: number }).maxTokens, model: (err as { model?: string }).model } : {}) }, sealedE), truncated: true, error: errorCode(err), ...cueMeta, ...retryMeta() });
       throw err;
     }
     if (isEmptyCompletion(gen)) {
       const sealedE = !!this.opts.study;
-      this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : { plan, stateNote }), text: "", backend: this.backend.id, genMs: systemClock() - t0,
+      this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealedE ? { sealed: sealedE } : this.plain ? {} : { plan, stateNote }), text: "", backend: this.backend.id, genMs: systemClock() - t0,
         ...replyMeta(this.backend.id, gen, sealedE), truncated: true, error: "empty_completion", ...cueMeta, ...retryMeta() });
       throw Object.assign(new Error("The reply came back empty. Please try again."), { code: "empty_completion" });
     }
@@ -273,10 +305,10 @@ export class HarnessSession {
     const streamed = firstTokenMs !== undefined;
     if (user && !streamed && text) onToken!(text); // non-streaming backend: one delta with the whole text
     const genMs = systemClock() - t0;
-    this.plans.push(plan);
+    if (!this.plain) this.plans.push(plan);
     this.transcript.push({ role: "assistant", content: text });
     const sealed = !!this.opts.study;
-    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealed ? { sealed } : { plan, stateNote }), text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}), ...meta, truncated, ...cueMeta, ...retryMeta() });
+    this.log({ type: "director_turn", t: nowIso(), turn: this.turn, ...(sealed ? { sealed } : this.plain ? {} : { plan, stateNote }), text, backend: this.backend.id, genMs, ...(streamed ? { firstTokenMs, streamed } : {}), ...meta, truncated, ...cueMeta, ...retryMeta() });
     // server-side defaults; the renderer overrides both via markShown() with what it displayed
     this.promptShownAt = this.clock();
     this.promptFirstTokenAt = streamed ? firstTokenClock : undefined;
@@ -285,8 +317,9 @@ export class HarnessSession {
 
   /** Process the user's reply and its telemetry, then produce the Director's next turn. */
   async reply(text: string, events: TypingEvent[] = [], sentAt = this.clock(), opts: TurnOptions = {}): Promise<{ user: UserTurnResult; director: DirectorTurnResult }> {
-    const tags = await this.tagger.tag(text);
-    this.checkExtractorWarning();
+    // plain: no topic tagging at all (command words like "Repeat" / "Test" never become topics; no extractor calls)
+    const tags = this.plain ? [] : await this.tagger.tag(text);
+    if (!this.plain) this.checkExtractorWarning();
     const user = this.observeUser(text, sanitizeTypingEvents(events), sentAt, tags);
     this.turn += 1;
     const director = await this.directorTurn(opts);
@@ -321,6 +354,19 @@ export class HarnessSession {
     const plan = this.plans[this.plans.length - 1];
     this.frame = { turn: this.turn, engagement: score, baseline, lift: score - (this.frame?.baseline ?? score), features, mentionedTopics: mentioned, lastPlan: plan };
     this.transcript.push({ role: "user", content: text });
+    if (this.plain) {
+      // plain chat: the turn is logged (typing telemetry, same keys), but nothing is learned or steered: no credit
+      // assignment, no interest map update / save, no interest_update line (the saved map stays exactly as it was)
+      for (const src of this.sources) src.clear(sentAt);
+      this.log({
+        type: "user_turn", t: nowIso(), turn: this.turn, text, features: features, engagement: score, baseline, mentionedTopics: [],
+        prompt: { ...(this.promptFirstTokenAt !== undefined ? { firstTokenAt: this.promptFirstTokenAt } : {}), completeAt: this.promptShownAt },
+        ...(this.opts.logRawEvents ? { rawEvents: events } : {}),
+        keyGaps: keyGaps(events, window),
+        ...keysBeforeComplete(events, window.from),
+      });
+      return { frame: this.frame, hypothesis: null };
+    }
 
     // credit assignment: the probed topic(s), spontaneous mentions, and the question style
     const obs: Array<[string, number, number]> = [];
@@ -417,7 +463,7 @@ export class HarnessSession {
       ...outcome,
     });
     this.log({ type: "session_end", t: nowIso(), turns: this.turn, ...outcome });
-    if (!this.baseline) this.opts.store?.saveMap(this.map);
+    if (!this.baseline && !this.plain) this.opts.store?.saveMap(this.map);
   }
 
   /**
@@ -508,6 +554,10 @@ export class HarnessSession {
         sessionId: this.id, userId: this.userId, backend: this.backend.id, turn: this.turn, frame: this.frame, plan: null, hypothesis: null, topTopics: [], topStyles: [],
         study: { index: st.index, total: st.total }, ...(r ? { extractorWarning: extractorWarningText(r) } : {}),
       };
+    }
+    if (this.plain) {
+      // plain chat learns nothing this session: no plan, hypothesis or topics (titles fall back to the user's text)
+      return { sessionId: this.id, userId: this.userId, backend: this.backend.id, turn: this.turn, frame: this.frame, plan: null, hypothesis: null, topTopics: [], topStyles: [] };
     }
     return {
       sessionId: this.id,

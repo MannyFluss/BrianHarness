@@ -48,7 +48,8 @@ test("browser bundle runs a full mock session in a bare VM (no process/require/B
     const creds = new BH.KVCredentialStore(kv);
     await creds.modify("openai", async () => ({ type: "api_key", key: "sk-test" }));
     let t = 1000;
-    const host = new BH.HarnessHost({ userId: "u", storage, backend: async () => BH.createBrowserBackend({ provider: "mock", seed: 3 }), clock: () => t, seed: () => 7 });
+    // a study controller that cannot say why it assigned nothing -> Director profile (plain chat learns nothing)
+    const host = new BH.HarnessHost({ userId: "u", storage, backend: async () => BH.createBrowserBackend({ provider: "mock", seed: 3 }), clock: () => t, seed: () => 7, study: { assign: async () => null } });
     const first = await host.newSession();
     for (const text of ["I love the night sky, telescopes and nebulae", "ok", "astronomy clubs and star parties are the best"]) {
       t += 5000;

@@ -49,6 +49,21 @@ in the requested style about the planned topic. Keep it under 60 words, plain an
 Never mention the state note, telemetry, scores, typing, or that you are measuring anything.`;
 
 /**
+ * Plain chat (profile "plain": a session started with no study assignment, chosen once in HarnessHost.newSession).
+ * No plan, no state note, no topic steering: the reply answers or does what the person said. Study sessions never
+ * see this prompt (they keep DIRECTOR_SYSTEM_PROMPT byte for byte).
+ */
+export const PLAIN_SYSTEM_PROMPT = `You are a warm, friendly chat partner in a chat app.
+Always respond to the person's latest message first. If they ask a question, answer it. If they give an instruction
+(repeat something, explain something, write or list something), do exactly that, fully and right away.
+Match the length to the request: a line or two for small talk, as much as a good answer needs for a real question.
+Stay on what they bring up; don't change the subject or steer toward topics of your own.
+A short follow-up question is optional: use one only when it genuinely helps, and usually not after an instruction.
+Keep the tone plain, friendly and conversational.
+The very first user message may be "(session start)": that is not from the person, so just greet them briefly
+and invite them to say what's on their mind.`;
+
+/**
  * The fixed hidden user cue sent with the opener only (turn 0, no user message yet). gpt-oss on Ollama Cloud returns
  * an empty done (no prompt eval, no tokens) for a conversation with only system messages, so the opener needs one
  * user turn. Identical in every arm; never added to the transcript, never logged as a user_turn.

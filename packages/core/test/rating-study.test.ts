@@ -222,11 +222,24 @@ test("study reissue: < 8 user turns or no answered session rating -> same index 
   // director_turn.plan.mode (explore/exploit/relax pacing, NOT the study arm) is omitted with the whole plan in study sessions
   assert.ok(!/"plan"|"mode"|"stateNote"|"adaptation"|"order"|"seed"/.test(all), "no plan / mode / schedule in study logs");
   assert.ok(storage.readSession(ids[0]!).filter((e) => e.type === "director_turn").every((e) => (e as { sealed?: boolean }).sealed === true));
-  // non-study sessions still log plan.mode (pacing) for sidecar/1 and replays
+  // study sessions never carry a profile field (not even "study")
+  assert.ok(ids.every((id) => !("profile" in (storage.readSession(id).find((e) => e.type === "session_start") as object))));
+  // a non-study session with no study controller is plain chat: profile:"plain" on session_start only, no plan / note logged
   const plain = new MemoryHarnessStorage();
   const h2 = new HarnessHost({ userId: "u", storage: plain, backend: async () => new MockBackend(1), seed: () => 5 });
   const p = await h2.newSession();
-  const dt = plain.readSession(p.sessionId).find((e) => e.type === "director_turn") as unknown as { plan: { mode: string } };
+  await h2.reply({ text: "Repeat this phrase I am ai", events: typed(Date.now(), 3) });
+  const pe = plain.readSession(p.sessionId) as unknown as Array<Record<string, unknown>>;
+  assert.equal(pe.find((e) => e.type === "session_start")!.profile, "plain");
+  assert.ok(pe.filter((e) => e.type !== "session_start").every((e) => !("profile" in e)), "profile on session_start only");
+  assert.ok(pe.filter((e) => e.type === "director_turn").every((e) => !("plan" in e) && !("stateNote" in e)));
+  // a non-study session whose controller cannot say why (or errored) keeps the Director profile: plan.mode logged as before
+  const dir = new MemoryHarnessStorage();
+  const h3 = new HarnessHost({ userId: "u", storage: dir, backend: async () => new MockBackend(1), seed: () => 5, study: { assign: async () => { throw new Error("keychain"); } } });
+  const q = await h3.newSession();
+  const dq = dir.readSession(q.sessionId) as unknown as Array<Record<string, unknown>>;
+  assert.ok(!("profile" in dq.find((e) => e.type === "session_start")!));
+  const dt = dq.find((e) => e.type === "director_turn") as unknown as { plan: { mode: string } };
   assert.ok(["explore", "exploit", "relax"].includes(dt.plan.mode));
 });
 
