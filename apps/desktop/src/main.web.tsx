@@ -6,10 +6,12 @@ import { App } from "./App";
 import { setTransport } from "./bridge";
 import { createInProcessTransport } from "./transport/in-process";
 import { nativeTransportOptions } from "./transport/native";
+import { installConsoleScrub } from "./secrets";
 import { flightRecorder, installErrorHooks, installScreenRecorder, installTapRecorder } from "./feedback/recorder";
 
 // native iOS app (Capacitor + CapacitorHttp): native fetch, Ollama Cloud on; plain PWA: unchanged
 // in-app bug report flight recorder: window errors + taps now, screen snapshots once the UI is up
+installConsoleScrub(console); // no bhd_ device token reaches the console from the web layer
 installErrorHooks(window);
 installTapRecorder(document);
 const transport = createInProcessTransport({ ...nativeTransportOptions(window), recorder: flightRecorder });

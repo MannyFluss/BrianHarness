@@ -13,6 +13,7 @@ import { createKeychainCredentials, keychainKV, type BHKeychainPlugin, type Migr
 import type { BHExportPlugin } from "./types";
 import type { BHAppleAuthPlugin } from "./apple-auth";
 import type { KeyValueStore } from "@brianharness/core/browser";
+import { scrubSecrets } from "../secrets";
 
 export { createNativeStreamFetch, type BHStreamPlugin, type BHStreamEvent } from "./native-stream";
 export { createKeychainCredentials, migrateCredentials, keychainKV, keychainStatus, isMissingEntitlement, KEYCHAIN_UNAVAILABLE_NOTE, type BHKeychainPlugin } from "./keychain";
@@ -76,7 +77,7 @@ export function nativeTransportOptions(
   if (keychain) {
     const legacy = hooks.legacyCredentials ?? new KVCredentialStore(safeLocalKV("brianharness/")); // the web build's store
     out.credentials = createKeychainCredentials(keychain, legacy, (r) => {
-      if (r.failed.length) console.warn("[brianharness] keychain migration kept local copies for:", r.failed.map((f) => `${f.providerId} (${f.error})`).join(", "));
+      if (r.failed.length) console.warn("[brianharness] keychain migration kept local copies for:", scrubSecrets(r.failed.map((f) => `${f.providerId} (${f.error})`).join(", ")));
       hooks.onMigration?.(r);
     });
     const store = out.credentials as ReturnType<typeof createKeychainCredentials>;

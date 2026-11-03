@@ -2,9 +2,21 @@
 // named controls, window errors. The transport adds chat / backend-state / native-plugin events (in-process.ts).
 // Hooks only read the DOM: they never change what the user sees, the study, timing or the session log.
 import { FlightRecorder } from "@brianharness/core/browser";
+import { scrubDeep } from "../secrets";
 import { controlName, ratingControl, ratingHidden, screenSnapshot, studyHidden, overlaysOf } from "./snapshot";
 
 export const flightRecorder = new FlightRecorder();
+scrubRecorder(flightRecorder);
+
+/** every event's strings are bhd_-scrubbed on the way in (the report builder redacts again on the way out) */
+export function scrubRecorder(rec: FlightRecorder): FlightRecorder {
+  const tagged = rec as FlightRecorder & { __bhScrub?: boolean };
+  if (tagged.__bhScrub) return rec;
+  const record = rec.record.bind(rec);
+  rec.record = (type, data = {}) => { try { record(type, scrubDeep(data)); } catch { /* never break the app */ } };
+  tagged.__bhScrub = true;
+  return rec;
+}
 
 /** study session in progress (set by the App from hud.study): snapshots / taps skip the blinding-check choice */
 let inStudy = false;
