@@ -63,6 +63,7 @@ test("transport records chat + backend state events; context() gives the session
 
 test("delivery: 201 -> sent (exact report bytes, device token); no export", async () => {
   const { t, w, rec, downloads } = app({ feedback: 201 });
+  await t.providers.select("mock"); // these tests chat on Mock; a stored token alone now means Spider Cloud (c114b0a)
   await t.providers.setApiKey("spider", TOKEN);
   await t.newSession();
   const r = await makeReport(t, rec);
@@ -76,6 +77,7 @@ test("delivery: 201 -> sent (exact report bytes, device token); no export", asyn
 
 test("delivery: 404 (endpoint not deployed) -> exported as one .json, not queued, never retried", async () => {
   const { t, w, rec, downloads } = app({ feedback: 404 });
+  await t.providers.select("mock"); // these tests chat on Mock; a stored token alone now means Spider Cloud (c114b0a)
   await t.providers.setApiKey("spider", TOKEN);
   await t.newSession();
   const r = await makeReport(t, rec);
@@ -110,6 +112,7 @@ test("delivery: 422 invalid_feedback_envelope -> exported; no token -> exported 
 
 test("sending a report touches no study, schedule, timing or session record", async () => {
   const { t, rec, downloads } = app({ feedback: 404 });
+  await t.providers.select("mock"); // these tests chat on Mock; a stored token alone now means Spider Cloud (c114b0a)
   await t.providers.setApiKey("spider", TOKEN);
   await t.study!.enable();
   const s = await t.newSession();

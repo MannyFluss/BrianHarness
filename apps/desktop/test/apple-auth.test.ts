@@ -355,6 +355,7 @@ test("siwa in-process: session log files never contain Apple tokens or ids", asy
     download: (fs) => { files.push(...fs); return true; },
     appleAuth: { isAvailable: async () => ({ available: true }), makeNonce: async () => ({ nonce: "M".repeat(43) }), signIn: async ({ nonce }) => ({ identityToken: jwt(Date.now() + 600_000, USER), user: USER, nonce }), credentialState: async () => ({ state: "authorized" }) },
   });
+  await t.providers.select("mock"); // chat on Mock; a stored token alone now means Spider Cloud (c114b0a)
   await t.appleAuth!.launch();
   await t.newSession();
   await t.appleAuth!.signIn(); // mid-session via the sidebar
