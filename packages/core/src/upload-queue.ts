@@ -11,6 +11,12 @@
  *                                        > 500 KB -> needs-export
  *   network error / no token          -> stays queued (backoff on errors; no 5xx count)
  * A client-side pre-check (secret patterns, > 1 MiB) marks a body needs-export without sending it.
+ *
+ * kind "feedback" (in-app bug report, POST /v1/feedback, FEEDBACK_REPORT_SCHEMA.md) rides the same queue and token.
+ * Its differences: 409 report_exists = done; 429 delays only that report (its own Worker cap, so it never pauses
+ * session uploads); a 404 (endpoint not deployed yet) is final like any other 4xx: needs-export, never retried, and
+ * the app exports the report as a .json file instead. Feedback items are counted apart (summary.feedback), so the
+ * study-log counts and "Export logs" prompt never include them.
  */
 import type { KeyValueStore } from "./platform/kv.js";
 import type { ExportFile } from "./zip.js";
@@ -20,7 +26,7 @@ import { sha256HexSync, studySessionRecordFromJsonl, type StudySessionRecord } f
 export type UploadState = "pending" | "needs-export" | "done";
 export interface UploadItem {
   id: string;
-  kind: "session" | "study_start";
+  kind: "session" | "study_start" | "feedback";
   /** export file name (sessions) */
   name?: string;
   bytes: number;
@@ -45,8 +51,12 @@ export interface UploadSummary {
   blocked?: "no-token" | "auth" | "rate-limited" | "offline";
   pausedUntil?: number;
   items: Array<Pick<UploadItem, "id" | "kind" | "name" | "state" | "lastStatus" | "lastError">>;
+  /** in-app bug reports (kind "feedback"), counted apart from the study logs above */
+  feedback?: { pending: number; needsExport: number; done: number; blocked?: UploadSummary["blocked"] };
 }
-export interface UploadTarget { url: string; token: string }
+/** url = POST /v1/sessions; feedbackUrl defaults to /v1/feedback on the same origin */
+export interface UploadTarget { url: string; token: string; feedbackUrl?: string }
+export const FEEDBACK_UPLOAD_MAX_BYTES = 256 * 1024;
 
 export const UPLOAD_MAX_BYTES = 1024 * 1024;
 export const UPLOAD_BIG_BYTES = 500 * 1024;
@@ -113,6 +123,29 @@ export class UploadQueue {
       return this.add({ id: body.id, kind: "study_start" }, JSON.stringify(body));
     });
   }
+  /** queue an in-app bug report (id = report_id; body = the report JSON as is). Returns the item (state after the pre-check). */
+  enqueueFeedback(report: { report_id: string }, name?: string): Promise<UploadItem | null> {
+    return this.serial(async () => {
+      const body = JSON.stringify(report);
+      const item = await this.add({ id: report.report_id, kind: "feedback", ...(name ? { name } : {}) }, body);
+      if (item && item.state === "pending" && item.bytes > FEEDBACK_UPLOAD_MAX_BYTES) return this.finalize(item.id, "larger than 256 KB: not uploaded");
+      return item;
+    });
+  }
+  /** one item's current state (any kind) */
+  async item(id: string): Promise<UploadItem | null> {
+    return (await this.index()).find((i) => i.id === id) ?? null;
+  }
+  private async finalize(id: string, lastError: string): Promise<UploadItem | null> {
+    const items = await this.index();
+    const it = items.find((i) => i.id === id);
+    if (!it) return null;
+    Object.assign(it, { state: "needs-export", lastError });
+    await this.removeBody(id);
+    await this.saveIndex(items);
+    this.changed();
+    return it;
+  }
   private async add(base: { id: string; kind: UploadItem["kind"]; name?: string; study?: UploadItem["study"] }, body: string): Promise<UploadItem | null> {
     const items = await this.index();
     const had = items.find((i) => i.id === base.id);
@@ -128,13 +161,17 @@ export class UploadQueue {
   }
 
   async summary(): Promise<UploadSummary> {
-    const items = await this.index();
+    const all = await this.index();
+    const items = all.filter((i) => i.kind !== "feedback");
+    const fb = all.filter((i) => i.kind === "feedback");
     const p = await this.pause();
     const pending = items.filter((i) => i.state === "pending").length;
     return {
       pending, needsExport: items.filter((i) => i.state === "needs-export").length, done: items.filter((i) => i.state === "done").length,
       ...(pending && this.lastBlocked ? { blocked: this.lastBlocked } : {}), ...(p.until && p.until > this.now() ? { pausedUntil: p.until } : {}),
       items: items.filter((i) => i.state !== "done").map(({ id, kind, name, state, lastStatus, lastError }) => ({ id, kind, name, state, lastStatus, lastError })),
+      ...(fb.length ? { feedback: { pending: fb.filter((i) => i.state === "pending").length, needsExport: fb.filter((i) => i.state === "needs-export").length, done: fb.filter((i) => i.state === "done").length,
+        ...(fb.some((i) => i.state === "pending") && this.lastBlocked ? { blocked: this.lastBlocked } : {}) } } : {}),
     };
   }
   private changed() { if (this.o.onChange) void this.summary().then(this.o.onChange, () => {}); }
@@ -168,7 +205,7 @@ export class UploadQueue {
       it.attempts++;
       let res: Response;
       try {
-        res = await f(target.url, { method: "POST", headers: { authorization: `Bearer ${target.token}`, "content-type": "application/json" }, body });
+        res = await f(it.kind === "feedback" ? (target.feedbackUrl ?? new URL("/v1/feedback", target.url).href) : target.url, { method: "POST", headers: { authorization: `Bearer ${target.token}`, "content-type": "application/json" }, body });
       } catch (e) {
         it.lastError = `network: ${(e as Error).message}`;
         it.lastStatus = 0;
@@ -178,7 +215,7 @@ export class UploadQueue {
       }
       it.lastStatus = res.status;
       const err = await errorOf(res);
-      if (res.status === 201 || (res.status === 409 && err.error === "session_exists")) {
+      if (res.status === 201 || (res.status === 409 && err.error === (it.kind === "feedback" ? "report_exists" : "session_exists"))) {
         Object.assign(it, { state: "done", doneAt: new Date(this.now()).toISOString(), lastError: undefined, consecutive5xx: 0 });
         await this.removeBody(it.id);
       } else if (res.status === 401) {
@@ -186,6 +223,9 @@ export class UploadQueue {
         await this.kv.set(PAUSE, JSON.stringify({ ...p, tokenFp: fp }));
         this.lastBlocked = "auth";
         break;
+      } else if (res.status === 429 && it.kind === "feedback") { // the feedback cap: only this report waits
+        it.nextAt = this.now() + retryAfterMs(res.headers.get("retry-after"), this.now());
+        it.lastError = `rate limited (${err.error ?? "429"})`;
       } else if (res.status === 429) {
         const until = this.now() + retryAfterMs(res.headers.get("retry-after"), this.now());
         it.lastError = `rate limited (${err.error ?? "429"})`;

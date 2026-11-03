@@ -3,10 +3,16 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 
 // window <title> comes from the one brand config
 const brand = JSON.parse(readFileSync(new URL("../../packages/core/src/brand.json", import.meta.url), "utf8")) as { name: string };
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
+// in-app bug report header: the commit the bundle was built from (BH_COMMIT overrides; null outside a git checkout)
+const commit = (() => {
+  if (process.env.BH_COMMIT) return process.env.BH_COMMIT;
+  try { return execSync("git rev-parse --short HEAD", { cwd: here("."), stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { return ""; }
+})();
 
 // Web/PWA CSP connect-src. The Electron renderer keeps its tight index.html CSP (default-src 'self',
 // no network: it talks to the core over IPC only).
@@ -32,6 +38,7 @@ export default defineConfig(({ mode }) => {
   const web = mode === "web";
   return {
     base: "./",
+    define: { __BH_COMMIT__: JSON.stringify(commit) },
     root: web ? here("./web") : here("."),
     publicDir: here("./public"),
     plugins: [

@@ -6,9 +6,13 @@ import { App } from "./App";
 import { setTransport } from "./bridge";
 import { createInProcessTransport } from "./transport/in-process";
 import { nativeTransportOptions } from "./transport/native";
+import { flightRecorder, installErrorHooks, installScreenRecorder, installTapRecorder } from "./feedback/recorder";
 
 // native iOS app (Capacitor + CapacitorHttp): native fetch, Ollama Cloud on; plain PWA: unchanged
-const transport = createInProcessTransport(nativeTransportOptions(window));
+// in-app bug report flight recorder: window errors + taps now, screen snapshots once the UI is up
+installErrorHooks(window);
+installTapRecorder(document);
+const transport = createInProcessTransport({ ...nativeTransportOptions(window), recorder: flightRecorder });
 setTransport(transport);
 document.documentElement.classList.add("eeg-web");
 document.documentElement.dataset.platform = transport.platform;
@@ -19,3 +23,4 @@ addEventListener("pagehide", flush);
 document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush());
 
 createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+installScreenRecorder(document);

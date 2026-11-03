@@ -20,7 +20,7 @@ export function Message({ msg }: { msg: ChatMsg }) {
   const user = msg.role === "user";
   return (
     <div className={cn("eeg-enter group flex w-full max-w-[95%] flex-col gap-1", user ? "ml-auto items-end" : "items-start")}>
-      <div className={cn("eeg-prose w-fit min-w-0 max-w-full whitespace-pre-wrap text-foreground", user && "rounded-lg bg-secondary px-4 py-3")} data-streaming={msg.streaming ? "true" : undefined}>
+      <div className={cn("eeg-prose w-fit min-w-0 max-w-full whitespace-pre-wrap text-foreground", user && "rounded-lg bg-secondary px-4 py-3")} data-msg-role={msg.role} data-streaming={msg.streaming ? "true" : undefined}>
         {msg.text}
         {msg.streaming && <span className="eeg-caret ml-0.5 inline-block animate-pulse text-muted-foreground" aria-hidden>▍</span>}
       </div>

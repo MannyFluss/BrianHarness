@@ -37,3 +37,4 @@ export * from "./providers/spider-cloud.js";
 export * from "./providers/max-tokens.js";
 export * from "./upload-body.js";
 export * from "./upload-queue.js";
+export * from "./flight-recorder.js";

@@ -16,6 +16,9 @@ import { AppleSignInScreen, useAppleAuth } from "./components/AppleSignIn";
 import { shouldOfferAtLaunch, type AppleAuthView } from "./transport/apple-auth";
 import { useTypingTelemetry } from "./telemetry";
 import { useLayoutMode, useVisualViewportHeight } from "./layout";
+import { FeedbackSheet, type FeedbackSheetPhase } from "./components/FeedbackSheet";
+import { assembleReport, isReportShortcut } from "./feedback/report";
+import { flightRecorder, setRecorderStudy, snapshotScreenNow } from "./feedback/recorder";
 
 let nextId = 0;
 const mid = () => `m${++nextId}`;
@@ -161,6 +164,51 @@ export function App() {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: last?.streaming ? "auto" : "smooth" });
   }, [messages]);
 
+  // ---- in-app bug report (Report row, Cmd/Ctrl+Shift+R, window.__bhReport). UI only: opening the sheet doesn't
+  // hide the page (no AWAY_MS), start or end a session, or touch ratings / study state.
+  const [report, setReport] = useState<{ trigger: string } | null>(null);
+  const [reportPhase, setReportPhase] = useState<FeedbackSheetPhase>({ kind: "idle" });
+  const reportRef = useRef(report);
+  reportRef.current = report;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const uiRef = useRef({ layout: layout as string, sidebarOpen, hudOpen, busy });
+  uiRef.current = { layout, sidebarOpen, hudOpen, busy };
+  const infoRef = useRef(info);
+  infoRef.current = info;
+  const canReport = !!bridge().feedback;
+  const openReport = useCallback((trigger: string) => {
+    if (!bridge().feedback || reportRef.current) return;
+    snapshotScreenNow(); // the screen as it was, before the sheet covers it
+    flightRecorder.record("state", { event: "report_open", trigger });
+    reportRef.current = { trigger };
+    setReportPhase({ kind: "idle" });
+    setReport({ trigger });
+  }, []);
+  const closeReport = useCallback(() => {
+    if (!reportRef.current) return;
+    reportRef.current = null;
+    setReport(null);
+  }, []);
+  const sendReport = useCallback(async (note: string) => {
+    const r = reportRef.current;
+    const fb = bridge().feedback;
+    if (!r || !fb) return;
+    setReportPhase({ kind: "sending" });
+    try {
+      const doc = await assembleReport({ note, trigger: r.trigger, messages: messagesRef.current, recorder: flightRecorder, bridge: bridge(), info: infoRef.current, ui: uiRef.current });
+      const result = await fb.send(doc);
+      setReportPhase({ kind: "done", result });
+    } catch (err) {
+      setReportPhase({ kind: "done", result: { state: "failed", queued: false, reason: (err as Error).message } });
+    }
+  }, []);
+  useEffect(() => { setRecorderStudy(!!hud?.study); }, [hud]);
+  useEffect(() => {
+    window.__bhReport = (o) => openReport(o?.source ?? "hook");
+    return () => { delete window.__bhReport; };
+  }, [openReport]);
+
   useEffect(() => {
     if (!pending) return;
     const t = setInterval(() => setTick((x) => x + 1), 80);
@@ -171,10 +219,11 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "h") { e.preventDefault(); setHudOpen((v) => !v); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") { e.preventDefault(); setSidebarOpen((v) => !v); }
+      if (isReportShortcut(e)) { e.preventDefault(); openReport("shortcut"); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [openReport]);
 
   const send = useCallback(async (textArg?: string) => {
     const text = (textArg ?? draftRef.current).trim();
@@ -282,7 +331,7 @@ export function App() {
 
   return (
     <div className="eeg-app flex" data-busy={busy ? "true" : "false"} data-layout={layout}>
-      <Sidebar variant={phone ? "drawer" : "column"} open={sidebarOpen} sessions={sessions} info={info} onNew={() => { if (phone) setSidebarOpen(false); requestNew(); }} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} />
+      <Sidebar variant={phone ? "drawer" : "column"} open={sidebarOpen} sessions={sessions} info={info} onNew={() => { if (phone) setSidebarOpen(false); requestNew(); }} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} onReport={canReport ? () => { if (phone) setSidebarOpen(false); openReport("sidebar"); } : undefined} />
       <main className="flex min-w-0 flex-1 flex-col">
         <TopBar sidebarOpen={sidebarOpen && !phone} onOpenSidebar={() => { setSidebarOpen(true); if (phone) setHudOpen(false); }} hudOpen={hudOpen} onToggleHud={() => { setHudOpen((v) => !v); if (phone) setSidebarOpen(false); }}>
           <span className="font-title text-2xl tracking-tight md:text-3xl" title={title}>{title}</span>
@@ -315,6 +364,7 @@ export function App() {
       <AppleSignInScreen open={siwaOpen && !card} view={appleView ?? launchApple} phone={phone} onClose={() => setSiwaOpen(false)} />
       <SessionRatingCard open={!!card} study={!!hud?.study} phone={phone} stateRef={cardState} onClose={closeCard} />
       {phone && <Hud variant="sheet" open={hudOpen} onClose={() => setHudOpen(false)} hud={hud} stateNote={stateNote} />}
+      <FeedbackSheet open={!!report} phone={phone} phase={reportPhase} onSend={(n) => void sendReport(n)} onClose={closeReport} />
     </div>
   );
 }

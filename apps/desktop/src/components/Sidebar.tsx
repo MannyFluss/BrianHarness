@@ -1,4 +1,4 @@
-import { PanelLeftCloseIcon, PlusIcon, XIcon } from "lucide-react";
+import { BugIcon, PanelLeftCloseIcon, PlusIcon, XIcon } from "lucide-react";
 import type { Info, SessionItem } from "../bridge";
 import { cn } from "../lib";
 import { Mark } from "./Mark";
@@ -14,7 +14,7 @@ function when(iso: string | null) {
 }
 
 // column: collapsible left column (iPad landscape / Mac). drawer: slide-over with a backdrop (iPhone).
-export function Sidebar({ open, sessions, info, onNew, onClose, onInfo, pickerRef, variant = "column" }: { open: boolean; sessions: SessionItem[]; info: Info | null; onNew: () => void; onClose: () => void; onInfo: (i: Info) => void; pickerRef?: React.MutableRefObject<(() => void) | null>; variant?: "column" | "drawer" }) {
+export function Sidebar({ open, sessions, info, onNew, onClose, onInfo, pickerRef, onReport, variant = "column" }: { open: boolean; sessions: SessionItem[]; info: Info | null; onNew: () => void; onClose: () => void; onInfo: (i: Info) => void; pickerRef?: React.MutableRefObject<(() => void) | null>; onReport?: () => void; variant?: "column" | "drawer" }) {
   const drawer = variant === "drawer";
   return (
     <>
@@ -58,6 +58,11 @@ export function Sidebar({ open, sessions, info, onNew, onClose, onInfo, pickerRe
         <div className="border-t border-border/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
           <StudyData />
           <AppleSignInRow />
+          {onReport && (
+            <button onClick={onReport} data-feedback-row aria-label="Report a problem" className="eeg-tap-row flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              <BugIcon className="size-3" /> Report
+            </button>
+          )}
           <ModelPicker info={info} onChanged={onInfo} openRef={pickerRef} />
         </div>
       </div>

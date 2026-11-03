@@ -48,7 +48,12 @@ import {
   normalizeSpiderUrl,
   UploadQueue,
   STUDY_PROTOCOL_VERSION,
+  recordingBackend,
+  recordPluginRejections,
+  type FeedbackReport,
+  type FlightRecorder,
 } from "@brianharness/core/browser";
+import { createFeedbackApi } from "./feedback";
 import { saveViaBHExport, shareViaBHExport } from "./bh-export";
 import { createAppleAuth, deviceLabelFor, isAppleRecord, type AppleAuth, type AppleAuthView, type BHAppleAuthPlugin } from "./apple-auth";
 import type { BHExportPlugin, EegBridge, ExportResult, Info, KeyProvider, ProviderId, ProviderStatus, UploadStatusView } from "./types";
@@ -126,6 +131,8 @@ export interface InProcessOptions {
   uploadAutoSchedule?: boolean;
   /** iOS BHAppleAuth plugin (Sign in with Apple -> Worker session token in credentials/spider) */
   appleAuth?: BHAppleAuthPlugin;
+  /** in-app bug report flight recorder: chat / backend-state / native-plugin-error events (feedback/recorder.ts) */
+  recorder?: FlightRecorder;
 }
 export const APP_VERSION_DEFAULT = "0.1.0";
 /** a session file whose session_start carries the study block */
@@ -169,6 +176,11 @@ export function safeLocalKV(ns: string): KeyValueStore {
 }
 
 export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge {
+  const rec = opts.recorder;
+  // study session in progress -> the recorder stores study-scrubbed events only (no raw error text, no prompt sizes)
+  rec?.setStudyProbe(() => !!host?.hud()?.study);
+  // flight recorder: native plugin rejections become `error` events (calls and results unchanged)
+  if (rec) opts = { ...opts, ...(opts.bhExport ? { bhExport: recordPluginRejections("BHExport", opts.bhExport, rec) } : {}), ...(opts.appleAuth ? { appleAuth: recordPluginRejections("BHAppleAuth", opts.appleAuth, rec) } : {}) };
   const settingsKV = opts.settingsKV ?? safeLocalKV("brianharness/");
   const credentials = opts.credentials ?? new KVCredentialStore(safeLocalKV("brianharness/"));
   const userId = opts.userId ?? "local-user";
@@ -221,6 +233,11 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
 
   let backend: ModelBackend | null = null;
   const build = async (s: WebSettings): Promise<ModelBackend> => {
+    const b = recordingBackend(await buildRaw(s), rec); // one `chat` flight-recorder event per generate (P0 fields)
+    rec?.record("state", { event: "backend", backend: b.id, provider: s.provider });
+    return b;
+  };
+  const buildRaw = async (s: WebSettings): Promise<ModelBackend> => {
     const p = s.provider;
     if (p === "ollama") {
       const baseUrl = normalizeOllamaBaseUrl(s.ollamaUrl ?? DEFAULT_OLLAMA_URL);
@@ -250,7 +267,8 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       backend = await build(await loadSettings());
     } catch (err) {
       console.warn("[brianharness] backend unavailable, using mock:", (err as Error).message);
-      backend = createBrowserBackend({ provider: "mock", seed: 42, mockTokenDelayMs: opts.mockTokenDelayMs });
+      rec?.record("state", { event: "mock_fallback", reason: (err as Error).message });
+      backend = recordingBackend(createBrowserBackend({ provider: "mock", seed: 42, mockTokenDelayMs: opts.mockTokenDelayMs }), rec);
     }
     return backend;
   };
@@ -304,7 +322,8 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
       if (!nativeFetch) return null;
       const token = await readApiKey(credentials, SPIDER_CREDENTIAL_ID).catch(() => null);
       if (!token) return null;
-      return { url: `${normalizeSpiderUrl((await loadSettings()).spiderCloudUrl)}/v1/sessions`, token };
+      const origin = normalizeSpiderUrl((await loadSettings()).spiderCloudUrl);
+      return { url: `${origin}/v1/sessions`, feedbackUrl: `${origin}/v1/feedback`, token };
     },
   }));
   const enqueueStudySession = async (f: ExportFile) => {
@@ -319,6 +338,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
     void q.flush().catch(() => {});
   };
   void uploadQueue.then((q) => q.flush()).catch(() => {}); // launch: retry anything left over
+  const feedbackApi = createFeedbackApi({ queue: uploadQueue, bhExport: opts.bhExport, download: opts.download, recorder: rec });
 
   // llm-extract: one persisted call cap shared by every NON-study session (study sessions use a per-session
   // budget, so practice can't use up study calls); answers cached for the app's lifetime
@@ -532,6 +552,14 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
           },
         }
       : {}),
+    feedback: {
+      send: (r) => feedbackApi.send(r as FeedbackReport),
+      export: (r) => feedbackApi.export(r as FeedbackReport),
+      async context() {
+        const h = host?.hud() ?? null; // never starts a session or the host
+        return { sessionId: h?.sessionId ?? null, study: { inStudy: !!h?.study, index: h?.study?.index ?? null } };
+      },
+    },
     uploads: {
       status: async () => (await (await uploadQueue).summary()) as UploadStatusView,
       flush: async () => (await (await uploadQueue).flush({ force: true })) as UploadStatusView,
@@ -546,6 +574,7 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
         await saveSettings({ provider: provider as ProviderKind, model: model ?? undefined });
         backend = next;
         host?.setBackend(next);
+        rec?.record("state", { event: "provider", provider, model: model ?? null });
         return info();
       },
       async setApiKey(provider: KeyProvider, key: string) {

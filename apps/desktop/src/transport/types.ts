@@ -60,8 +60,16 @@ export type StudyStatusView = { enabled: boolean; next: number; total: number; s
 export type UploadStatusView = {
   pending: number; needsExport: number; done: number;
   blocked?: "no-token" | "auth" | "rate-limited" | "offline";
-  items: Array<{ id: string; kind: "session" | "study_start"; name?: string; state: "pending" | "needs-export" | "done"; lastStatus?: number; lastError?: string }>;
+  items: Array<{ id: string; kind: "session" | "study_start" | "feedback"; name?: string; state: "pending" | "needs-export" | "done"; lastStatus?: number; lastError?: string }>;
 };
+/**
+ * In-app bug report delivery result. sent = 201/409 report_exists; exported = the upload failed or can't happen
+ * yet (404 endpoint not deployed, 4xx, no token, offline) and the .json went out via the share sheet / download;
+ * queued = still in the upload queue for a retry (also true together with "exported" when the retry is pending).
+ */
+export type FeedbackSendResult = { state: "sent" | "exported" | "queued" | "failed"; queued: boolean; status?: number; reason?: string; export?: ExportResult };
+/** session-log bracket around the Report sheet (Director-approved): open -> sent | closed */
+export type FeedbackLogEvent = { type: "feedback_open" | "feedback_sent" | "feedback_closed"; ts: number; sent?: boolean; report_id?: string };
 export type SessionItem = { id: string; title: string; turns: number; startedAt: string | null; active: boolean };
 export type Info = {
   backend: string; paid: boolean; provider: string; model: string | null; dataDir: string; userId: string; platform: string; appName: string;
@@ -159,6 +167,16 @@ export interface EegBridge {
     skip(): void;
     status(): Promise<AppleAuthView>;
     onChange(cb: (v: AppleAuthView) => void): () => void;
+  };
+  /**
+   * In-app bug report (FEEDBACK_REPORT_SCHEMA.md): send = POST /v1/feedback via the upload queue, export fallback;
+   * export = share / download the report .json only. Never touches study, schedule or session records.
+   */
+  feedback?: {
+    send(report: unknown): Promise<FeedbackSendResult>;
+    export(report: unknown): Promise<ExportResult>;
+    /** current session id + coarse study state for the report header ({inStudy, index} only) */
+    context(): Promise<{ sessionId: string | null; study: { inStudy: boolean; index: number | null } }>;
   };
   /** study-log auto-upload to the Spider Cloud Worker (needs the device token) */
   uploads?: {

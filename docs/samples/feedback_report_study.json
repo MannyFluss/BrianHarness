@@ -1,0 +1,239 @@
+{
+  "schema": "brianharness-feedback/1",
+  "report_id": "9b1f4c2e-5a7d-4e3b-8c6a-1d2e3f4a5b6c",
+  "kind": "bug",
+  "created_at": "2026-11-03T17:41:20.000Z",
+  "summary": "reply stopped halfway, and the cut-off note was hidden",
+  "app": {
+    "bundle_id": "com.manny.brianharness",
+    "version": "0.4.0",
+    "build": "20261103.0940",
+    "commit": "b413996"
+  },
+  "filters": {
+    "inStudy": true,
+    "truncated_turns": 1,
+    "last_error_code": "http_502",
+    "platform": "ios"
+  },
+  "payload": {
+    "header": {
+      "report_id": "9b1f4c2e-5a7d-4e3b-8c6a-1d2e3f4a5b6c",
+      "build": "20261103.0940",
+      "commit": "b413996",
+      "app_version": "0.4.0",
+      "device": "iPhone",
+      "os": "iOS 18.1",
+      "orientation": "portrait",
+      "platform": "ios",
+      "app_state": {
+        "visibility": "visible",
+        "online": true,
+        "layout": "phone",
+        "busy": false,
+        "sidebarOpen": true,
+        "hudOpen": false,
+        "overlays": [
+          "sidebar"
+        ],
+        "backend": "spider-cloud",
+        "provider": "spider-cloud",
+        "model": "grok-4-fast",
+        "uploads": {
+          "pending": 0,
+          "needsExport": 0
+        }
+      },
+      "note": "reply stopped halfway, and the cut-off note was hidden",
+      "last_error_summary": "error[stream] http_502 (8s ago)",
+      "sessionId": "s-20261103-0938-7f2a",
+      "study": {
+        "inStudy": true,
+        "index": 3
+      },
+      "trigger": "sidebar",
+      "counts": {
+        "events_recorded": 10,
+        "events_included": 10,
+        "events_dropped": 0,
+        "text_cap": 500,
+        "bytes": 3386
+      }
+    },
+    "events": [
+      {
+        "ts": 1793727600000,
+        "type": "state",
+        "data": {
+          "event": "backend",
+          "backend": "spider-cloud",
+          "provider": "spider-cloud",
+          "model": "grok-4-fast"
+        }
+      },
+      {
+        "ts": 1793727600900,
+        "type": "screen",
+        "data": {
+          "screen": "chat",
+          "overlays": [],
+          "layout": "phone",
+          "busy": false,
+          "title": null,
+          "controls": [
+            {
+              "control": "composer-send",
+              "label": "Send"
+            }
+          ],
+          "messages": [
+            {
+              "role": "user",
+              "text": "explain lifetimes in depth"
+            }
+          ],
+          "notices": []
+        }
+      },
+      {
+        "ts": 1793727604100,
+        "type": "tap",
+        "data": {
+          "control": "composer-send",
+          "label": "Send"
+        }
+      },
+      {
+        "ts": 1793727661300,
+        "type": "chat",
+        "data": {
+          "backend": "spider-cloud",
+          "model": "grok-4-fast",
+          "max_tokens": 4096,
+          "status": 200,
+          "ms": 57200,
+          "finish_reason": "length",
+          "usage": {
+            "prompt_tokens": null,
+            "completion_tokens": 4096,
+            "reasoning_tokens": 0
+          },
+          "truncated": true,
+          "error": null,
+          "streamed": true,
+          "chars": 15230
+        }
+      },
+      {
+        "ts": 1793727661900,
+        "type": "screen",
+        "data": {
+          "screen": "chat",
+          "overlays": [],
+          "layout": "phone",
+          "busy": false,
+          "title": null,
+          "messages": [
+            {
+              "role": "assistant",
+              "text": "Lifetimes describe how long a reference is valid… (reply ends mid-sentence)",
+              "cutOff": true
+            }
+          ],
+          "notices": [
+            "Reply cut off at the length limit"
+          ]
+        }
+      },
+      {
+        "ts": 1793727670000,
+        "type": "error",
+        "data": {
+          "source": "native",
+          "code": "ESTATE",
+          "plugin": "BHAppleAuth",
+          "method": "credentialState"
+        }
+      },
+      {
+        "ts": 1793727672000,
+        "type": "chat",
+        "data": {
+          "backend": "spider-cloud",
+          "model": "grok-4-fast",
+          "max_tokens": 4096,
+          "status": 502,
+          "ms": 900,
+          "finish_reason": null,
+          "usage": {
+            "prompt_tokens": null,
+            "completion_tokens": null,
+            "reasoning_tokens": null
+          },
+          "truncated": false,
+          "error": {
+            "code": "http_502"
+          },
+          "streamed": true,
+          "chars": 0
+        }
+      },
+      {
+        "ts": 1793727672001,
+        "type": "error",
+        "data": {
+          "source": "stream",
+          "code": "http_502",
+          "status": 502,
+          "partial": false
+        }
+      },
+      {
+        "ts": 1793727672600,
+        "type": "screen",
+        "data": {
+          "screen": "chat",
+          "overlays": [],
+          "layout": "phone",
+          "busy": false,
+          "title": null,
+          "messages": [
+            {
+              "role": "assistant",
+              "text": "⚠ [error text omitted]"
+            }
+          ],
+          "notices": []
+        }
+      },
+      {
+        "ts": 1793727675000,
+        "type": "tap",
+        "data": {
+          "control": "sidebar-report",
+          "label": "Report"
+        }
+      }
+    ],
+    "chat_turns": [
+      {
+        "role": "user",
+        "text": "explain lifetimes in depth"
+      },
+      {
+        "role": "assistant",
+        "text": "Lifetimes describe how long a reference is valid… (reply ends mid-sentence)",
+        "cutOff": true
+      },
+      {
+        "role": "user",
+        "text": "keep going"
+      },
+      {
+        "role": "assistant",
+        "text": "⚠ [error text omitted]",
+        "error": true
+      }
+    ]
+  }
+}
