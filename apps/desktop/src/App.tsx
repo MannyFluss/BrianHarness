@@ -164,6 +164,32 @@ export function App() {
     }
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: last?.streaming ? "auto" : "smooth" });
   }, [messages]);
+  // UI only (scroll nit, Nov 3): the composer dock floats over the transcript and grows (multi-line draft, extractor
+  // warning, safe area) past the fixed pb-40, and a smooth scroll that starts far away after a very long reply can
+  // stop short. So the transcript's bottom padding tracks the dock's real height, and once a reply is complete the
+  // view is pinned to the bottom again after layout settles, so the "reply cut off" note clears the composer.
+  const dock = useRef<HTMLDivElement>(null);
+  const [dockPad, setDockPad] = useState<number | null>(null);
+  useEffect(() => {
+    const el = dock.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const sc = scroller.current;
+      const pinned = !!sc && sc.scrollHeight - sc.clientHeight - sc.scrollTop < 48;
+      setDockPad(Math.ceil(el.getBoundingClientRect().height) + 16);
+      if (pinned) requestAnimationFrame(() => sc!.scrollTo({ top: sc!.scrollHeight, behavior: "auto" }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    const sc = scroller.current;
+    if (!sc || !last || last.role !== "assistant" || last.streaming) return;
+    let f2 = 0;
+    const f1 = requestAnimationFrame(() => { f2 = requestAnimationFrame(() => sc.scrollTo({ top: sc.scrollHeight, behavior: "auto" })); });
+    return () => { cancelAnimationFrame(f1); cancelAnimationFrame(f2); };
+  }, [messages]);
 
   // ---- in-app bug report (Report row, Cmd/Ctrl+Shift+R, window.__bhReport). UI only: opening the sheet doesn't
   // hide the page (no AWAY_MS), start or end a session, or touch ratings / study state.
@@ -355,13 +381,13 @@ export function App() {
         <div className="flex min-h-0 flex-1">
           <div className="relative flex min-w-0 flex-1 flex-col">
             <div ref={scroller} className="flex-1 overflow-y-auto overscroll-contain">
-              <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-6 px-4 pb-40 pt-6 md:px-6 md:pt-8">
+              <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-6 px-4 pb-40 pt-6 md:px-6 md:pt-8" style={dockPad ? { paddingBottom: Math.max(160, dockPad) } : undefined} data-transcript>
                 {messages.map((m) => <Message key={m.id} msg={m} />)}
                 {probe && !pending && <TurnProbe onSkip={() => dismissProbe("skipped")} onRate={(v) => { const p = probeRef.current; if (!p) return; probeRef.current = null; setProbe(null); logRating({ scope: "turn", turn: p.turn, value: v, shownAt: p.shownAt, answeredAt: Date.now(), dismissed: false }); }} />}
                 {pending && <Thinking tick={tick} />}
               </div>
             </div>
-            <div className="eeg-composer-dock pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background/90 to-transparent pt-10">
+            <div ref={dock} className="eeg-composer-dock pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background/90 to-transparent pt-10">
               <div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-3 md:px-4">
                 {hud?.extractorWarning && (
                   <div role="status" data-testid="extractor-warning" className="mb-2 rounded-md border border-amber-400/30 bg-amber-400/10 px-3 py-1.5 text-center text-xs text-amber-200/90">
