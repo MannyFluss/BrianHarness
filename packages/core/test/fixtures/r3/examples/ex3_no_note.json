@@ -1,0 +1,26 @@
+{
+ "expect": "pass",
+ "input": "[CHAT] u6 \"why is my rye so dense?\" · a6.p1 \"Rye has weak gluten, so...\"\nu7 \"Just the recipe please, no science.\"\na7.p1 \"300 g rye flour, 200 g bread flour, 350 g water...\" · a7.p2 \"Mix, rest 1 hour, shape, proof 2 hours, bake 50 minutes at 230 C.\"\n[ATTENTION DIGEST · after a7 · window 22 s · tracking poor (0.48) · baseline: 41 paragraphs]\nno events (window quality below 0.6)\nSession ledger: fermentation/rye 3 turns (0.64) · recipe steps 1 turn (0.40)\n[YOUR FOOTPRINT] notes 3 of 7 Actor turns · session share 1.9% · n3 (turn 6, go_deeper) -> pushback (\"no science\")",
+ "previous_notes": [],
+ "output": {
+  "context_update": {
+   "summary": "Asked to drop the science; my last go-deeper drew pushback.",
+   "hypotheses": [
+    {
+     "label": "recipe steps",
+     "conf": 0.55,
+     "evidence": [
+      "u7"
+     ]
+    }
+   ],
+   "changed": [
+    "fermentation 0.64 -> 0.50 after pushback"
+   ]
+  },
+  "intent": "Stay quiet and let them lead.",
+  "note": null,
+  "no_note_reason": "They asked for no science, pushed back on n3, and there is no valid signal this window."
+ },
+ "situation": "Rye baking; u7 \"Just the recipe please, no science.\" a7 gave the recipe. Tracking poor 0.48, no events. Footprint: 3 of 7 turns, 1.9%, n3 (go_deeper) got pushback."
+}

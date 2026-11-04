@@ -1,0 +1,36 @@
+{
+ "expect": "fail",
+ "input": "[CHAT] u3 \"I'm in lecture learning about NLP\" · a3.p1 \"Nice! What's the lecture covering?\"\nu4 \"tokenizers. what's a token?\"\na4.p1 \"A token is a chunk of text a model treats as one unit...\" · a4.p2 \"Rare words get split into pieces, like un + believ + able...\" · a4.p3 \"Each model has a fixed vocabulary of tokens...\"\n[ATTENTION DIGEST · after a4 · window 29 s · tracking good (0.77) · baseline: 22 paragraphs]\na4.p1 read 0.9x · a4.p2 DEEP 2.6x, reread 2x e8 (z 2.7, conf .79) · a4.p3 skim 0.5x e9 (z -1.5, conf .70)\noff-screen 0 s · composer pauses >2 s: 1\nSession ledger: tokenization 2 turns (0.58) · lecture logistics 1 turn (0.20)\n[YOUR FOOTPRINT] notes 0 of 4 Actor turns · session share 0.0%",
+ "previous_notes": [],
+ "output": {
+  "context_update": {
+   "summary": "User is in an NLP lecture on tokenizers; the splitting of rare words is the part that landed.",
+   "hypotheses": [
+    {
+     "label": "subword splitting",
+     "conf": 0.7,
+     "evidence": [
+      "e8"
+     ]
+    },
+    {
+     "label": "vocabulary size",
+     "conf": 0.3,
+     "evidence": [
+      "e9"
+     ]
+    }
+   ],
+   "changed": [
+    "new: subword splitting 0.70"
+   ]
+  },
+  "intent": "Test whether one concrete example of splitting keeps the thread going.",
+  "note": null,
+  "no_note_reason": null
+ },
+ "expect_codes": [
+  "schema_invalid"
+ ],
+ "expect_detail": "no_note_reason: None"
+}

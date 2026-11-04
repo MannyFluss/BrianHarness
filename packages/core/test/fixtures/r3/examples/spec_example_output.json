@@ -1,0 +1,50 @@
+{
+ "expect": "pass",
+ "source": "spec canvas 'Example output' (DIRECTOR_OUT) with its example digest excerpt",
+ "input": "a7.p1 \"Starters need feeding every day...\"      read   1.0x typical\na7.p2 \"Rye flour ferments much faster...\"       DEEP   2.4x typical, reread 2x   e31 (z 2.6, conf .74)\na7.p3 \"Most bakers use 75% hydration...\"        skim   0.3x typical               e32 (z -1.9, conf .70)\nlook-back: a5.p2 \"hot spots in your oven\" 3.1 s                                   e33 (z 2.1, conf .61)",
+ "output": {
+  "context_update": {
+   "summary": "Manny is planning his first rye sourdough. He engages most with the why of fermentation; recipe numbers get skimmed.",
+   "hypotheses": [
+    {
+     "label": "fermentation science",
+     "conf": 0.7,
+     "evidence": [
+      "e31",
+      "e19"
+     ]
+    },
+    {
+     "label": "oven hardware",
+     "conf": 0.4,
+     "evidence": [
+      "e33"
+     ]
+    }
+   ],
+   "changed": [
+    "raised fermentation science 0.55 -> 0.70"
+   ]
+  },
+  "intent": "See whether the fermentation thread keeps holding when the Actor goes deeper.",
+  "note": {
+   "id": "n5",
+   "rationale": "Deep read + 2 rereads on the rye-fermentation paragraph (e31), look-back to oven hot spots (e33); hydration skimmed (e32).",
+   "observation": "They seem most drawn to why rye ferments faster; the hydration numbers landed flat.",
+   "suggestion": {
+    "move": "go_deeper",
+    "target": "why rye ferments faster",
+    "text": "go deeper on why rye ferments faster, and skip more ratios"
+   },
+   "value": "Two turns of signal agree; a generic next reply would likely repeat ratios he skimmed.",
+   "evidence": [
+    "e31",
+    "e32",
+    "e33"
+   ],
+   "confidence": 0.78,
+   "expires_after_turns": 1
+  },
+  "no_note_reason": null
+ }
+}

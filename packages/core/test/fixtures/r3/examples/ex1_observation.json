@@ -1,0 +1,54 @@
+{
+ "expect": "pass",
+ "input": "[CHAT] u4 \"how did it work?\" · a4.p1 \"Caravans moved goods in relays...\" · a4.p2 \"Marco Polo's account made it famous in Europe...\"\nu5 \"ok what else is interesting about it?\"\na5.p1 \"It was a web of routes linking China and the Mediterranean...\" · a5.p2 \"Silk, spices, glass and paper moved along it...\" · a5.p3 \"Cities like Samarkand grew rich as relay points...\"\n[ATTENTION DIGEST · after a5 · window 38 s · tracking good (0.81) · baseline: 34 paragraphs]\na5.p1 read 1.1x · a5.p2 skim 0.4x e14 (z -1.8, conf .72) · a5.p3 DEEP 2.1x, reread 1x e15 (z 2.3, conf .75)\nlook-back: a4.p2 \"Marco Polo's account\" 2.6 s e16 (z 1.9, conf .66)\nSession ledger: silk road history 2 turns (0.62) · trade goods 1 turn (0.30)\n[YOUR FOOTPRINT] notes 1 of 5 Actor turns · session share 0.6% · n1 (turn 3, give_example) -> followed; next dwell 1.0x",
+ "previous_notes": [
+  {
+   "id": "n1",
+   "rationale": "-",
+   "suggestion": {
+    "move": "give_example",
+    "text": "give an example of a city on the route"
+   },
+   "value": "-",
+   "evidence": [
+    "e9"
+   ],
+   "confidence": 0.6,
+   "expires_after_turns": 1
+  }
+ ],
+ "output": {
+  "context_update": {
+   "summary": "Open Silk Road chat; people and cities beat lists of goods.",
+   "hypotheses": [
+    {
+     "label": "silk road history",
+     "conf": 0.66,
+     "evidence": [
+      "e15",
+      "e16"
+     ]
+    }
+   ],
+   "changed": [
+    "history 0.62 -> 0.66"
+   ]
+  },
+  "intent": "Let the Actor lean toward people and places on an open turn.",
+  "note": {
+   "id": "n2",
+   "rationale": "Deep read + reread on relay cities (e15), look-back to Marco Polo (e16), goods skimmed (e14).",
+   "observation": "The people and relay cities of the Silk Road hold them more than the list of goods.",
+   "value": "An open 'what else' would otherwise get more goods.",
+   "evidence": [
+    "e15",
+    "e16",
+    "e14"
+   ],
+   "confidence": 0.66,
+   "expires_after_turns": 1
+  },
+  "no_note_reason": null
+ },
+ "situation": "Silk Road chat; u5 open \"what else is interesting?\". a5.p3 relay cities DEEP 2.1x, reread (e15); look-back to Marco Polo a4.p2 (e16); goods list skimmed (e14). Tracking good 0.81. Footprint: 1 of 5 turns, 0.6%, n1 followed."
+}
