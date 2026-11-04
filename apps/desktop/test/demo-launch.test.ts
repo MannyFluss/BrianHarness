@@ -107,5 +107,5 @@ test("demo launch: plain chat (study off) never uploads as a study session; enab
   assert.deepEqual(w.log.filter((l) => l.path === "/v1/sessions").map((l) => l.kind).sort(), ["session", "study_start"]);
   const st = await t.study!.status();
   assert.equal(st.next, 2); assert.equal(st.total, 10);
-  assert.equal(STUDY_PROTOCOL_VERSION, 3);
+  assert.equal(STUDY_PROTOCOL_VERSION, 4);
 });

@@ -4,7 +4,7 @@
 // session_start only. Replays Manny's d2bd6006 turns through the real in-process transport with a fake Worker fetch.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { KVCredentialStore, MemoryKV, OPENER_CUE, PLAIN_SYSTEM_PROMPT, DIRECTOR_SYSTEM_PROMPT, StudyController, STUDY_PROGRESS_KEY } from "@brianharness/core/browser";
+import { KVCredentialStore, MemoryKV, OPENER_CUE, PLAIN_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, DIRECTOR_SYSTEM_PROMPT, StudyController, STUDY_PROGRESS_KEY } from "@brianharness/core/browser";
 import { createInProcessTransport } from "../src/transport/in-process.ts";
 
 const TOKEN = "bhd_fake_plain"; // fake literal
@@ -46,7 +46,7 @@ test("plain chat replay (d2bd6006 turns): plain prompt, no trailing note, latest
     const m = r.messages;
     assert.equal(m[0]!.role, "system"); assert.equal(m[0]!.content, PLAIN_SYSTEM_PROMPT);
     assert.equal(m.filter((x) => x.role === "system").length, 1, `request ${n}: exactly one (leading) system message`);
-    assert.ok(!m.some((x) => x.content.includes("[DIRECTOR STATE") || x.content === DIRECTOR_SYSTEM_PROMPT), "no state note, no Director prompt");
+    assert.ok(!m.some((x) => x.content.includes("[DIRECTOR STATE ·") || x.content === DIRECTOR_SYSTEM_PROMPT), "no state note, no Director prompt");
     assert.equal(m.at(-1)!.role, "user");
     assert.equal(m.at(-1)!.content, n === 0 ? OPENER_CUE : USER[n - 1], `request ${n}: the latest user message is last`);
     if (n > 0) assert.ok(!m.some((x) => x.content === OPENER_CUE), "cue on the opener only");
@@ -74,7 +74,8 @@ test("plain profile is chosen once from the study controller: off / finished -> 
   {
     const broken = { get: async () => { throw new Error("keychain"); }, set: async () => { throw new Error("keychain"); }, remove: async () => {}, keys: async () => [] };
     const { t, reqs } = setup(broken as unknown as MemoryKV); await t.providers.setApiKey("spider", TOKEN); await t.newSession();
-    assert.equal(reqs[0]!.messages[0]!.content, DIRECTOR_SYSTEM_PROMPT);
+    // protocol 4: the same prompt with the state note appended inside the leading system message
+    assert.ok(reqs[0]!.messages[0]!.content.startsWith(CHAT_SYSTEM_PROMPT + "\n\n[DIRECTOR STATE"));
   }
   // study on -> a study session: Director prompt + note, never plain
   {
@@ -116,4 +117,6 @@ test("StudyController.noStudyReason: off, finished, lost, error, and null after 
 
 test("plain prompt names the opener cue verbatim", () => {
   assert.ok(PLAIN_SYSTEM_PROMPT.includes(`"${OPENER_CUE}"`));
+  assert.equal(PLAIN_SYSTEM_PROMPT, CHAT_SYSTEM_PROMPT, "protocol 4: plain = the shared prompt with no note");
+  assert.notEqual(CHAT_SYSTEM_PROMPT, DIRECTOR_SYSTEM_PROMPT);
 });

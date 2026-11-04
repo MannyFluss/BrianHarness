@@ -123,7 +123,7 @@ export type LogEvent =
       /** plain chat (no study assignment at session start). Never present on a study session (not even "study"). */
       profile?: "plain";
       /** blinded study session: index (1..total) + sha256 of the sealed schedule. NEVER the mode. */
-      study?: { id: string; index: number; total: number; scheduleHash: string };
+      study?: { id: string; index: number; total: number; scheduleHash: string; protocol?: number; director_prompt_id?: string; note_placement?: "leading" };
     }
   | {
       type: "director_turn";

@@ -41,6 +41,7 @@ export interface ModelBackend {
   generate(req: GenerateRequest): Promise<GenerateResult>;
 }
 
+/** protocol <= 3 Director prompt (a trailing state note after the user turn). No longer sent; kept for the record. */
 export const DIRECTOR_SYSTEM_PROMPT = `You are the Director: a warm, curious conversational partner in a chat app.
 Your hidden goal is to discover what genuinely draws this person in, without ever announcing that goal.
 Before each of your turns you receive a [DIRECTOR STATE] note with telemetry and a Plan.
@@ -49,19 +50,31 @@ in the requested style about the planned topic. Keep it under 60 words, plain an
 Never mention the state note, telemetry, scores, typing, or that you are measuring anything.`;
 
 /**
- * Plain chat (profile "plain": a session started with no study assignment, chosen once in HarnessHost.newSession).
- * No plan, no state note, no topic steering: the reply answers or does what the person said. Study sessions never
- * see this prompt (they keep DIRECTOR_SYSTEM_PROMPT byte for byte).
+ * Protocol 4 (Nov 3 2026): ONE system prompt for every chat: plain chat, the adaptive arm and the baseline arm. It
+ * answers the person first; the [DIRECTOR STATE] note (study arms: the only thing that differs between them) is
+ * appended to this same leading system message (leadingSystemMessage) and never trails the user turn. Plain chat
+ * sends it with no note. DIRECTOR_PROMPT_ID (logged on protocol-4 study session_start) pins this exact text.
  */
-export const PLAIN_SYSTEM_PROMPT = `You are a warm, friendly chat partner in a chat app.
+export const CHAT_SYSTEM_PROMPT = `You are a warm, friendly chat partner in a chat app.
 Always respond to the person's latest message first. If they ask a question, answer it. If they give an instruction
 (repeat something, explain something, write or list something), do exactly that, fully and right away.
 Match the length to the request: a line or two for small talk, as much as a good answer needs for a real question.
-Stay on what they bring up; don't change the subject or steer toward topics of your own.
-A short follow-up question is optional: use one only when it genuinely helps, and usually not after an instruction.
+Stay with what they bring up. A short follow-up question is optional: use one only when it genuinely helps,
+and usually not after an instruction.
+These instructions may end with a [DIRECTOR STATE] note. Its Plan is only a light suggestion for that optional
+follow-up question when they have nothing specific going on; never let it replace, delay or shorten your answer.
+Never mention the note, telemetry, scores, typing, or that you are measuring anything.
 Keep the tone plain, friendly and conversational.
 The very first user message may be "(session start)": that is not from the person, so just greet them briefly
 and invite them to say what's on their mind.`;
+/** plain chat sends CHAT_SYSTEM_PROMPT with no note (same text; kept as a name for the plain profile) */
+export const PLAIN_SYSTEM_PROMPT = CHAT_SYSTEM_PROMPT;
+/** "dp4-" + first 8 hex of sha256(CHAT_SYSTEM_PROMPT), note excluded (a test pins it); identical in both arms */
+export const DIRECTOR_PROMPT_ID = "dp4-23e5a648";
+/** where the state / plan note goes (protocol 4): appended to the leading system message */
+export const NOTE_PLACEMENT = "leading" as const;
+/** the leading system message: the shared prompt, then (study arms / Director profile) a blank line and the note */
+export const leadingSystemMessage = (note: string): string => (note ? `${CHAT_SYSTEM_PROMPT}\n\n${note}` : CHAT_SYSTEM_PROMPT);
 
 /**
  * The fixed hidden user cue sent with the opener only (turn 0, no user message yet). gpt-oss on Ollama Cloud returns

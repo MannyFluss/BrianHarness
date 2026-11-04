@@ -5,7 +5,7 @@
  * Used identically by the desktop app (Electron main process) and the sim runner.
  */
 import type { ChatMessage, DirectorPlan, ExtractorFallbackReason, ExtractorOutcomeRecord, FeatureMap, FeedbackLogInput, FeedbackLogRecord, FrameState, LogEvent, RatingRecord, TypingEvent } from "./types.js";
-import { DIRECTOR_SYSTEM_PROMPT, OPENER_CUE, PLAIN_SYSTEM_PROMPT, OPENER_CUE_ID, type GenerateResult, type ModelBackend } from "./backends.js";
+import { DIRECTOR_PROMPT_ID, NOTE_PLACEMENT, OPENER_CUE, leadingSystemMessage, OPENER_CUE_ID, type GenerateResult, type ModelBackend } from "./backends.js";
 import { OPEN_TOPIC, baselineRotation, planBaselineTurn, planTurn, type DirectorPolicyOptions } from "./director.js";
 import { estimateEngagement, eegQuality, textFeatures, type EegBlendOptions, type EngagementContext } from "./engagement.js";
 import { InterestMap } from "./interest-map.js";
@@ -202,7 +202,7 @@ export class HarnessSession {
     for (const s of this.sources) await s.start?.();
     this.checkExtractorWarning(); // started without an extractor (no key / mock or local model)
     const st = this.opts.study;
-    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(this.plain ? { profile: "plain" as const } : {}), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash, ...(st.protocol !== undefined ? { protocol: st.protocol } : {}) }, ...(st.reissueOf ? { reissueOf: st.reissueOf } : {}), ...(st.manualReissue ? { manualReissue: true } : {}), ...(st.reissueReason ? { reissueReason: st.reissueReason } : {}), ...(st.progressRecovered ? { progressRecovered: true } : {}) } : {}) });
+    this.log({ type: "session_start", t: nowIso(), sessionId: this.id, userId: this.userId, backend: this.backend.id, sources: this.sources.map((s) => `${s.id}:${s.kind}`), ...(this.plain ? { profile: "plain" as const } : {}), ...(st ? { study: { id: st.id, index: st.index, total: st.total, scheduleHash: st.scheduleHash, ...(st.protocol !== undefined ? { protocol: st.protocol } : {}), ...(st.protocol !== undefined && st.protocol >= 4 ? { director_prompt_id: DIRECTOR_PROMPT_ID, note_placement: NOTE_PLACEMENT } : {}) }, ...(st.reissueOf ? { reissueOf: st.reissueOf } : {}), ...(st.manualReissue ? { manualReissue: true } : {}), ...(st.reissueReason ? { reissueReason: st.reissueReason } : {}), ...(st.progressRecovered ? { progressRecovered: true } : {}) } : {}) });
     return this.directorTurn(opts);
   }
 
@@ -222,24 +222,25 @@ export class HarnessSession {
     const stateNote = this.baseline ? buildBaselineStateNote(plan) : buildStateNote(this.frame, this.map, plan);
     // opener (no user message yet): a fixed hidden user cue, same in every arm (backends.ts OPENER_CUE)
     const openerCue = !this.transcript.some((m) => m.role === "user");
+    // protocol 4: the note is part of the ONE leading system message (shared prompt + blank line + note); the arms
+    // differ only in the note text; the latest user message (or the opener cue) is always the last message
     const messages: ChatMessage[] = [
-      { role: "system", content: DIRECTOR_SYSTEM_PROMPT },
+      { role: "system", content: leadingSystemMessage(stateNote) },
       ...this.transcript,
-      { role: "system", content: stateNote },
       ...(openerCue ? [{ role: "user" as const, content: OPENER_CUE }] : []),
     ];
     return this.generateTurn(messages, plan, stateNote, openerCue, opts);
   }
 
   /**
-   * Plain chat: ONE leading system message (PLAIN_SYSTEM_PROMPT), the transcript, and the opener cue on turn 0, so
-   * the latest user message is always the last message. No plan, no state note (nothing trails the user turn).
+   * Plain chat: ONE leading system message (the shared protocol-4 prompt with NO note), the transcript, and the opener
+   * cue on turn 0, so the latest user message is always the last message. No plan, no state note.
    * The opener cue and the empty-completion retry are the shared generateTurn path, unchanged.
    */
   private plainTurn(opts: TurnOptions): Promise<DirectorTurnResult> {
     const openerCue = !this.transcript.some((m) => m.role === "user");
     const messages: ChatMessage[] = [
-      { role: "system", content: PLAIN_SYSTEM_PROMPT },
+      { role: "system", content: leadingSystemMessage("") },
       ...this.transcript,
       ...(openerCue ? [{ role: "user" as const, content: OPENER_CUE }] : []),
     ];

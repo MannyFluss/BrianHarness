@@ -44,8 +44,12 @@ export const REISSUE_REASON_MAX = 120;
  * 2 = builds 1604 / 2031 (Director replies cut by max_tokens 200: the Researcher treats them as practice).
  * 3 = the P0 cut-off fix (per-model max_tokens, finish_reason/truncated logged): a protocol-2 install restarts
  *     at index 1 with a new schedule (no progress recovery: recovery only matches the new schedule's hash).
+ * 4 = report d2bd6006 fix: every arm uses the shared answer-first prompt (CHAT_SYSTEM_PROMPT) with the state / plan
+ *     note appended to the leading system message (never after the user turn); the arms still differ only in the
+ *     note text. session_start.study adds director_prompt_id + note_placement:"leading". A protocol-3 install resets
+ *     to "not started" exactly like protocol 2 did (same ensureProtocol path, no recovery of v3 progress).
  */
-export const STUDY_PROTOCOL_VERSION = 3;
+export const STUDY_PROTOCOL_VERSION = 4;
 /** a study session counts only with >= this many user turns AND an answered session rating; else its index is reissued */
 export const STUDY_MIN_USER_TURNS = 8;
 

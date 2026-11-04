@@ -54,7 +54,7 @@ writes `phaseD-schedule-<hash[0:12]>.json` whose content is `raw` byte-for-byte,
 
 ## Study protocol
 
-`STUDY_PROTOCOL_VERSION = 3` (2 = the freeze, builds 1604/2031; 3 = the P0 reply cut-off fix: their Director replies were cut by max_tokens 200). It is sealed into the schedule as `protocol` and logged in
+`STUDY_PROTOCOL_VERSION = 4` (2 = the freeze, builds 1604/2031; 3 = the P0 reply cut-off fix: their Director replies were cut by max_tokens 200; 4 = the report d2bd6006 fix: both arms use the shared answer-first prompt with the state / plan note in the leading system message, `session_start.study` adds `director_prompt_id` and `note_placement: "leading"`). It is sealed into the schedule as `protocol` and logged in
 `session_start.study.protocol`, `final.protocol` and `study_start.protocol` (local record; see the upload note
 below). On launch a schedule with no or a lower `protocol` is discarded together with the study progress
 (enabled/next/last), so "Start study" seals a new schedule with a new hash. Session files and the upload
@@ -169,7 +169,8 @@ body against the Worker's own `checkJsonl` / `scanValue` (local checkout, read-o
 // session_start
 { type: "session_start", t: string, sessionId: string, userId: string, backend: string, // e.g. "spider-cloud:gemma4:cloud"
   sources: string[],                                       // ["typing:typing"]
-  study?: { id: "phaseD", index: number /*1..10*/, total: 10, scheduleHash: string /*64 hex*/, protocol?: number /*STUDY_PROTOCOL_VERSION: 3 (2 = builds 1604/2031)*/ },
+  study?: { id: "phaseD", index: number /*1..10*/, total: 10, scheduleHash: string /*64 hex*/, protocol?: number /*STUDY_PROTOCOL_VERSION: 4 (2 = builds 1604/2031, 3 = 601300f)*/, director_prompt_id?: string /*protocol >= 4: "dp4-" + 8 hex of sha256(shared prompt, note excluded); same in both arms*/, note_placement?: "leading" /*protocol >= 4*/ },
+  profile?: "plain", // non-study sessions only, when no study is running (off / finished); never on study sessions
   reissueOf?: string,                                      // study only: the invalid previous session, or "manual"
   manualReissue?: true, reissueReason?: string,            // manual redo only (see Manual reissue)
   progressRecovered?: true }                               // first study session after a progress rebuild / Set next

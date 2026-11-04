@@ -183,7 +183,7 @@ const shim = ({ settings, order, next }) => {
   localStorage.setItem("brianharness/settings", JSON.stringify(settings));
   localStorage.setItem("brianharness/credentials/spider", JSON.stringify({ type: "api_key", key: "proxy-swaps-in-the-real-token" }));
   localStorage.setItem("brianharness/llm-extract/calls", JSON.stringify({ calls: 50, max: 50 })); // extractor off
-  localStorage.setItem("mock-keychain/study/phaseD/schedule", JSON.stringify({ study: "phaseD", version: 1, seed: 1, order, createdAt: new Date().toISOString(), protocol: 3 }));
+  localStorage.setItem("mock-keychain/study/phaseD/schedule", JSON.stringify({ study: "phaseD", version: 1, seed: 1, order, createdAt: new Date().toISOString(), protocol: 4 }));
   localStorage.setItem("mock-keychain/study/phaseD/progress", JSON.stringify({ enabled: true, next }));
 };
 const native = () => {

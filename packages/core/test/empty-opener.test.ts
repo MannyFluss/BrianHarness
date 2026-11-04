@@ -1,6 +1,7 @@
 // P0 Nov 3 2026 empty launch opener: the opener was [system prompt, system state note] with no user turn; Ollama Cloud
 // answered a single done chunk (no prompt eval, no tokens) -> "" with finish_reason stop. Proposal (a): a fixed hidden
 // user cue on the opener only, identical in every arm, not in the transcript, not a user_turn, flagged opener_cue.
+// Protocol 4: the state note is part of the leading system message, so the opener is [system, user cue].
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -17,10 +18,10 @@ test("opener carries the fixed user cue in both arms; later turns and the transc
     await s.start();
     await s.reply("I bake bread");
     await s.reply("sourdough mostly");
-    assert.deepEqual(sent[0]!.map((m) => m.role), ["system", "system", "user"]);
+    assert.deepEqual(sent[0]!.map((m) => m.role), ["system", "user"]); // protocol 4: the note is inside the leading system message
     assert.deepEqual(sent[0]!.at(-1), { role: "user", content: OPENER_CUE });
     for (const m of sent.slice(1)) assert.ok(!m.some((x) => x.content === OPENER_CUE), "cue only on the opener");
-    assert.deepEqual(sent[1]!.map((m) => m.role), ["system", "assistant", "user", "system"]);
+    assert.deepEqual(sent[1]!.map((m) => m.role), ["system", "assistant", "user"]); // the latest user message is last
     const log = store.readSession(s.id);
     const dts = log.filter((e) => e.type === "director_turn") as Extract<LogEvent, { type: "director_turn" }>[];
     assert.deepEqual(dts.map((d) => d.opener_cue), [true, false, false]);
