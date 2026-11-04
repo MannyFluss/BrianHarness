@@ -36,6 +36,19 @@ export function studyTapAction(enabled: boolean, asked: boolean, sinceAskedMs: n
   return sinceAskedMs < STUDY_CONFIRM_MIN_MS ? "ignore" : "toggle";
 }
 
+/**
+ * Study on/stop button label. While the open chat is practice or plain (not a study session) it names the NEXT
+ * study session ("Study on · next: session 1/10 · stop"); once a study session is open it names that session
+ * ("Study 1/10 · stop"). Uses only progress + the open session's index (never the arm or the schedule).
+ */
+export function studyToggleLabel(study: { enabled: boolean; next: number; total: number }, open: { inStudy: boolean; index: number | null } | null, confirm: boolean): string {
+  if (study.enabled) {
+    if (open?.inStudy && open.index !== null) return `Study ${open.index}/${study.total} · stop`;
+    return `Study on · next: session ${Math.min(study.next, study.total)}/${study.total} · stop`;
+  }
+  return confirm ? "Tap again to start the 10-session study" : study.next > study.total ? "Study complete" : "Start study";
+}
+
 // Settings > data: "Export logs" (session JSONL + interest map) and the Phase D study switch.
 // Shows only the study's progress, never its schedule or a session's condition.
 export function StudyData() {
@@ -48,11 +61,22 @@ export function StudyData() {
   const [uploads, setUploads] = useState<UploadStatusView | null>(null);
   const [redo, setRedo] = useState<{ n: string; reason: string; phrase: string } | null>(null);
   const [setNext, setSetNext] = useState<{ n: string; phrase: string } | null>(null);
+  const [open, setOpen] = useState<{ inStudy: boolean; index: number | null } | null>(null);
+  // the open chat: study session or not ({inStudy, index} only; never starts a session)
+  const refreshOpen = useCallback(async () => {
+    if (b.feedback?.context) setOpen((await b.feedback.context().catch(() => null))?.study ?? null);
+  }, [b]);
   const refresh = useCallback(async () => {
     if (b.study) setStudy(await b.study.status().catch(() => null));
     if (b.uploads) setUploads(await b.uploads.status().catch(() => null));
-  }, [b]);
+    await refreshOpen();
+  }, [b, refreshOpen]);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!b.study) return;
+    const t = setInterval(() => { void b.study!.status().then(setStudy, () => {}); void refreshOpen(); }, 5000);
+    return () => clearInterval(t);
+  }, [b, refreshOpen]);
   if (!b.exportLogs && !b.study) return null;
 
   const exportLogs = async () => {
@@ -133,7 +157,7 @@ export function StudyData() {
       {b.study && study && !study.progressLost && (
         <button className={row} onClick={() => void toggleStudy()} data-study-toggle>
           <FlaskConicalIcon className="size-3" />
-          {study.enabled ? `Study ${Math.min(study.next, study.total)}/${study.total} · stop` : confirm ? "Tap again to start the 10-session study" : study.next > study.total ? "Study complete" : "Start study"}
+          {studyToggleLabel(study, open, confirm)}
         </button>
       )}
       {b.study?.reissue && study?.scheduled && !study.progressLost && assigned > 0 && (
