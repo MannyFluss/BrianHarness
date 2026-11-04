@@ -15,3 +15,8 @@ export * from "./digest.js";
 export * from "./director.js";
 export * from "./session.js";
 export * from "./director-prompt-text.js";
+// E5: gaze compression (R1 reference port + streaming GazeSource), R2 replay, paragraph visibility
+export * as gazeRef from "./gaze-ref.js";
+export * from "./gaze-stream.js";
+export * from "./gaze-replay.js";
+export * from "./visibility.js";
