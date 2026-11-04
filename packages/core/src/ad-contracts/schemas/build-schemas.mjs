@@ -89,7 +89,9 @@ const pluginSchema = {
   definitions: {
     CameraPermission: permission, Orientation: orientation, HealthCode: healthCode, ScreenInfo: screenInfo, GazeStatus: status,
     SyntheticSource: synthetic, StartOptions: startOptions, StartResult: obj({ status: { $ref: "#/definitions/GazeStatus" }, screen: { $ref: "#/definitions/ScreenInfo" } }),
-    StatusResult: obj({ status: { $ref: "#/definitions/GazeStatus" } }),
+    /** v1.0.1 patch: getStatus() resolves to GazeStatus itself (the TS was right; stop/pause/resume keep {status}) */
+    StatusResult: { $ref: "#/definitions/GazeStatus" },
+    StopPauseResumeResult: obj({ status: { $ref: "#/definitions/GazeStatus" } }),
     PermissionResult: obj({ permission }),
     CalibrateOptions: calibrateOptions, CalibrateResult: calibrateResult,
     RestoreCalibrationOptions: obj({ orientation, model: arr({ type: "number" }, 1, 4096) }), OkResult: obj({ ok: { type: "boolean" } }),

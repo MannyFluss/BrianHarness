@@ -7,6 +7,13 @@ Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/a
 
 ## Changes
 
+### contract-v1.0.1 (2026-11-04, patch; no field semantics change; included in contract-v1.1)
+1. `gaze-plugin.schema.json`: `StatusResult` (what `getStatus()` resolves to) is now `GazeStatus` itself, matching
+   `gaze-plugin.ts` (`getStatus(): Promise<GazeStatus>`), which IOS Dev built to. The old schema wrongly wrapped it
+   as `{status}`. The `{status}` wrapper that `stop()`, `pause()` and `resume()` return is `StopPauseResumeResult`.
+2. README / examples only: the example iPad is the confirmed 11-inch iPad Pro, `iPad13,4` (1194 x 834 pt landscape).
+3. README only: the unsealing sentence now states the Researcher's ruling (see Resolved with Researcher, 3).
+
 ### contract-v1.1 (2026-11-04, additive; every contract-v1 line still validates)
 1. `blinding.json` + `blinding.ts`: the ONE shared blinding list (arm-key patterns = protocol 4's `ARM_KEYS` exactly,
    TAB-ONLY fields, sealed-only types, sealed-only health codes, the `.sealed` suffix). `tools/phaseD/check_blinding.mjs`
@@ -154,19 +161,19 @@ samples about every 100 ms) and `status`.
     "code": null
   },
   "screen": {
-    "deviceModel": "iPad13,8",
+    "deviceModel": "iPad13,4",
     "platform": "ios",
     "orientation": "landscape_right",
-    "widthPt": 1366,
-    "heightPt": 1024,
+    "widthPt": 1194,
+    "heightPt": 834,
     "scale": 2,
     "webview": {
       "x": 0,
       "y": 0,
-      "width": 1366,
-      "height": 1024
+      "width": 1194,
+      "height": 834
     },
-    "widthMm": 263
+    "widthMm": 230
   }
 }
 ```
@@ -197,43 +204,43 @@ samples about every 100 ms) and `status`.
     },
     {
       "id": "c2",
-      "x": 683,
+      "x": 597,
       "y": 80
     },
     {
       "id": "c3",
-      "x": 1286,
+      "x": 1114,
       "y": 80
     },
     {
       "id": "c4",
       "x": 80,
-      "y": 512
+      "y": 417
     },
     {
       "id": "c5",
-      "x": 683,
-      "y": 512
+      "x": 597,
+      "y": 417
     },
     {
       "id": "c6",
-      "x": 1286,
-      "y": 512
+      "x": 1114,
+      "y": 417
     },
     {
       "id": "c7",
       "x": 80,
-      "y": 944
+      "y": 754
     },
     {
       "id": "c8",
-      "x": 683,
-      "y": 944
+      "x": 597,
+      "y": 754
     },
     {
       "id": "c9",
-      "x": 1286,
-      "y": 944
+      "x": 1114,
+      "y": 754
     }
   ]
 }
@@ -326,19 +333,19 @@ samples about every 100 ms) and `status`.
   "src": "synthetic",
   "hz": 30,
   "screen": {
-    "deviceModel": "iPad13,8",
+    "deviceModel": "iPad13,4",
     "platform": "ios",
     "orientation": "landscape_right",
-    "widthPt": 1366,
-    "heightPt": 1024,
+    "widthPt": 1194,
+    "heightPt": 834,
     "scale": 2,
     "webview": {
       "x": 0,
       "y": 0,
-      "width": 1366,
-      "height": 1024
+      "width": 1194,
+      "height": 834
     },
-    "widthMm": 263
+    "widthMm": 230
   },
   "samples": [
     {
@@ -948,6 +955,17 @@ Every other event type has an example in `examples/event-*.json`, and all of the
     director.timeout, director.kill_switch, director.leak_breaker`.
 20. **JSON Schema draft-07**, which iOS, Python and Worker tooling all read. Ajv validates it in the test (`strict`
     on, except `strictRequired`, because closed sub-schemas use `required` to forbid fields).
+21. **iOS gaze plugin choices (IOS Dev, accepted):**
+    - `conf` is a heuristic from the ARKit tracking state: 0.95 normal, 0.5 limited, reduced for closed eyes,
+      |head| over 30°, or a distance outside 15-90 cm. It is not a calibrated probability.
+    - `start()` rejects with the health code as the error code, or `EINVAL` / `EREPLAY` for bad input.
+    - A calibrate target with no face samples returns `ok:false` with `gaze.low_quality`.
+    - Replayed data is always `src:"synthetic"`.
+    - No bridge-delay correction in the clock anchor (v1).
+    - Synthetic files resolve from `public/<file>`, then the bundle root.
+    - Head-pose signs (decision 6) are unverified until a real-device check, so Phase 1 features must not depend on the
+      sign of head pose.
+
 
 ## Resolved with Researcher (Nov 4 2026)
 
@@ -969,6 +987,9 @@ Every other event type has an example in `examples/event-*.json`, and all of the
    id, model and run id. The sealed log is never re-uploaded and stays immutable and hash-pinned. Judge output
    computed on sealed logs is stored sealed too. Judge fields stay null in the main log. A judge-file type can wait
    for contract-v2.
+   - Per session, only the participant-side steps come first: the session survey and the blind guess. The app never
+     reveals the arm. Analyst unsealing is dataset-level only, after the R5 stopping rule is met and the analysis code
+     is hash-frozen. Interim reports never read sealed logs.
 4. A survey/rating event for bh-ad/1 comes in contract-v2.
 
 ## Blinded guard rules (shared by the client guard and check_blinding)
@@ -979,7 +1000,9 @@ any line has: `session_start.arm` or `p_inject`; `actor_turn.note_id` or `actor_
 note_outcome | session_share`; `health.code` `director.leak_breaker`; or any key matching the shared arm-key list at any
 depth. Fail closed: every line must be a bh-ad/1 object of this session and the first line its session_start, else
 reject. A `<id>.sealed` upload is accepted only when its own session_start and the base `<id>` main log are blinded.
-The sealed log needs a read key the app never holds and is unsealed only at dataset level (ruling 3).
+The sealed log needs a read key the app never holds and is unsealed only at dataset level: analyst unsealing happens only after the R5 stopping rule is met and the analysis code is
+hash-frozen; per session only the participant-side survey and blind guess come first, the app never reveals the arm,
+and interim reports never read sealed logs (ruling 3).
 check_blinding.mjs applies the same per-line rules to every bh-ad/1 blinded main log in a folder (sealed files are
 counted, not checked; tab_visible logs carry the arm by design).
 
@@ -988,3 +1011,28 @@ counted, not checked; tab_visible logs carry the arm by design).
 1. Accept the `<sessionId>.sealed` companion upload as a normal `ad_session` (it already passes `ID_RE`). Optionally,
    restrict reading it to a separate key.
 2. Implement the server side of the blinded guard (approved by the Researcher): same rules, read from `blinding.json`, fail closed, and reject a `.sealed` upload whose base session isn't blinded. Proposed error: 422 with a code per `BLINDED_GUARD_CODES` (naming is yours).
+
+## contract-v2 backlog (not implemented; collected for v2)
+
+From R5 (`research/R5/`: PREREG_EVAL_DRAFT.md §10, SURVEY_EVENT_PROPOSAL.md, PILOT_ACCURACY.md):
+1. A `survey` event with `blind_guess`; `probe_trigger` and `note_id` are sealed-only (TAB_ONLY_FIELDS.survey).
+2. Pilot events: `pilot_target`, `pilot_page`, `pilot_run`.
+3. `director_would_be` tokens for held-back (shadow / blocked) notes, for the would-be share.
+4. `session_start` pins: the format id and assembled prompt sha8 (v1.1 has them as optional `director_format_id` /
+   `director_assembled_sha8`; v2 makes them required), plus `judge_prompt_id`, `gaze_config_hash`, `survey_id`.
+5. The per-turn injection draw `u` on `injection`, sealed only (coin provenance for the audit).
+6. A judge-file schema (`bh-ad-judge/1`: sessionId, note id or turn, judge prompt id, model, run id; stored sealed for
+   sealed logs).
+7. `check_blinding` exempts `survey.blind_guess` (its value is an arm word) and masks arm words in survey free text.
+
+From R1 (`research/R1/FEATURES.md`, "What R1 needs that contract-v1 lacks"):
+1. Drift anchors: an event for taps / known-gaze moments `{t, x, y}` (composer-tap drift correction).
+2. Keystroke timing: first-key time and pause count (or inter-key intervals, never key identity) on `user_turn`.
+3. Paragraph streaming / visibility: `aoi_layout` box `complete_t` (stream-complete time).
+4. Line height per AOI box (`line_h`).
+5. A fixed paragraph split rule for excerpts, in the contract.
+6. Calibration validation error (`errDeg` / `errParas` from a validation-dot check) from `calibrate`.
+7. A Mac meaning for `Orientation`.
+8. Measured delivery rate (fps) next to the nominal `gaze_quality.hz`.
+9. `aoi` on `gaze_l1` fixations.
+(R1 item 9, streaming state across ~100 ms batches, and item 10, `lids`, are implementation notes, not contract needs.)

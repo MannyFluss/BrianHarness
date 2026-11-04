@@ -11,18 +11,18 @@
     "code": null
   },
   "screen": {
-    "deviceModel": "iPad13,8",
+    "deviceModel": "iPad13,4",
     "platform": "ios",
     "orientation": "landscape_right",
-    "widthPt": 1366,
-    "heightPt": 1024,
+    "widthPt": 1194,
+    "heightPt": 834,
     "scale": 2,
     "webview": {
       "x": 0,
       "y": 0,
-      "width": 1366,
-      "height": 1024
+      "width": 1194,
+      "height": 834
     },
-    "widthMm": 263
+    "widthMm": 230
   }
 }

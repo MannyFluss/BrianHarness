@@ -98,6 +98,10 @@ test("gaze: numbers only, never images; null estimate rules; rates 30/15", () =>
   assert.ok(!valid(P, "GazeBatchEvent", { ...X.pluginGazeBatch, samples: [{ ...X.gazeSample, pixels: "AAAA" }] }).ok);
   assert.ok(!valid(P, "StartResult", { ...X.pluginStartResult, snapshot: "x" }).ok);
   assert.ok(!valid(P, "GazeStatus", { ...X.pluginStatusPaused, preview: true }).ok);
+  // v1.0.1: getStatus() resolves to GazeStatus itself (gaze-plugin.ts); stop/pause/resume resolve to {status}
+  assert.ok(valid(P, "StatusResult", X.pluginStatusPaused).ok);
+  assert.ok(!valid(P, "StatusResult", { status: X.pluginStatusPaused }).ok);
+  assert.ok(valid(P, "StopPauseResumeResult", { status: X.pluginStatusPaused }).ok);
   assert.ok(!valid(P, "StartOptions", { mode: "synthetic", webNow: 1 }).ok, "synthetic needs a source");
   assert.ok(!valid(P, "StartOptions", { mode: "camera", webNow: 1, synthetic: { file: "a.json" } }).ok);
   assert.ok(!valid(P, "SyntheticSource", { file: "/etc/passwd.json" }).ok, "bundle-relative path only");

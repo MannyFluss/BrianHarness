@@ -460,6 +460,9 @@
       }
     },
     "StatusResult": {
+      "$ref": "#/definitions/GazeStatus"
+    },
+    "StopPauseResumeResult": {
       "type": "object",
       "additionalProperties": false,
       "required": [
