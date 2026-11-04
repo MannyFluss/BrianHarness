@@ -2,6 +2,7 @@
 // Report d2bd6006 P4 verify: on a built web bundle (Mock, plain web, fresh profile), a tap on a PAST sidebar row
 // shows that session's transcript read-only (composer gone, "New chat" offered), and a tap on the CURRENT row brings
 // the live chat back untouched. iPad landscape 1194x834 + 1194x406 (touch, iPadOS desktop UA) and iPhone portrait.
+// Plus: during a study session the past rows are disabled (note shown) and a forced tap opens nothing.
 // Usage: DIST=apps/desktop/dist-web OUT=/tmp/out node apps/desktop/scripts/verify-past-chat.mjs
 import { createServer } from "node:http";
 import { readFileSync, existsSync, statSync, mkdirSync, writeFileSync } from "node:fs";
@@ -65,6 +66,41 @@ try {
     check(!(await viewer.count()) && (await ta.isVisible()) && live.includes(SECOND) && !live.includes(FIRST), `${c.name}: tap on the current row returns to the live chat untouched`);
     await page.screenshot({ path: join(out, `${c.name}-3-back-to-live.png`) });
     check(errors.length === 0, `${c.name}: no page errors`, errors.slice(0, 3));
+    await ctx.close();
+  }
+  // during a study session: past rows are disabled with a note, a (forced) tap opens nothing, nothing is written
+  {
+    const c = CASES[0], name = `${c.name}-study`;
+    const ctx = await b.newContext({ viewport: { width: c.w, height: c.h }, hasTouch: true, isMobile: true, deviceScaleFactor: 2, userAgent: c.ua });
+    const page = await ctx.newPage();
+    const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
+    await page.goto(`http://127.0.0.1:${PORT}/`);
+    const ta = page.locator("textarea"); await ta.waitFor({ timeout: 20000 });
+    const idle = () => page.waitForFunction(() => document.querySelector(".eeg-app")?.getAttribute("data-busy") === "false", null, { timeout: 20000 });
+    const say = async (t) => { await idle(); await ta.fill(t); await page.getByRole("button", { name: /^send$/i }).tap(); await page.waitForTimeout(300); await idle(); };
+    await say(FIRST);
+    const toggle = page.locator("[data-study-toggle]");
+    await toggle.tap(); await page.waitForTimeout(900); await toggle.tap(); await page.waitForTimeout(800);
+    await page.locator("aside").getByRole("button", { name: "New chat" }).tap(); await page.waitForTimeout(700);
+    const skip = page.getByRole("button", { name: /^skip$/i });
+    if (await skip.count()) { await skip.first().tap({ force: true }); await page.waitForTimeout(300); }
+    await idle();
+    await say("a study turn");
+    // the toggle label refreshes on a 5 s poll (release-p4 StudyData): wait for "Study N/10 · stop"
+    const inStudy = await page.waitForFunction(() => /Study \d+\/\d+ · stop/.test(document.querySelector("[data-study-toggle]")?.textContent ?? ""), null, { timeout: 8000 }).then(() => true, () => false);
+    const past = page.locator("[data-session-row='past']");
+    const snap = () => page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)])));
+    const before = await snap();
+    check(inStudy, `${name}: a study session is running`, await toggle.textContent().catch(() => null));
+    check(await past.count() >= 1 && (await past.first().isDisabled()), `${name}: past rows disabled`, { past: await past.count() });
+    const note = page.locator("[data-sessions-locked]");
+    check(await note.isVisible() && /after this study session/i.test(await note.innerText()), `${name}: "Past chats open after this study session." shown`, await note.innerText().catch(() => null));
+    await page.screenshot({ path: join(out, `${name}-1-locked.png`) });
+    await past.first().tap({ force: true }).catch(() => {});
+    await page.waitForTimeout(500);
+    check(!(await page.locator("[data-transcript-viewer]").count()) && (await ta.isVisible()), `${name}: a forced tap opens nothing; the study chat stays`);
+    check(JSON.stringify(await snap()) === JSON.stringify(before), `${name}: nothing written to storage by the tap`);
+    check(errors.length === 0, `${name}: no page errors`, errors.slice(0, 3));
     await ctx.close();
   }
 } finally { await b.close(); srv.close(); }
