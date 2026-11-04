@@ -2,3 +2,6 @@
 export * from "./storage.js";
 export * from "./log.js";
 export * from "./upload.js";
+export * from "./tokenizer.js";
+export * from "./tokenizer-node.js";
+export * from "./share.js";
