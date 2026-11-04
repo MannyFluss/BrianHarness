@@ -81,6 +81,19 @@ export function stem(w: string): string {
 }
 
 /**
+ * Command words (report d2bd6006: "Repeat this phrase I am ai", "Test" became topics kp:repeat / kp:test and the
+ * adaptive note planned "EXPLORE repeat"). Words that instruct the chat partner or test the app never name an
+ * interest; part of IDF_STOPWORDS, so they are dropped as unigrams and trimmed from bigram edges.
+ */
+const IDF_COMMAND_WORDS_LIST = `
+repeat repeats repeating repeated test tests testing tested explain explains explaining explained describe describes described
+summarize summarise summarizes summarises summary translate translates translation define defines definition list lists
+write writes rewrite rewrites paraphrase phrase phrases sentence sentences quote type typed typing reply replies respond
+responds response prompt prompts command commands instruction instructions focus focusing elaborate clarify
+`.split(/\s+/).filter(Boolean);
+export const IDF_COMMAND_WORDS: ReadonlySet<string> = new Set(IDF_COMMAND_WORDS_LIST);
+
+/**
  * Generic English function words, common verbs, time words and conversational fillers. Deliberately
  * topic-free: nothing here names a hobby (tests assert it contains no sim persona passion word).
  */
@@ -106,7 +119,7 @@ first second third last next new old big small little huge tiny whole full high 
 dont didnt doesnt cant wont im ive id youre thats theres isnt wasnt
 idk tbh imo imho btw fyi ngl lmao rofl smh omw irl nah meh yup ya yah ok k gonna wanna gotta kinda dunno lemme
 bored tired busy stressed relaxed relaxing exhausted sleepy annoyed calm chill weird boring awesome cute
-`.split(/\s+/).filter(Boolean));
+`.split(/\s+/).concat([...IDF_COMMAND_WORDS_LIST]).filter(Boolean));
 
 /**
  * Evaluative adjectives, intensifiers and exclamations ("i'd make the wizard mode insane", "alright"): they

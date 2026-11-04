@@ -14,6 +14,7 @@
  * API key, a disk cache and a hard call cap through the options.
  * Leak-free: the prompt contains no example hobbies; tests check it against the sim persona vocabulary.
  */
+import { IDF_COMMAND_WORDS } from "./tagger-idf.js";
 import type { RankPrior, TopicTag, TopicTagger } from "./tagger.js";
 import { KeyphraseIdfTagger, stem, type KeyphraseIdfOptions } from "./tagger-idf.js";
 import { normalizeOllamaBaseUrl } from "./providers/ollama.js";
@@ -213,6 +214,7 @@ export function parseExtractorResponse(raw: string): ExtractedInterest[] {
     const o = x as { label?: unknown; confidence?: unknown; turns?: unknown };
     const label = String(o.label ?? "").trim().toLowerCase().replace(/\s+/g, " ");
     if (!label || label.length > 60) continue;
+    if (label.split(/[\s-]+/).every((w) => IDF_COMMAND_WORDS.has(w))) continue; // "repeat", "test": command words never name an interest
     const c = Number(o.confidence);
     const turns = Array.isArray(o.turns) ? o.turns.map(Number).filter((n) => Number.isFinite(n)) : [];
     out.push({ label, confidence: Number.isFinite(c) ? Math.max(0, Math.min(1, c)) : 0.5, turns });
