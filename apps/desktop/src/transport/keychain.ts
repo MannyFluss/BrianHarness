@@ -4,6 +4,7 @@
 // keychainKV adapts it to core's KeyValueStore, so KVCredentialStore (same JSON records and
 // "credentials/<provider>" keys as the web build) works unchanged on top.
 import { KVCredentialStore, MemoryKV, type CredentialStoreLike, type KeyValueStore, type StoredCredential } from "@brianharness/core/browser";
+import { scrubSecrets } from "../secrets";
 
 export interface BHKeychainPlugin {
   get(o: { key: string }): Promise<{ value: string | null | undefined }>;
@@ -36,6 +37,9 @@ export const KEYCHAIN_UNAVAILABLE_NOTE =
   "iOS Keychain unavailable on this build (OSStatus -34018 errSecMissingEntitlement, e.g. an unsigned simulator build). Keys you add are kept in memory for this launch only; keys saved earlier on this device still work.";
 
 export function keychainErrorMessage(op: string, err: unknown): string {
+  return scrubSecrets(keychainErrorMessageRaw(op, err));
+}
+function keychainErrorMessageRaw(op: string, err: unknown): string {
   const st = keychainStatus(err);
   if (isKeychainProgrammingError(err)) return `iOS Keychain ${op}: invalid argument (EINVAL, a bug in the app's call): ${String((err as Error)?.message ?? err)}`;
   if (isMissingEntitlement(err)) return `iOS Keychain ${op} failed: OSStatus -34018 errSecMissingEntitlement (this build has no keychain entitlement, e.g. an unsigned simulator build)`;

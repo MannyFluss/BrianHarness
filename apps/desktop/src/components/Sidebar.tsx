@@ -14,7 +14,16 @@ function when(iso: string | null) {
 }
 
 // column: collapsible left column (iPad landscape / Mac). drawer: slide-over with a backdrop (iPhone).
-export function Sidebar({ open, sessions, info, onNew, onClose, onInfo, pickerRef, onReport, variant = "column" }: { open: boolean; sessions: SessionItem[]; info: Info | null; onNew: () => void; onClose: () => void; onInfo: (i: Info) => void; pickerRef?: React.MutableRefObject<(() => void) | null>; onReport?: () => void; variant?: "column" | "drawer" }) {
+/** a row's accessible name: date + turns only (never the title, which is the user's own text: it would reach the
+ * flight recorder's tap / screen events, and a study session's title is never recorded) */
+export function sessionRowLabel(s: Pick<SessionItem, "startedAt" | "turns" | "active">, viewing: boolean): string {
+  const meta = `${when(s.startedAt) || "undated"}, ${s.turns} ${s.turns === 1 ? "turn" : "turns"}`;
+  return s.active ? `Current chat, ${meta}` : `${viewing ? "Viewing past chat" : "Open past chat"}, ${meta}`;
+}
+
+// onOpenSession: tap a row = open that past session read-only (the current row = back to the live chat).
+// openLocked: a study session is in progress (or a reply / rating step is showing): past rows are disabled.
+export function Sidebar({ open, sessions, info, onNew, onClose, onInfo, pickerRef, onReport, variant = "column", onOpenSession, viewingId = null, openLocked = null }: { open: boolean; sessions: SessionItem[]; info: Info | null; onNew: () => void; onClose: () => void; onInfo: (i: Info) => void; pickerRef?: React.MutableRefObject<(() => void) | null>; onReport?: () => void; variant?: "column" | "drawer"; onOpenSession?: (s: SessionItem) => void; viewingId?: string | null; openLocked?: string | null }) {
   const drawer = variant === "drawer";
   return (
     <>
@@ -48,12 +57,26 @@ export function Sidebar({ open, sessions, info, onNew, onClose, onInfo, pickerRe
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {sessions.length === 0 && <div className="px-2 py-4 text-xs text-muted-foreground">No sessions yet.</div>}
-          {sessions.map((s) => (
-            <div key={s.id} className={cn("eeg-tap-row mb-0.5 flex w-full flex-col justify-center rounded-lg px-3 py-2 transition-colors", s.active ? "bg-accent" : "hover:bg-accent/60")}>
-              <span className="block truncate font-prose text-[16px] text-foreground">{s.title}</span>
-              <span className="block text-xs text-muted-foreground">{when(s.startedAt)} · {s.turns} {s.turns === 1 ? "turn" : "turns"}</span>
-            </div>
-          ))}
+          {openLocked && sessions.some((s) => !s.active) && <div role="note" data-sessions-locked className="px-2 pb-2 text-xs text-muted-foreground">{openLocked}</div>}
+          {sessions.map((s) => {
+            const body = (
+              <>
+                <span className="block truncate font-prose text-[16px] text-foreground">{s.title}</span>
+                <span className="block text-xs text-muted-foreground">{when(s.startedAt)} · {s.turns} {s.turns === 1 ? "turn" : "turns"}</span>
+              </>
+            );
+            const viewing = viewingId === s.id;
+            const selected = viewingId ? viewing : s.active;
+            if (!onOpenSession) return <div key={s.id} className={cn("mb-0.5 flex w-full flex-col justify-center rounded-lg px-3 py-2", s.active && "bg-accent")}>{body}</div>;
+            const locked = !!openLocked && !s.active;
+            return (
+              <button key={s.id} type="button" data-session-row={s.active ? "current" : "past"} aria-label={sessionRowLabel(s, viewing)} aria-current={selected ? "true" : undefined}
+                disabled={locked} onClick={() => onOpenSession(s)}
+                className={cn("eeg-tap-row mb-0.5 flex w-full flex-col items-stretch justify-center rounded-lg px-3 py-2 text-left transition-colors", selected ? "bg-accent" : "hover:bg-accent/60", locked && "cursor-not-allowed opacity-50 hover:bg-transparent")}>
+                {body}
+              </button>
+            );
+          })}
         </div>
         <div className="border-t border-border/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
           <StudyData />

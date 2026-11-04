@@ -9,18 +9,21 @@ import { Composer } from "./components/Composer";
 import { Hud } from "./components/Hud";
 import { Message, Thinking, type ChatMsg } from "./components/Message";
 import { Sidebar } from "./components/Sidebar";
+import { TranscriptViewer } from "./components/TranscriptViewer";
+import { transcriptAllowed } from "./transcript";
 import { pickerLabel } from "./components/ModelPicker";
 import { TopBar } from "./components/TopBar";
 import { StudyLostBanner } from "./components/StudyData";
 import { AppleSignInScreen, useAppleAuth } from "./components/AppleSignIn";
 import { shouldOfferAtLaunch, type AppleAuthView } from "./transport/apple-auth";
 import { useTypingTelemetry } from "./telemetry";
+import { cn } from "./lib";
 import { useLayoutMode, useVisualViewportHeight } from "./layout";
 import { FeedbackSheet, type FeedbackSheetPhase } from "./components/FeedbackSheet";
 import { assembleReport, isReportShortcut, reportAllowed } from "./feedback/report";
-import { flightRecorder, setRecorderStudy, snapshotScreenNow } from "./feedback/recorder";
+import { flightRecorder, flushReportEdits, setRecorderStudy, snapshotScreenNow } from "./feedback/recorder";
 import { feedbackBracket } from "./feedback/away";
-import type { FeedbackLogEvent } from "./transport/types";
+import type { FeedbackLogEvent, SessionTranscript } from "./transport/types";
 
 let nextId = 0;
 const mid = () => `m${++nextId}`;
@@ -48,6 +51,8 @@ export function App() {
   const [hud, setHud] = useState<HudState | null>(null);
   const [stateNote, setStateNote] = useState("");
   const [sessions, setSessions] = useState<SessionItem[]>([]);
+  /** a past session open read-only (sidebar row); the live session keeps running underneath, untouched */
+  const [viewing, setViewing] = useState<SessionTranscript | null>(null);
   const [info, setInfo] = useState<Info | null>(null);
   const layout = useLayoutMode();
   const phone = layout === "phone";
@@ -123,7 +128,7 @@ export function App() {
 
   const startNew = useCallback(async () => {
     try {
-      const { result: r, replyId } = await streamTurn(() => setMessages([]), (onToken) => bridge().newSession(onToken));
+      const { result: r, replyId } = await streamTurn(() => { setViewing(null); setMessages([]); }, (onToken) => bridge().newSession(onToken));
       setMessages((m) => completeReply(m, replyId, r.director.text, r.director.truncated));
       scheduler.current = probeScheduler(r.sessionId); // seeded per session: reproducible probe turns
       userTurns.current = 0;
@@ -188,6 +193,22 @@ export function App() {
 
   // The commit that shows the Director's message COMPLETE (stream end) starts the reply-latency
   // clock (completeAt), once per message; its first-token time is kept for the turn log.
+  // Pinned-to-bottom (report d2bd6006 P3): the transcript follows the newest message only while the user is at the
+  // bottom. A programmatic scroll counts as pinned until it settles (a smooth scroll passes through "not at the bottom").
+  const pinned = useRef(true);
+  const autoScrollUntil = useRef(0);
+  const pinToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const sc = scroller.current;
+    if (!sc) return;
+    autoScrollUntil.current = Date.now() + (behavior === "smooth" ? 900 : 150);
+    pinned.current = true;
+    sc.scrollTo({ top: sc.scrollHeight, behavior });
+  }, []);
+  const onTranscriptScroll = useCallback(() => {
+    const sc = scroller.current;
+    if (!sc || Date.now() < autoScrollUntil.current) return;
+    pinned.current = sc.scrollHeight - sc.clientHeight - sc.scrollTop < 48;
+  }, []);
   useLayoutEffect(() => {
     const last = messages[messages.length - 1];
     if (last?.role === "assistant" && !last.streaming && stampedId.current !== last.id) {
@@ -195,8 +216,22 @@ export function App() {
       shownAt.current = Date.now();
       firstTokenAt.current = last.firstTokenAt;
     }
-    scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: last?.streaming ? "auto" : "smooth" });
-  }, [messages]);
+    // the user's own message always brings the view down; a reply (streaming or complete) only if they were at the bottom
+    if (last?.role === "user" || pinned.current) pinToBottom(last?.streaming ? "auto" : "smooth");
+  }, [messages, pinToBottom]);
+  // the iPad / iPhone keyboard (visualViewport resize -> --app-h) or any other resize shrinks the transcript while its
+  // scrollTop stays put, which hid the newest reply while composing: re-pin after the resize if the user was at the bottom
+  useEffect(() => {
+    const sc = scroller.current;
+    let raf = 0;
+    const repin = () => { if (!pinned.current) return; cancelAnimationFrame(raf); raf = requestAnimationFrame(() => pinToBottom("auto")); };
+    const ro = typeof ResizeObserver === "undefined" || !sc ? null : new ResizeObserver(repin);
+    if (sc) ro?.observe(sc);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", repin);
+    window.addEventListener("resize", repin);
+    return () => { ro?.disconnect(); vv?.removeEventListener("resize", repin); window.removeEventListener("resize", repin); cancelAnimationFrame(raf); };
+  }, [pinToBottom]);
   // UI only (scroll nit, Nov 3): the composer dock floats over the transcript and grows (multi-line draft, extractor
   // warning, safe area) past the fixed pb-40, and a smooth scroll that starts far away after a very long reply can
   // stop short. So the transcript's bottom padding tracks the dock's real height, and once a reply is complete the
@@ -208,21 +243,21 @@ export function App() {
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
       const sc = scroller.current;
-      const pinned = !!sc && sc.scrollHeight - sc.clientHeight - sc.scrollTop < 48;
+      const atBottom = pinned.current || (!!sc && sc.scrollHeight - sc.clientHeight - sc.scrollTop < 48);
       setDockPad(Math.ceil(el.getBoundingClientRect().height) + 16);
-      if (pinned) requestAnimationFrame(() => sc!.scrollTo({ top: sc!.scrollHeight, behavior: "auto" }));
+      if (atBottom) requestAnimationFrame(() => pinToBottom("auto"));
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [pinToBottom]);
   useEffect(() => {
     const last = messages[messages.length - 1];
     const sc = scroller.current;
-    if (!sc || !last || last.role !== "assistant" || last.streaming) return;
+    if (!sc || !last || last.role !== "assistant" || last.streaming || !pinned.current) return;
     let f2 = 0;
-    const f1 = requestAnimationFrame(() => { f2 = requestAnimationFrame(() => sc.scrollTo({ top: sc.scrollHeight, behavior: "auto" })); });
+    const f1 = requestAnimationFrame(() => { f2 = requestAnimationFrame(() => pinToBottom("auto")); });
     return () => { cancelAnimationFrame(f1); cancelAnimationFrame(f2); };
-  }, [messages]);
+  }, [messages, pinToBottom]);
 
   // ---- in-app bug report (Report row, Cmd/Ctrl+Shift+R, window.__bhReport). UI only: opening the sheet doesn't
   // hide the page (no AWAY_MS), start or end a session, or touch ratings / study state.
@@ -270,6 +305,7 @@ export function App() {
     if (!r || !fb) return;
     setReportPhase({ kind: "sending" });
     try {
+      flushReportEdits(); // one note-edit summary instead of a snapshot per keystroke
       const doc = await assembleReport({ note, trigger: r.trigger, messages: messagesRef.current, recorder: flightRecorder, bridge: bridge(), info: infoRef.current, ui: uiRef.current });
       if (!reportSent.current) logFeedback({ type: "feedback_sent", ts: Date.now(), report_id: doc.report_id });
       reportSent.current = true;
@@ -383,6 +419,29 @@ export function App() {
     };
   }, [requestNew, dismissProbe, closeCard]);
 
+  // ---- past sessions, read-only (sidebar rows). Viewing reads the stored log only: no session starts, resumes or
+  // ends, nothing is written to any session log, no rating is shown or dismissed. Blocked while a STUDY session is in
+  // progress (rows disabled, and the transport refuses too), while a reply is coming, and while a rating step or the
+  // Report sheet is showing; the live session underneath is never touched.
+  const studyActive = !!hud?.study;
+  const canOpenPast = !!bridge().sessionTranscript;
+  const openLocked = !canOpenPast ? null
+    : studyActive ? "Past chats open after this study session."
+    : busy || card || probe ? "Past chats open once this step is done." : null;
+  const openSession = useCallback(async (s: SessionItem) => {
+    if (s.active) { setViewing(null); if (phone) setSidebarOpen(false); return; } // the current row: back to the live chat
+    if (!transcriptAllowed({ canOpen: !!bridge().sessionTranscript, studyActive: !!hud?.study, busy: uiRef.current.busy, ratingCardOpen: !!cardRef.current, turnProbeOpen: !!probeRef.current, reportOpen: !!reportRef.current })) return;
+    const t = await bridge().sessionTranscript!(s.id).catch(() => null);
+    if (!t) return;
+    flightRecorder.record("state", { event: "past_chat_open", turns: t.turns.length });
+    setViewing(t);
+    if (phone) setSidebarOpen(false);
+  }, [hud, phone]);
+  const closeViewer = useCallback(() => setViewing(null), []);
+  useEffect(() => { if (studyActive) setViewing(null); }, [studyActive]);
+  // back from a past chat: the live transcript was display:none, so pin it to the newest message again
+  useEffect(() => { if (!viewing) pinToBottom("auto"); }, [viewing, pinToBottom]);
+
   // dev/debug only: schedule hash (never the order) and the explicit unseal command
   useEffect(() => {
     const dev = !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV || (() => { try { return localStorage.getItem("bh.debug") === "1"; } catch { return false; } })();
@@ -414,15 +473,16 @@ export function App() {
 
   return (
     <div className="eeg-app flex" data-busy={busy ? "true" : "false"} data-layout={layout}>
-      <Sidebar variant={phone ? "drawer" : "column"} open={sidebarOpen} sessions={sessions} info={info} onNew={() => { if (phone) setSidebarOpen(false); requestNew(); }} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} onReport={canReport ? () => { if (phone) setSidebarOpen(false); openReport("sidebar"); } : undefined} />
+      <Sidebar variant={phone ? "drawer" : "column"} open={sidebarOpen} sessions={sessions} onOpenSession={canOpenPast ? (x) => void openSession(x) : undefined} viewingId={viewing?.id ?? null} openLocked={openLocked} info={info} onNew={() => { if (phone) setSidebarOpen(false); setViewing(null); requestNew(); }} onClose={() => setSidebarOpen(false)} onInfo={setInfo} pickerRef={pickerRef} onReport={canReport ? () => { if (phone) setSidebarOpen(false); openReport("sidebar"); } : undefined} />
       <main className="flex min-w-0 flex-1 flex-col">
         <TopBar sidebarOpen={sidebarOpen && !phone} onOpenSidebar={() => { setSidebarOpen(true); if (phone) setHudOpen(false); }} hudOpen={hudOpen} onToggleHud={() => { setHudOpen((v) => !v); if (phone) setSidebarOpen(false); }}>
-          <span className="font-title text-2xl tracking-tight md:text-3xl" title={title}>{title}</span>
+          <span className="font-title text-2xl tracking-tight md:text-3xl" title={viewing?.title ?? title}>{viewing?.title ?? title}</span>
         </TopBar>
         <StudyLostBanner />
         <div className="flex min-h-0 flex-1">
-          <div className="relative flex min-w-0 flex-1 flex-col">
-            <div ref={scroller} className="flex-1 overflow-y-auto overscroll-contain">
+          {viewing && <TranscriptViewer t={viewing} onBack={closeViewer} onNew={() => { setViewing(null); requestNew(); }} />}
+          <div className={cn("relative flex min-w-0 flex-1 flex-col", viewing && "hidden")} aria-hidden={viewing ? true : undefined}>
+            <div ref={scroller} onScroll={onTranscriptScroll} className="flex-1 overflow-y-auto overscroll-contain">
               <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-6 px-4 pb-40 pt-6 md:px-6 md:pt-8" style={dockPad ? { paddingBottom: Math.max(160, dockPad) } : undefined} data-transcript>
                 {messages.map((m) => <Message key={m.id} msg={m} />)}
                 {probe && !pending && <TurnProbe onSkip={() => dismissProbe("skipped")} onRate={(v) => { const p = probeRef.current; if (!p) return; probeRef.current = null; setProbe(null); logRating({ scope: "turn", turn: p.turn, value: v, shownAt: p.shownAt, answeredAt: Date.now(), dismissed: false }); }} />}

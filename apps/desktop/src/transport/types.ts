@@ -71,6 +71,10 @@ export type FeedbackSendResult = { state: "sent" | "exported" | "queued" | "fail
 /** session-log bracket around the Report sheet (Director-approved): open -> sent | closed */
 export type FeedbackLogEvent = { type: "feedback_open" | "feedback_sent" | "feedback_closed"; ts: number; trigger?: string; sent?: boolean; report_id?: string };
 export type SessionItem = { id: string; title: string; turns: number; startedAt: string | null; active: boolean };
+/** one visible turn of a past session (read-only viewer): what the user typed / what the Director showed */
+export type TranscriptTurn = { role: "user" | "assistant"; text: string; cutOff?: true };
+/** a past session as the read-only viewer shows it: no state notes, plans, cues, ratings or study / arm data */
+export type SessionTranscript = { id: string; title: string; startedAt: string | null; turns: TranscriptTurn[] };
 export type Info = {
   backend: string; paid: boolean; provider: string; model: string | null; dataDir: string; userId: string; platform: string; appName: string;
   /** extractor prompt setting ("v2" default; "v1" = rollback) */
@@ -128,6 +132,11 @@ export interface EegBridge {
   ): Promise<{ director: DirectorTurn; hud: Hud; engagement: number; title: string }>;
   hud(): Promise<Hud | null>;
   sessions(): Promise<SessionItem[]>;
+  /**
+   * Read-only transcript of a stored session (sidebar row). Reads the session log only; never writes, never
+   * starts / resumes / ends a session. null: unknown id, or a study session is in progress (blocked).
+   */
+  sessionTranscript?(id: string): Promise<SessionTranscript | null>;
   info(): Promise<Info>;
   providers: ProvidersBridge;
   platform: string;

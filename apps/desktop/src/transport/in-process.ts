@@ -57,6 +57,8 @@ import { createFeedbackApi } from "./feedback";
 import { saveViaBHExport, shareViaBHExport } from "./bh-export";
 import { createAppleAuth, deviceLabelFor, isAppleRecord, type AppleAuth, type AppleAuthView, type BHAppleAuthPlugin } from "./apple-auth";
 import type { BHExportPlugin, EegBridge, ExportResult, Info, KeyProvider, ProviderId, ProviderStatus, UploadStatusView } from "./types";
+import { sessionTranscriptOf } from "../transcript";
+import { scrubRecorder } from "../feedback/recorder";
 
 /** Web fallback for "Export logs": one zip download (no share sheet in a plain browser). */
 export function downloadZip(files: ExportFile[], name: string, doc: Document | undefined = typeof document !== "undefined" ? document : undefined): boolean {
@@ -194,7 +196,7 @@ export function safeLocalKV(ns: string): KeyValueStore {
 }
 
 export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge {
-  const rec = opts.recorder;
+  const rec = opts.recorder ? scrubRecorder(opts.recorder) : undefined; // bhd_ never stored in an event
   // study session in progress -> the recorder stores study-scrubbed events only (no raw error text, no prompt sizes)
   rec?.setStudyProbe(() => !!host?.hud()?.study);
   // flight recorder: native plugin rejections become `error` events (calls and results unchanged)
@@ -541,6 +543,14 @@ export function createInProcessTransport(opts: InProcessOptions = {}): EegBridge
     },
     async sessions() {
       return (await getHost()).sessions();
+    },
+    async sessionTranscript(id) {
+      const h = await getHost();
+      if (h.hud()?.study) return null; // a study session is in progress: past chats stay closed until it ends
+      const item = h.sessions().find((s) => s.id === id);
+      if (!item) return null;
+      const { storage } = await ready;
+      return sessionTranscriptOf(id, item.title, storage.readSession(id) as never); // read only
     },
     async info() {
       await ensureBackend();
