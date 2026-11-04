@@ -5,3 +5,6 @@ export * from "./upload.js";
 export * from "./tokenizer.js";
 export * from "./tokenizer-node.js";
 export * from "./share.js";
+export * from "./actor.js";
+export * from "./lint.js";
+export * from "./leaks.js";
