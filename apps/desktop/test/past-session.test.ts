@@ -89,3 +89,37 @@ test("sessionTranscript is refused while a study session is in progress; logs, s
   assert.equal(await t.sessionTranscript!(practice.sessionId), null);
   assert.deepEqual({ logs: await logs(), status: await t.study!.status(), hash: await t.study!.hash!(), sessions: await t.sessions() }, before);
 });
+
+// release-p4: protocol-4 study sessions (sealed director turns) and plain-chat sessions (no plan / state note)
+test("protocol 4: a finished study session and a plain-chat session open read-only with only visible turns; blocked mid-study", async () => {
+  const { t, logs } = app();
+  await t.providers.setApiKey("spider", "bhd_fake_past_session_token");
+  await t.providers.select("mock");
+  assert.deepEqual(await t.study!.enable(), { ok: true });
+  const study1 = await t.newSession();
+  assert.ok((await t.hud())?.study, "study session 1 running");
+  await say(t, "first: tide pools");
+  await say(t, "first: a second turn");
+  // mid-study: refused, including the study session itself
+  assert.equal(await t.sessionTranscript!(study1.sessionId), null);
+  await t.study!.disable();
+  const plain = await t.newSession(); // study off -> plain-chat profile
+  assert.ok(!(await t.hud())?.study);
+  await say(t, "a plain chat about bread");
+  const all = await logs();
+  const studyLog = all.find((l) => l.includes(study1.sessionId) && l.includes('"study":{'))!;
+  assert.match(studyLog, /"sealed"/, "protocol-4 study log has sealed director turns");
+  assert.match(studyLog, /"protocol":4|"protocol": 4/, "protocol 4");
+  assert.match(all.find((l) => l.includes(plain.sessionId))!, /"profile":"plain"/);
+  const before = { logs: all, sessions: await t.sessions(), hud: await t.hud(), status: await t.study!.status() };
+  const s = await t.sessionTranscript!(study1.sessionId);
+  assert.ok(s, "study session opens once no study session is in progress");
+  assert.deepEqual(s.turns.filter((x) => x.role === "user").map((x) => x.text), ["first: tide pools", "first: a second turn"]);
+  assert.ok(s.turns.filter((x) => x.role === "assistant").every((x) => x.text.length > 0));
+  assert.doesNotMatch(JSON.stringify(s), LEAKY);
+  const p = await t.sessionTranscript!(plain.sessionId);
+  assert.ok(p);
+  assert.deepEqual(p.turns.filter((x) => x.role === "user").map((x) => x.text), ["a plain chat about bread"]);
+  assert.doesNotMatch(JSON.stringify(p), /profile|plain"|stateNote|"plan"/);
+  assert.deepEqual({ logs: await logs(), sessions: await t.sessions(), hud: await t.hud(), status: await t.study!.status() }, before, "read-only");
+});
