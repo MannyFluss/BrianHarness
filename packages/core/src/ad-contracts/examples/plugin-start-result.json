@@ -1,0 +1,28 @@
+{
+  "status": {
+    "supported": true,
+    "unsupportedCode": null,
+    "permission": "granted",
+    "state": "running",
+    "pauseReason": null,
+    "tracker": "arkit",
+    "mode": "synthetic",
+    "hz": 30,
+    "code": null
+  },
+  "screen": {
+    "deviceModel": "iPad13,8",
+    "platform": "ios",
+    "orientation": "landscape_right",
+    "widthPt": 1366,
+    "heightPt": 1024,
+    "scale": 2,
+    "webview": {
+      "x": 0,
+      "y": 0,
+      "width": 1366,
+      "height": 1024
+    },
+    "widthMm": 263
+  }
+}

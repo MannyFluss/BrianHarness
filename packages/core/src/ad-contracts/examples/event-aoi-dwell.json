@@ -1,0 +1,25 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:16:52.040Z",
+  "mono": 412040,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 105,
+  "type": "aoi_dwell",
+  "turn": 11,
+  "msg": "a11",
+  "dwell": [
+    {
+      "aoi": "a11.p2",
+      "words": 52,
+      "visibleMs": 18200,
+      "gazeMs": 14100,
+      "msPerWordZ": 2.6,
+      "fixations": 61,
+      "reentries": 2,
+      "regressionsIn": 5,
+      "firstFixLatencyMs": 640,
+      "coverage": 0.9,
+      "conf": 0.74
+    }
+  ]
+}

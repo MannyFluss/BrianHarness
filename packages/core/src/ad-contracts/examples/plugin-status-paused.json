@@ -1,0 +1,11 @@
+{
+  "supported": true,
+  "unsupportedCode": null,
+  "permission": "granted",
+  "state": "paused",
+  "pauseReason": "background",
+  "tracker": "arkit",
+  "mode": "camera",
+  "hz": null,
+  "code": null
+}

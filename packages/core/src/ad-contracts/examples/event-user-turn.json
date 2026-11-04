@@ -1,0 +1,13 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:16:53.500Z",
+  "mono": 413500,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 107,
+  "type": "user_turn",
+  "turn": 11,
+  "msg": "u11",
+  "text": "ok so how long should the levain sit before I mix?",
+  "sentAt": 413480,
+  "hold_ms": 0
+}

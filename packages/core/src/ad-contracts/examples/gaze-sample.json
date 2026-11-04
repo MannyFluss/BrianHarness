@@ -1,0 +1,20 @@
+{
+  "t": 81234.5,
+  "x": 212.4,
+  "y": 388.9,
+  "conf": 0.94,
+  "face": true,
+  "blink": false,
+  "lids": {
+    "l": 0.08,
+    "r": 0.11
+  },
+  "head": {
+    "yaw": -4.2,
+    "pitch": 6.1,
+    "roll": 1.3,
+    "distCm": 34.5
+  },
+  "cal": false,
+  "src": "arkit"
+}

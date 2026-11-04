@@ -1,0 +1,10 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:30:00.100Z",
+  "mono": 1200100,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 401,
+  "type": "session_end",
+  "turns": 21,
+  "reason": "user"
+}

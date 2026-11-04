@@ -1,0 +1,10 @@
+{
+  "mode": "synthetic",
+  "synthetic": {
+    "file": "gaze-replays/ipadpro-m1-landscape-01.json",
+    "loop": true,
+    "speed": 1
+  },
+  "webNow": 80012.25,
+  "maxHz": 30
+}

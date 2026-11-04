@@ -1,0 +1,18 @@
+{
+  "context_update": {
+    "summary": "Manny asked for a weekday bake schedule; he is reading everything at his usual pace.",
+    "hypotheses": [
+      {
+        "label": "fermentation science",
+        "conf": 0.66,
+        "evidence": [
+          "e31"
+        ]
+      }
+    ],
+    "changed": []
+  },
+  "intent": "Let the schedule question play out before steering.",
+  "note": null,
+  "no_note_reason": "He asked a concrete scheduling question; the Actor should just answer it, and nothing new stands out."
+}

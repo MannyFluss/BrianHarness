@@ -1,0 +1,67 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:16:52.050Z",
+  "mono": 412050,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 106,
+  "type": "attention_digest",
+  "turn": 11,
+  "msg": "a11",
+  "digest": {
+    "msg": "a11",
+    "windowMs": 41000,
+    "quality": 0.82,
+    "qualityLabel": "good",
+    "paras": [
+      {
+        "aoi": "a11.p2",
+        "excerpt": "Rye flour ferments much faster...",
+        "label": "deep",
+        "ratio": 2.4,
+        "ev": [
+          "e31"
+        ]
+      },
+      {
+        "aoi": "a11.p3",
+        "excerpt": "Most bakers use 75% hydration...",
+        "label": "skim",
+        "ratio": 0.3,
+        "ev": [
+          "e32"
+        ]
+      }
+    ],
+    "lookBacks": [
+      {
+        "aoi": "a9.p2",
+        "excerpt": "hot spots in your oven",
+        "ms": 3100,
+        "ev": "e33"
+      }
+    ],
+    "offscreenMs": 0,
+    "composerPauses": 2,
+    "events": [
+      "e31",
+      "e32",
+      "e33"
+    ]
+  },
+  "events": [
+    {
+      "id": "e31",
+      "kind": "deep_read",
+      "aoi": "a11.p2",
+      "excerpt": "Rye flour ferments much faster",
+      "t0": 392000,
+      "t1": 410300,
+      "z": 2.6,
+      "conf": 0.74,
+      "features": {
+        "msPerWord": 271,
+        "reentries": 2
+      }
+    }
+  ]
+}

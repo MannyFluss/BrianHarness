@@ -1,0 +1,18 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:16:52.000Z",
+  "mono": 412000,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 101,
+  "type": "gaze_quality",
+  "turn": 12,
+  "calib": {
+    "errDeg": 3.4,
+    "errParas": 0.6,
+    "ageS": 410,
+    "orientation": "portrait"
+  },
+  "quality": 0.82,
+  "faceFrac": 0.97,
+  "hz": 30
+}

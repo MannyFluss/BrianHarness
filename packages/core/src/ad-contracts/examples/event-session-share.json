@@ -1,0 +1,18 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:30:00.000Z",
+  "mono": 1200000,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 400,
+  "type": "session_share",
+  "turns": 21,
+  "notes": 6,
+  "shadow_notes": 5,
+  "blocked_notes": 1,
+  "injection_rate": 0.2857142857142857,
+  "session_share": 0.0158,
+  "session_dynamic_share": 0.0209,
+  "mean_turn_share": 0.0231,
+  "max_turn_share": 0.0312,
+  "echo_share": 0.091
+}

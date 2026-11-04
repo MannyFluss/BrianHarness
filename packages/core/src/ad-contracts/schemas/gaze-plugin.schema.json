@@ -1,0 +1,831 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://brianharness.app/contracts/v1/gaze-plugin.schema.json",
+  "title": "Gaze plugin API payloads (contract-v1): every method argument, result and event. Numbers only, never images.",
+  "definitions": {
+    "CameraPermission": {
+      "type": "string",
+      "enum": [
+        "prompt",
+        "granted",
+        "denied",
+        "restricted"
+      ]
+    },
+    "Orientation": {
+      "type": "string",
+      "enum": [
+        "portrait",
+        "portrait_upside_down",
+        "landscape_left",
+        "landscape_right"
+      ]
+    },
+    "HealthCode": {
+      "type": "string",
+      "enum": [
+        "gaze.camera_denied",
+        "gaze.arkit_unsupported",
+        "gaze.model_missing",
+        "gaze.calibration_stale",
+        "gaze.thermal_degraded",
+        "gaze.tracker_interrupted",
+        "gaze.low_quality",
+        "gaze.no_consent",
+        "net.worker_unreachable",
+        "auth.no_token",
+        "model.route_unverified",
+        "model.empty_completion",
+        "model.length_cutoff",
+        "budget.director_cap",
+        "budget.actor_cap",
+        "budget.judge_cap",
+        "budget.daily_cap_device",
+        "budget.daily_cap_global",
+        "upload.too_large",
+        "upload.rejected",
+        "upload.cap",
+        "director.schema_invalid",
+        "director.timeout",
+        "director.kill_switch",
+        "director.leak_breaker"
+      ]
+    },
+    "ScreenInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceModel",
+        "platform",
+        "orientation",
+        "widthPt",
+        "heightPt",
+        "scale",
+        "webview",
+        "widthMm"
+      ],
+      "properties": {
+        "deviceModel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "ios",
+            "mac",
+            "web"
+          ]
+        },
+        "orientation": {
+          "type": "string",
+          "enum": [
+            "portrait",
+            "portrait_upside_down",
+            "landscape_left",
+            "landscape_right"
+          ]
+        },
+        "widthPt": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "heightPt": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "scale": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 8
+        },
+        "webview": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": -100000,
+              "maximum": 100000
+            },
+            "y": {
+              "type": "number",
+              "minimum": -100000,
+              "maximum": 100000
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            "height": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100000
+            }
+          }
+        },
+        "widthMm": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 2000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "GazeStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "supported",
+        "unsupportedCode",
+        "permission",
+        "state",
+        "pauseReason",
+        "tracker",
+        "mode",
+        "hz",
+        "code"
+      ],
+      "properties": {
+        "supported": {
+          "type": "boolean"
+        },
+        "unsupportedCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "gaze.camera_denied",
+                "gaze.arkit_unsupported",
+                "gaze.model_missing",
+                "gaze.calibration_stale",
+                "gaze.thermal_degraded",
+                "gaze.tracker_interrupted",
+                "gaze.low_quality",
+                "gaze.no_consent",
+                "net.worker_unreachable",
+                "auth.no_token",
+                "model.route_unverified",
+                "model.empty_completion",
+                "model.length_cutoff",
+                "budget.director_cap",
+                "budget.actor_cap",
+                "budget.judge_cap",
+                "budget.daily_cap_device",
+                "budget.daily_cap_global",
+                "upload.too_large",
+                "upload.rejected",
+                "upload.cap",
+                "director.schema_invalid",
+                "director.timeout",
+                "director.kill_switch",
+                "director.leak_breaker"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "permission": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "granted",
+            "denied",
+            "restricted"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "starting",
+            "running",
+            "calibrating",
+            "paused",
+            "stopped",
+            "error"
+          ]
+        },
+        "pauseReason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "background",
+                "user",
+                "interrupted",
+                "permission_revoked"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tracker": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "arkit",
+                "mediapipe"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "camera",
+                "synthetic"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hz": {
+          "anyOf": [
+            {
+              "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeHz"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "gaze.camera_denied",
+                "gaze.arkit_unsupported",
+                "gaze.model_missing",
+                "gaze.calibration_stale",
+                "gaze.thermal_degraded",
+                "gaze.tracker_interrupted",
+                "gaze.low_quality",
+                "gaze.no_consent",
+                "net.worker_unreachable",
+                "auth.no_token",
+                "model.route_unverified",
+                "model.empty_completion",
+                "model.length_cutoff",
+                "budget.director_cap",
+                "budget.actor_cap",
+                "budget.judge_cap",
+                "budget.daily_cap_device",
+                "budget.daily_cap_global",
+                "upload.too_large",
+                "upload.rejected",
+                "upload.cap",
+                "director.schema_invalid",
+                "director.timeout",
+                "director.kill_switch",
+                "director.leak_breaker"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SyntheticSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/-]+\\.json$"
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeSample"
+          },
+          "minItems": 1
+        },
+        "loop": {
+          "type": "boolean"
+        },
+        "speed": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 16
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "file"
+          ]
+        },
+        {
+          "required": [
+            "samples"
+          ]
+        }
+      ]
+    },
+    "StartOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "webNow"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "camera",
+            "synthetic"
+          ]
+        },
+        "synthetic": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "file": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/-]+\\.json$"
+            },
+            "samples": {
+              "type": "array",
+              "items": {
+                "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeSample"
+              },
+              "minItems": 1
+            },
+            "loop": {
+              "type": "boolean"
+            },
+            "speed": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 16
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "file"
+              ]
+            },
+            {
+              "required": [
+                "samples"
+              ]
+            }
+          ]
+        },
+        "webNow": {
+          "type": "number",
+          "minimum": 0
+        },
+        "maxHz": {
+          "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeHz"
+        }
+      },
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "synthetic"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "synthetic"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "synthetic"
+          ]
+        }
+      }
+    },
+    "StartResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "screen"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/GazeStatus"
+        },
+        "screen": {
+          "$ref": "#/definitions/ScreenInfo"
+        }
+      }
+    },
+    "StatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/definitions/GazeStatus"
+        }
+      }
+    },
+    "PermissionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "permission"
+      ],
+      "properties": {
+        "permission": {
+          "type": "string",
+          "enum": [
+            "prompt",
+            "granted",
+            "denied",
+            "restricted"
+          ]
+        }
+      }
+    },
+    "CalibrateOptions": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "phase",
+            "orientation",
+            "targets"
+          ],
+          "properties": {
+            "phase": {
+              "const": "begin"
+            },
+            "orientation": {
+              "type": "string",
+              "enum": [
+                "portrait",
+                "portrait_upside_down",
+                "landscape_left",
+                "landscape_right"
+              ]
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "x",
+                  "y"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16
+                  },
+                  "x": {
+                    "type": "number",
+                    "minimum": -100000,
+                    "maximum": 100000
+                  },
+                  "y": {
+                    "type": "number",
+                    "minimum": -100000,
+                    "maximum": 100000
+                  }
+                }
+              },
+              "minItems": 1,
+              "maxItems": 32
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "phase",
+            "targetId",
+            "t0",
+            "t1"
+          ],
+          "properties": {
+            "phase": {
+              "const": "target"
+            },
+            "targetId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16
+            },
+            "t0": {
+              "type": "number",
+              "minimum": 0
+            },
+            "t1": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "phase"
+          ],
+          "properties": {
+            "phase": {
+              "const": "end"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "phase"
+          ],
+          "properties": {
+            "phase": {
+              "const": "cancel"
+            }
+          }
+        }
+      ]
+    },
+    "CalibrateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "ok",
+        "fit",
+        "model",
+        "samples",
+        "code"
+      ],
+      "properties": {
+        "phase": {
+          "type": "string",
+          "enum": [
+            "begin",
+            "target",
+            "end",
+            "cancel"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "fit": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "core",
+                "native"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 0,
+              "maxItems": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "samples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "gaze.camera_denied",
+                "gaze.arkit_unsupported",
+                "gaze.model_missing",
+                "gaze.calibration_stale",
+                "gaze.thermal_degraded",
+                "gaze.tracker_interrupted",
+                "gaze.low_quality",
+                "gaze.no_consent",
+                "net.worker_unreachable",
+                "auth.no_token",
+                "model.route_unverified",
+                "model.empty_completion",
+                "model.length_cutoff",
+                "budget.director_cap",
+                "budget.actor_cap",
+                "budget.judge_cap",
+                "budget.daily_cap_device",
+                "budget.daily_cap_global",
+                "upload.too_large",
+                "upload.rejected",
+                "upload.cap",
+                "director.schema_invalid",
+                "director.timeout",
+                "director.kill_switch",
+                "director.leak_breaker"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RestoreCalibrationOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "orientation",
+        "model"
+      ],
+      "properties": {
+        "orientation": {
+          "type": "string",
+          "enum": [
+            "portrait",
+            "portrait_upside_down",
+            "landscape_left",
+            "landscape_right"
+          ]
+        },
+        "model": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 1,
+          "maxItems": 4096
+        }
+      }
+    },
+    "OkResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SyncClockOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "webNow"
+      ],
+      "properties": {
+        "webNow": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "SyncClockResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "driftMs"
+      ],
+      "properties": {
+        "driftMs": {
+          "type": "number"
+        }
+      }
+    },
+    "GazeBatchEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "hz",
+        "samples"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hz": {
+          "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeHz"
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeSample"
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      }
+    },
+    "GazeStatusEvent": {
+      "$ref": "#/definitions/GazeStatus"
+    },
+    "GazeReplayFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "layout",
+        "src",
+        "hz",
+        "screen",
+        "samples"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-gaze-replay/1"
+        },
+        "layout": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "src": {
+          "type": "string",
+          "enum": [
+            "synthetic",
+            "replay"
+          ]
+        },
+        "hz": {
+          "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeHz"
+        },
+        "screen": {
+          "$ref": "#/definitions/ScreenInfo"
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeSample"
+          },
+          "minItems": 1
+        }
+      }
+    }
+  }
+}

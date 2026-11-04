@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://brianharness.app/contracts/v1/gaze-sample.schema.json",
+  "title": "GazeSample (contract-v1)",
+  "definitions": {
+    "GazeSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "t",
+        "x",
+        "y",
+        "conf",
+        "face",
+        "blink",
+        "cal",
+        "src"
+      ],
+      "properties": {
+        "t": {
+          "type": "number",
+          "minimum": 0
+        },
+        "x": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100000,
+              "maximum": 100000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "y": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -100000,
+              "maximum": 100000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conf": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "face": {
+          "type": "boolean"
+        },
+        "blink": {
+          "type": "boolean"
+        },
+        "lids": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "l",
+            "r"
+          ],
+          "properties": {
+            "l": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "r": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "head": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "yaw",
+            "pitch",
+            "roll",
+            "distCm"
+          ],
+          "properties": {
+            "yaw": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "pitch": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "roll": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "distCm": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 500
+            }
+          }
+        },
+        "cal": {
+          "type": "boolean"
+        },
+        "src": {
+          "type": "string",
+          "enum": [
+            "arkit",
+            "mediapipe",
+            "synthetic",
+            "replay"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "x": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "y": {
+                "type": "null"
+              },
+              "conf": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "y": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "x": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "face": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "head"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "HeadPose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "yaw",
+        "pitch",
+        "roll",
+        "distCm"
+      ],
+      "properties": {
+        "yaw": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "pitch": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "roll": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "distCm": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 500
+        }
+      }
+    },
+    "GazeHz": {
+      "enum": [
+        30,
+        15
+      ]
+    }
+  },
+  "$ref": "#/definitions/GazeSample"
+}

@@ -1,0 +1,3321 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://brianharness.app/contracts/v1/bh-ad-events.schema.json",
+  "title": "bh-ad/1 session log line (contract-v1)",
+  "definitions": {
+    "ev_session_start": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "profile",
+        "contract",
+        "userId",
+        "session_type",
+        "tab",
+        "actor_prompt_id",
+        "director_prompt_id",
+        "pipeline_version",
+        "tokenizer",
+        "models",
+        "consent",
+        "gaze",
+        "device",
+        "director_enabled"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "session_start"
+        },
+        "profile": {
+          "const": "actor-director"
+        },
+        "contract": {
+          "const": "contract-v1"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "session_type": {
+          "type": "string",
+          "enum": [
+            "blinded",
+            "tab_visible"
+          ],
+          "description": "SESSION TYPE. Fixed at session start by the schedule. blinded => tab hidden, main log redacted (see TAB-ONLY fields)"
+        },
+        "tab": {
+          "type": "string",
+          "enum": [
+            "visible",
+            "hidden"
+          ],
+          "description": "must agree with session_type: blinded=hidden, tab_visible=visible"
+        },
+        "arm": {
+          "type": "string",
+          "enum": [
+            "on",
+            "shadow",
+            "off"
+          ],
+          "description": "TAB-ONLY: tab_visible sessions and the sealed log of a blinded session; NEVER in a blinded main log"
+        },
+        "p_inject": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "TAB-ONLY (same rule as arm)"
+        },
+        "sealed": {
+          "const": true
+        },
+        "blind": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "total",
+            "scheduleHash"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "scheduleHash": {
+              "type": "string",
+              "minLength": 64,
+              "maxLength": 64,
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "actor_prompt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^ap[0-9]+-[0-9a-f]{8}$"
+        },
+        "director_prompt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^dir[0-9]+-[0-9a-f]{8}$"
+        },
+        "pipeline_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "tokenizer": {
+          "const": "o200k_base"
+        },
+        "models": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "actor",
+            "director"
+          ],
+          "properties": {
+            "actor": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "director": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        "consent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "camera",
+            "rawGaze"
+          ],
+          "properties": {
+            "camera": {
+              "type": "boolean"
+            },
+            "rawGaze": {
+              "type": "boolean"
+            }
+          }
+        },
+        "gaze": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tracker",
+            "permission"
+          ],
+          "properties": {
+            "tracker": {
+              "type": "string",
+              "enum": [
+                "arkit",
+                "mediapipe",
+                "synthetic",
+                "replay",
+                "none"
+              ]
+            },
+            "permission": {
+              "$ref": "https://brianharness.app/contracts/v1/gaze-plugin.schema.json#/definitions/CameraPermission"
+            }
+          }
+        },
+        "device": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "deviceModel",
+            "platform",
+            "orientation",
+            "widthPt",
+            "heightPt"
+          ],
+          "properties": {
+            "deviceModel": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "platform": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "mac",
+                "web"
+              ]
+            },
+            "orientation": {
+              "$ref": "https://brianharness.app/contracts/v1/gaze-plugin.schema.json#/definitions/Orientation"
+            },
+            "widthPt": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "heightPt": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 100000
+            }
+          }
+        },
+        "director_enabled": {
+          "type": "boolean"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "session_type": {
+              "const": "blinded"
+            },
+            "tab": {
+              "const": "hidden"
+            }
+          },
+          "required": [
+            "sealed",
+            "blind"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "arm"
+                ]
+              },
+              {
+                "required": [
+                  "p_inject"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "session_type": {
+              "const": "blinded"
+            },
+            "tab": {
+              "const": "hidden"
+            }
+          },
+          "required": [
+            "sealed",
+            "blind",
+            "arm",
+            "p_inject"
+          ]
+        },
+        {
+          "properties": {
+            "session_type": {
+              "const": "tab_visible"
+            },
+            "tab": {
+              "const": "visible"
+            }
+          },
+          "required": [
+            "arm",
+            "p_inject"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "sealed"
+                ]
+              },
+              {
+                "required": [
+                  "blind"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "ev_gaze_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "calib",
+        "quality",
+        "faceFrac",
+        "hz"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "gaze_quality"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "calib": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "errDeg",
+            "errParas",
+            "ageS",
+            "orientation"
+          ],
+          "properties": {
+            "errDeg": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "errParas": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ageS": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "orientation": {
+              "$ref": "https://brianharness.app/contracts/v1/gaze-plugin.schema.json#/definitions/Orientation"
+            }
+          }
+        },
+        "quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "faceFrac": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "hz": {
+          "anyOf": [
+            {
+              "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeHz"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ev_aoi_layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "msg",
+        "orientation",
+        "boxes"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "aoi_layout"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "msg": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^a[0-9]+$"
+        },
+        "orientation": {
+          "$ref": "https://brianharness.app/contracts/v1/gaze-plugin.schema.json#/definitions/Orientation"
+        },
+        "boxes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "aoi",
+              "words",
+              "x",
+              "y",
+              "w",
+              "h"
+            ],
+            "properties": {
+              "aoi": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "words": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "x": {
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 100000
+              },
+              "y": {
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 10000000
+              },
+              "w": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "h": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 10000000
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 400
+        }
+      }
+    },
+    "ev_scroll": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "samples"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "scroll"
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "t",
+              "top"
+            ],
+            "properties": {
+              "t": {
+                "type": "number",
+                "minimum": 0
+              },
+              "top": {
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 10000000
+              }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 600
+        }
+      }
+    },
+    "ev_gaze_l1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "t0",
+        "t1",
+        "fixations",
+        "saccades",
+        "gaps"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "gaze_l1"
+        },
+        "t0": {
+          "type": "number",
+          "minimum": 0
+        },
+        "t1": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fixations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "t0",
+              "t1",
+              "x",
+              "y",
+              "dispPx",
+              "n"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              "t0": {
+                "type": "number",
+                "minimum": 0
+              },
+              "t1": {
+                "type": "number",
+                "minimum": 0
+              },
+              "x": {
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 100000
+              },
+              "y": {
+                "type": "number",
+                "minimum": -100000,
+                "maximum": 100000
+              },
+              "dispPx": {
+                "type": "number",
+                "minimum": 0
+              },
+              "n": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 20
+        },
+        "saccades": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "t0",
+              "t1",
+              "from",
+              "to",
+              "dir",
+              "ampDeg"
+            ],
+            "properties": {
+              "t0": {
+                "type": "number",
+                "minimum": 0
+              },
+              "t1": {
+                "type": "number",
+                "minimum": 0
+              },
+              "from": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              "dir": {
+                "type": "string",
+                "enum": [
+                  "back",
+                  "jump"
+                ]
+              },
+              "ampDeg": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 10
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "t0",
+              "t1",
+              "kind"
+            ],
+            "properties": {
+              "t0": {
+                "type": "number",
+                "minimum": 0
+              },
+              "t1": {
+                "type": "number",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "blink",
+                  "offscreen",
+                  "noface",
+                  "lowconf"
+                ]
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 10
+        }
+      }
+    },
+    "ev_gaze_raw": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "samples"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "gaze_raw"
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "$ref": "https://brianharness.app/contracts/v1/gaze-sample.schema.json#/definitions/GazeSample"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      }
+    },
+    "ev_aoi_dwell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "msg",
+        "dwell"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "aoi_dwell"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "msg": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^a[0-9]+$"
+        },
+        "dwell": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "aoi",
+              "words",
+              "visibleMs",
+              "gazeMs",
+              "msPerWordZ",
+              "fixations",
+              "reentries",
+              "regressionsIn",
+              "firstFixLatencyMs",
+              "coverage",
+              "conf"
+            ],
+            "properties": {
+              "aoi": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "words": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "visibleMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "gazeMs": {
+                "type": "number",
+                "minimum": 0
+              },
+              "msPerWordZ": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "fixations": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reentries": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "regressionsIn": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "firstFixLatencyMs": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "coverage": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "conf": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 400
+        }
+      }
+    },
+    "ev_attention_digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "msg",
+        "digest",
+        "events"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "attention_digest"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "msg": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^a[0-9]+$"
+        },
+        "digest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "msg",
+            "windowMs",
+            "quality",
+            "qualityLabel",
+            "paras",
+            "lookBacks",
+            "offscreenMs",
+            "composerPauses",
+            "events"
+          ],
+          "properties": {
+            "msg": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 12,
+              "pattern": "^a[0-9]+$"
+            },
+            "windowMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "quality": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "qualityLabel": {
+              "type": "string",
+              "enum": [
+                "good",
+                "fair",
+                "poor"
+              ]
+            },
+            "paras": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "aoi",
+                  "excerpt",
+                  "label",
+                  "ratio"
+                ],
+                "properties": {
+                  "aoi": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "excerpt": {
+                    "type": "string",
+                    "minLength": 0,
+                    "maxLength": 80
+                  },
+                  "label": {
+                    "type": "string",
+                    "enum": [
+                      "deep",
+                      "read",
+                      "skim",
+                      "skipped"
+                    ]
+                  },
+                  "ratio": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "ev": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 12
+                    },
+                    "minItems": 0,
+                    "maxItems": 12
+                  }
+                }
+              },
+              "minItems": 0
+            },
+            "lookBacks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "aoi",
+                  "excerpt",
+                  "ms",
+                  "ev"
+                ],
+                "properties": {
+                  "aoi": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "excerpt": {
+                    "type": "string",
+                    "minLength": 0,
+                    "maxLength": 80
+                  },
+                  "ms": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "ev": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 12
+                  }
+                }
+              },
+              "minItems": 0
+            },
+            "offscreenMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "composerPauses": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "events": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 12
+              },
+              "minItems": 0,
+              "maxItems": 12
+            }
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "aoi",
+              "excerpt",
+              "t0",
+              "t1",
+              "z",
+              "conf",
+              "features"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 12,
+                "pattern": "^e[0-9]+$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "deep_read",
+                  "reread",
+                  "skip",
+                  "look_back",
+                  "fast_scan",
+                  "offscreen",
+                  "composer_hesitation",
+                  "eeg_spike"
+                ]
+              },
+              "aoi": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "excerpt": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 80
+              },
+              "t0": {
+                "type": "number",
+                "minimum": 0
+              },
+              "t1": {
+                "type": "number",
+                "minimum": 0
+              },
+              "z": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "conf": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "features": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 64
+        }
+      }
+    },
+    "ev_user_turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "msg",
+        "text",
+        "sentAt",
+        "hold_ms"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "user_turn"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "msg": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^u[0-9]+$"
+        },
+        "text": {
+          "type": "string"
+        },
+        "sentAt": {
+          "type": "number",
+          "minimum": 0
+        },
+        "hold_ms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1500
+        }
+      }
+    },
+    "ev_director_call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "msg",
+        "input_sha256",
+        "input_tokens",
+        "model",
+        "genMs",
+        "usage",
+        "footprint",
+        "repaired",
+        "deadline_missed",
+        "output"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "director_call"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "msg": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^a[0-9]+$"
+        },
+        "input_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "genMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prompt_tokens",
+            "completion_tokens",
+            "reasoning_tokens"
+          ],
+          "properties": {
+            "prompt_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "completion_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reasoning_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "footprint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "actor_turns",
+            "notes_injected",
+            "notes_shadowed",
+            "notes_blocked",
+            "session_share",
+            "session_dynamic_share",
+            "recent"
+          ],
+          "properties": {
+            "actor_turns": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "notes_injected": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "notes_shadowed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "notes_blocked": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "session_share": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "session_dynamic_share": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "recent": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "note_id",
+                  "turn",
+                  "kind",
+                  "move",
+                  "decision",
+                  "followed",
+                  "next_dwell_ratio"
+                ],
+                "properties": {
+                  "note_id": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 12
+                  },
+                  "turn": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "kind": {
+                    "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/NoteKind"
+                  },
+                  "move": {
+                    "anyOf": [
+                      {
+                        "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/SuggestionMove"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "inject",
+                      "shadow",
+                      "blocked"
+                    ]
+                  },
+                  "followed": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "next_dwell_ratio": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "minItems": 0,
+              "maxItems": 3
+            }
+          }
+        },
+        "repaired": {
+          "type": "boolean"
+        },
+        "deadline_missed": {
+          "type": "boolean"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/DirectorOutput"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": "string",
+          "enum": [
+            "gaze.camera_denied",
+            "gaze.arkit_unsupported",
+            "gaze.model_missing",
+            "gaze.calibration_stale",
+            "gaze.thermal_degraded",
+            "gaze.tracker_interrupted",
+            "gaze.low_quality",
+            "gaze.no_consent",
+            "net.worker_unreachable",
+            "auth.no_token",
+            "model.route_unverified",
+            "model.empty_completion",
+            "model.length_cutoff",
+            "budget.director_cap",
+            "budget.actor_cap",
+            "budget.judge_cap",
+            "budget.daily_cap_device",
+            "budget.daily_cap_global",
+            "upload.too_large",
+            "upload.rejected",
+            "upload.cap",
+            "director.schema_invalid",
+            "director.timeout",
+            "director.kill_switch",
+            "director.leak_breaker"
+          ]
+        }
+      }
+    },
+    "ev_rail_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "note_id",
+        "pass",
+        "blocked_by"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "rail_check"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note_id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^n[0-9]+$"
+        },
+        "pass": {
+          "type": "boolean"
+        },
+        "blocked_by": {
+          "type": "array",
+          "items": {
+            "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/RailCode"
+          },
+          "minItems": 0,
+          "maxItems": 12
+        },
+        "hits": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      }
+    },
+    "ev_injection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "note_id",
+        "decision",
+        "kind",
+        "actor_text",
+        "evidence",
+        "trigger_features",
+        "confidence"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "injection"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note_id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^n[0-9]+$"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "inject",
+            "shadow"
+          ]
+        },
+        "kind": {
+          "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/NoteKind"
+        },
+        "move": {
+          "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/SuggestionMove"
+        },
+        "actor_text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1200
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/EvidenceId"
+          },
+          "minItems": 1,
+          "maxItems": 24
+        },
+        "trigger_features": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "ev_note_dropped": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "note_id",
+        "reason"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "note_dropped"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note_id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^n[0-9]+$"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "late",
+            "superseded",
+            "session_end"
+          ]
+        }
+      }
+    },
+    "ev_context_share": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "note_id",
+        "opener",
+        "system",
+        "history",
+        "history_echo",
+        "user",
+        "director",
+        "total",
+        "share",
+        "dynamic_share",
+        "provider_prompt_tokens"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "context_share"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 12,
+              "pattern": "^n[0-9]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opener": {
+          "type": "boolean"
+        },
+        "system": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "history": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "history_echo": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "user": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "director": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "dynamic_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "provider_prompt_tokens": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ev_actor_turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "msg",
+        "text",
+        "model",
+        "genMs",
+        "firstTokenMs",
+        "usage",
+        "finish_reason",
+        "opener_cue"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "actor_turn"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "msg": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^a[0-9]+$"
+        },
+        "text": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "genMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "firstTokenMs": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "prompt_tokens",
+            "completion_tokens",
+            "reasoning_tokens"
+          ],
+          "properties": {
+            "prompt_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "completion_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reasoning_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "finish_reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opener_cue": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string",
+          "enum": [
+            "gaze.camera_denied",
+            "gaze.arkit_unsupported",
+            "gaze.model_missing",
+            "gaze.calibration_stale",
+            "gaze.thermal_degraded",
+            "gaze.tracker_interrupted",
+            "gaze.low_quality",
+            "gaze.no_consent",
+            "net.worker_unreachable",
+            "auth.no_token",
+            "model.route_unverified",
+            "model.empty_completion",
+            "model.length_cutoff",
+            "budget.director_cap",
+            "budget.actor_cap",
+            "budget.judge_cap",
+            "budget.daily_cap_device",
+            "budget.daily_cap_global",
+            "upload.too_large",
+            "upload.rejected",
+            "upload.cap",
+            "director.schema_invalid",
+            "director.timeout",
+            "director.kill_switch",
+            "director.leak_breaker"
+          ]
+        },
+        "note_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 12,
+              "pattern": "^n[0-9]+$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "TAB-ONLY: absent in a blinded main log"
+        },
+        "actor_request_sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "TAB-ONLY: absent in a blinded main log"
+        },
+        "sealed": {
+          "const": true,
+          "description": "blinded main log only"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "sealed"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "note_id"
+                ]
+              },
+              {
+                "required": [
+                  "actor_request_sha256"
+                ]
+              }
+            ]
+          },
+          "properties": {
+            "usage": {
+              "properties": {
+                "prompt_tokens": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        },
+        {
+          "required": [
+            "note_id",
+            "actor_request_sha256"
+          ],
+          "not": {
+            "required": [
+              "sealed"
+            ]
+          }
+        }
+      ]
+    },
+    "ev_note_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "note_id",
+        "decision",
+        "used",
+        "followed",
+        "answered_first",
+        "leaks",
+        "leak_source",
+        "next_dwell_ratio",
+        "next_rating",
+        "pushback"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "note_outcome"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note_id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^n[0-9]+$"
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "inject",
+            "shadow"
+          ]
+        },
+        "used": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "followed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "answered_first": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leaks": {
+          "type": "array",
+          "items": {
+            "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/LeakCode"
+          },
+          "minItems": 0,
+          "maxItems": 6,
+          "uniqueItems": true
+        },
+        "leak_source": {
+          "type": "string",
+          "enum": [
+            "regex",
+            "judge",
+            "both"
+          ]
+        },
+        "next_dwell_ratio": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_rating": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 5
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pushback": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ev_session_share": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turns",
+        "notes",
+        "shadow_notes",
+        "blocked_notes",
+        "injection_rate",
+        "session_share",
+        "session_dynamic_share",
+        "mean_turn_share",
+        "max_turn_share",
+        "echo_share"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "session_share"
+        },
+        "turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "shadow_notes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blocked_notes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "injection_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "session_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "session_dynamic_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "mean_turn_share": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_turn_share": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "echo_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "ev_health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "check",
+        "ok",
+        "code"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "health"
+        },
+        "check": {
+          "type": "string",
+          "enum": [
+            "camera.permission",
+            "arkit.supported",
+            "mediapipe.model_loaded",
+            "calibration.valid",
+            "thermal",
+            "tracker.running",
+            "gaze.window_quality",
+            "consent.camera",
+            "worker.reachable",
+            "auth.device_token",
+            "model.route",
+            "upstream.reply_shape",
+            "budget",
+            "upload",
+            "director.deadline",
+            "director.enabled",
+            "director.leak_breaker"
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "gaze.camera_denied",
+                "gaze.arkit_unsupported",
+                "gaze.model_missing",
+                "gaze.calibration_stale",
+                "gaze.thermal_degraded",
+                "gaze.tracker_interrupted",
+                "gaze.low_quality",
+                "gaze.no_consent",
+                "net.worker_unreachable",
+                "auth.no_token",
+                "model.route_unverified",
+                "model.empty_completion",
+                "model.length_cutoff",
+                "budget.director_cap",
+                "budget.actor_cap",
+                "budget.judge_cap",
+                "budget.daily_cap_device",
+                "budget.daily_cap_global",
+                "upload.too_large",
+                "upload.rejected",
+                "upload.cap",
+                "director.schema_invalid",
+                "director.timeout",
+                "director.kill_switch",
+                "director.leak_breaker"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "worker_code": {
+          "$ref": "https://brianharness.app/contracts/v1/worker.schema.json#/definitions/WorkerErrorCode"
+        },
+        "role": {
+          "$ref": "https://brianharness.app/contracts/v1/worker.schema.json#/definitions/Role"
+        }
+      }
+    },
+    "ev_session_end": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turns",
+        "reason"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "session_end"
+        },
+        "turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "user",
+            "new_chat",
+            "error",
+            "replay_end"
+          ]
+        }
+      }
+    },
+    "DirectorFootprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actor_turns",
+        "notes_injected",
+        "notes_shadowed",
+        "notes_blocked",
+        "session_share",
+        "session_dynamic_share",
+        "recent"
+      ],
+      "properties": {
+        "actor_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notes_injected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notes_shadowed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notes_blocked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "session_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "session_dynamic_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "recent": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "note_id",
+              "turn",
+              "kind",
+              "move",
+              "decision",
+              "followed",
+              "next_dwell_ratio"
+            ],
+            "properties": {
+              "note_id": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 12
+              },
+              "turn": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "kind": {
+                "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/NoteKind"
+              },
+              "move": {
+                "anyOf": [
+                  {
+                    "$ref": "https://brianharness.app/contracts/v1/note.schema.json#/definitions/SuggestionMove"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "inject",
+                  "shadow",
+                  "blocked"
+                ]
+              },
+              "followed": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "next_dwell_ratio": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 3
+        }
+      }
+    },
+    "ReadingDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "msg",
+        "windowMs",
+        "quality",
+        "qualityLabel",
+        "paras",
+        "lookBacks",
+        "offscreenMs",
+        "composerPauses",
+        "events"
+      ],
+      "properties": {
+        "msg": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^a[0-9]+$"
+        },
+        "windowMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "quality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "qualityLabel": {
+          "type": "string",
+          "enum": [
+            "good",
+            "fair",
+            "poor"
+          ]
+        },
+        "paras": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "aoi",
+              "excerpt",
+              "label",
+              "ratio"
+            ],
+            "properties": {
+              "aoi": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "excerpt": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 80
+              },
+              "label": {
+                "type": "string",
+                "enum": [
+                  "deep",
+                  "read",
+                  "skim",
+                  "skipped"
+                ]
+              },
+              "ratio": {
+                "type": "number",
+                "minimum": 0
+              },
+              "ev": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 12
+                },
+                "minItems": 0,
+                "maxItems": 12
+              }
+            }
+          },
+          "minItems": 0
+        },
+        "lookBacks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "aoi",
+              "excerpt",
+              "ms",
+              "ev"
+            ],
+            "properties": {
+              "aoi": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "excerpt": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 80
+              },
+              "ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "ev": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 12
+              }
+            }
+          },
+          "minItems": 0
+        },
+        "offscreenMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "composerPauses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12
+          },
+          "minItems": 0,
+          "maxItems": 12
+        }
+      }
+    },
+    "AttentionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "aoi",
+        "excerpt",
+        "t0",
+        "t1",
+        "z",
+        "conf",
+        "features"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^e[0-9]+$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "deep_read",
+            "reread",
+            "skip",
+            "look_back",
+            "fast_scan",
+            "offscreen",
+            "composer_hesitation",
+            "eeg_spike"
+          ]
+        },
+        "aoi": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "excerpt": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 80
+        },
+        "t0": {
+          "type": "number",
+          "minimum": 0
+        },
+        "t1": {
+          "type": "number",
+          "minimum": 0
+        },
+        "z": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conf": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "features": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "AoiDwell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aoi",
+        "words",
+        "visibleMs",
+        "gazeMs",
+        "msPerWordZ",
+        "fixations",
+        "reentries",
+        "regressionsIn",
+        "firstFixLatencyMs",
+        "coverage",
+        "conf"
+      ],
+      "properties": {
+        "aoi": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "words": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "visibleMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "gazeMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "msPerWordZ": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fixations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reentries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "regressionsIn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "firstFixLatencyMs": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "coverage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "conf": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "HealthCode": {
+      "type": "string",
+      "enum": [
+        "gaze.camera_denied",
+        "gaze.arkit_unsupported",
+        "gaze.model_missing",
+        "gaze.calibration_stale",
+        "gaze.thermal_degraded",
+        "gaze.tracker_interrupted",
+        "gaze.low_quality",
+        "gaze.no_consent",
+        "net.worker_unreachable",
+        "auth.no_token",
+        "model.route_unverified",
+        "model.empty_completion",
+        "model.length_cutoff",
+        "budget.director_cap",
+        "budget.actor_cap",
+        "budget.judge_cap",
+        "budget.daily_cap_device",
+        "budget.daily_cap_global",
+        "upload.too_large",
+        "upload.rejected",
+        "upload.cap",
+        "director.schema_invalid",
+        "director.timeout",
+        "director.kill_switch",
+        "director.leak_breaker"
+      ]
+    }
+  },
+  "type": "object",
+  "required": [
+    "type"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "session_start",
+        "gaze_quality",
+        "aoi_layout",
+        "scroll",
+        "gaze_l1",
+        "gaze_raw",
+        "aoi_dwell",
+        "attention_digest",
+        "user_turn",
+        "director_call",
+        "rail_check",
+        "injection",
+        "note_dropped",
+        "context_share",
+        "actor_turn",
+        "note_outcome",
+        "session_share",
+        "health",
+        "session_end"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session_start"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_session_start"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "gaze_quality"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_gaze_quality"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "aoi_layout"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_aoi_layout"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "scroll"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_scroll"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "gaze_l1"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_gaze_l1"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "gaze_raw"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_gaze_raw"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "aoi_dwell"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_aoi_dwell"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "attention_digest"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_attention_digest"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "user_turn"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_user_turn"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "director_call"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_director_call"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "rail_check"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_rail_check"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "injection"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_injection"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "note_dropped"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_note_dropped"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "context_share"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_context_share"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "actor_turn"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_actor_turn"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "note_outcome"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_note_outcome"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session_share"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_session_share"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "health"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_health"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "session_end"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_session_end"
+      }
+    }
+  ]
+}

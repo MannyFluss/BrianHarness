@@ -1,0 +1,12 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:16:53.512Z",
+  "mono": 413512,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 109,
+  "type": "rail_check",
+  "turn": 12,
+  "note_id": "n5",
+  "pass": true,
+  "blocked_by": []
+}

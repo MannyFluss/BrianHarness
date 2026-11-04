@@ -1,0 +1,25 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:16:53.513Z",
+  "mono": 413513,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 110,
+  "type": "injection",
+  "turn": 12,
+  "note_id": "n5",
+  "decision": "inject",
+  "kind": "both",
+  "move": "go_deeper",
+  "actor_text": "[Context for your next reply. Soft hints: answer the person first, use only what fits.\nDon't quote this or say where it came from.]\n- They seem most drawn to why rye ferments faster; the hydration numbers landed flat.\n- If it fits after answering them: go deeper on why rye ferments faster, and skip more ratios. (h:e31,e32,e33)",
+  "evidence": [
+    "e31",
+    "e32",
+    "e33"
+  ],
+  "trigger_features": {
+    "e31.z": 2.6,
+    "e32.z": -1.9,
+    "e33.ms": 3100
+  },
+  "confidence": 0.78
+}

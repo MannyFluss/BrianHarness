@@ -1,0 +1,12 @@
+{
+  "error": {
+    "message": "daily director request cap reached for this device (100 director requests per UTC day); resets at 2026-11-05T00:00:00.000Z",
+    "type": "rate_limit_error",
+    "code": "role_cap_director",
+    "limit": 100,
+    "used": 100,
+    "reset_at": "2026-11-05T00:00:00.000Z",
+    "role": "director",
+    "scope": "role"
+  }
+}

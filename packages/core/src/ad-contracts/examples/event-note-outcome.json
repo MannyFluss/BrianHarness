@@ -1,0 +1,19 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:17:50.000Z",
+  "mono": 470000,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 130,
+  "type": "note_outcome",
+  "turn": 12,
+  "note_id": "n5",
+  "decision": "inject",
+  "used": 0.5,
+  "followed": null,
+  "answered_first": true,
+  "leaks": [],
+  "leak_source": "regex",
+  "next_dwell_ratio": 1.2,
+  "next_rating": null,
+  "pushback": false
+}

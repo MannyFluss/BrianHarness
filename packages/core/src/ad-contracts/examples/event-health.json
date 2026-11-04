@@ -1,0 +1,15 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:10:01.200Z",
+  "mono": 1200,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 5,
+  "type": "health",
+  "check": "budget",
+  "ok": false,
+  "code": "budget.director_cap",
+  "detail": "Director paused: daily cap reached; chat continues without notes",
+  "http_status": 429,
+  "worker_code": "role_cap_director",
+  "role": "director"
+}

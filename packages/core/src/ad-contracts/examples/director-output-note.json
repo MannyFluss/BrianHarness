@@ -1,0 +1,45 @@
+{
+  "context_update": {
+    "summary": "Manny is planning his first rye sourdough. He engages most with the why of fermentation; recipe numbers get skimmed.",
+    "hypotheses": [
+      {
+        "label": "fermentation science",
+        "conf": 0.7,
+        "evidence": [
+          "e31",
+          "e19"
+        ]
+      },
+      {
+        "label": "oven hardware",
+        "conf": 0.4,
+        "evidence": [
+          "e33"
+        ]
+      }
+    ],
+    "changed": [
+      "raised fermentation science 0.55 -> 0.70"
+    ]
+  },
+  "intent": "See whether the fermentation thread keeps holding when the Actor goes deeper.",
+  "note": {
+    "id": "n5",
+    "rationale": "Deep read + 2 rereads on the rye-fermentation paragraph (e31), look-back to oven hot spots (e33); hydration skimmed (e32).",
+    "observation": "They seem most drawn to why rye ferments faster; the hydration numbers landed flat.",
+    "suggestion": {
+      "move": "go_deeper",
+      "target": "why rye ferments faster",
+      "text": "go deeper on why rye ferments faster, and skip more ratios"
+    },
+    "value": "Two turns of signal agree; a generic next reply would likely repeat ratios he skimmed.",
+    "evidence": [
+      "e31",
+      "e32",
+      "e33"
+    ],
+    "confidence": 0.78,
+    "expires_after_turns": 1
+  },
+  "no_note_reason": null
+}

@@ -1,0 +1,261 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://brianharness.app/contracts/v1/worker.schema.json",
+  "title": "Worker contract (contract-v1, adopted from Worker branch actor-director @ 9bc90f1)",
+  "definitions": {
+    "Role": {
+      "type": "string",
+      "enum": [
+        "actor",
+        "director",
+        "judge"
+      ]
+    },
+    "WorkerErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_role",
+        "role_cap_actor",
+        "role_cap_director",
+        "role_cap_judge",
+        "daily_cap_device",
+        "daily_cap_global",
+        "ad_log_too_large",
+        "invalid_json",
+        "invalid_ad_upload",
+        "invalid_jsonl",
+        "upload_rejected",
+        "session_exists",
+        "upload_cap_device",
+        "upload_cap_global"
+      ]
+    },
+    "AdUploadEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "sessionId",
+        "appVersion",
+        "platform",
+        "jsonl"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "appVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[^\\u0000-\\u001f]+$"
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[^\\u0000-\\u001f]+$"
+        },
+        "build": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jsonl": {
+          "type": "string"
+        }
+      },
+      "description": "POST /v1/ad-sessions body; whole body <= 1048576 bytes (413 ad_log_too_large)"
+    },
+    "AdUploadOk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "schema",
+        "received_at",
+        "bytes",
+        "lines",
+        "sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "const": "ad_session"
+        },
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "received_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lines": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64
+        }
+      }
+    },
+    "WorkerErrorBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "message",
+            "type",
+            "code"
+          ],
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "used": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reset_at": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "actor",
+                "director",
+                "judge"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "role",
+                "device",
+                "global"
+              ]
+            },
+            "field": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reason": {
+              "type": "string"
+            },
+            "permanent": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "RoleCapError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "message",
+            "type",
+            "code",
+            "role",
+            "scope",
+            "limit",
+            "used",
+            "reset_at"
+          ],
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "const": "rate_limit_error"
+            },
+            "code": {
+              "type": "string",
+              "enum": [
+                "role_cap_actor",
+                "role_cap_director",
+                "role_cap_judge"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "used": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reset_at": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "actor",
+                "director",
+                "judge"
+              ]
+            },
+            "scope": {
+              "const": "role"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}

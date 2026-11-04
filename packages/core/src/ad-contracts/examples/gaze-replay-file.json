@@ -1,0 +1,55 @@
+{
+  "schema": "bh-gaze-replay/1",
+  "layout": "ipadpro-m1-landscape",
+  "src": "synthetic",
+  "hz": 30,
+  "screen": {
+    "deviceModel": "iPad13,8",
+    "platform": "ios",
+    "orientation": "landscape_right",
+    "widthPt": 1366,
+    "heightPt": 1024,
+    "scale": 2,
+    "webview": {
+      "x": 0,
+      "y": 0,
+      "width": 1366,
+      "height": 1024
+    },
+    "widthMm": 263
+  },
+  "samples": [
+    {
+      "t": 0,
+      "x": 402,
+      "y": 210,
+      "conf": 0.9,
+      "face": true,
+      "blink": false,
+      "head": {
+        "yaw": 18,
+        "pitch": 2,
+        "roll": 0,
+        "distCm": 45
+      },
+      "cal": true,
+      "src": "synthetic"
+    },
+    {
+      "t": 33.3,
+      "x": 405,
+      "y": 211,
+      "conf": 0.9,
+      "face": true,
+      "blink": false,
+      "head": {
+        "yaw": 18,
+        "pitch": 2,
+        "roll": 0,
+        "distCm": 45
+      },
+      "cal": true,
+      "src": "synthetic"
+    }
+  ]
+}
