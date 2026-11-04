@@ -5,3 +5,4 @@ export * from "./health.js";
 export * from "./note.js";
 export * from "./events.js";
 export * from "./worker.js";
+export * from "./blinding.js";

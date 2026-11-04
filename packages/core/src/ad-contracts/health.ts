@@ -25,6 +25,7 @@ export const HEALTH_CODES = [
   "upload.too_large", // Worker 413 ad_log_too_large (body > 1 MiB)
   "upload.rejected", // Worker 400 invalid_ad_upload / invalid_jsonl / invalid_json, 422 upload_rejected (secret scan)
   "upload.cap", // Worker 429 upload_cap_device / upload_cap_global
+  "upload.blinded_guard", // (v1.1) the client-side blinded guard refused the upload (detail = BlindedGuardCode); fail closed
   "director.schema_invalid", // (spec) JSON invalid after the one repair retry
   "director.timeout", // the Director's answer was not ready 1.5 s after Send: that turn went without a note
   "director.kill_switch", // directorEnabled:false locally or by the remote flag

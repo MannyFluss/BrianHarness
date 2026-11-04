@@ -1,9 +1,26 @@
 # Actor/Director shared contracts
 
-**Version: contract-v1** · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
+**Version: contract-v1.1** (additive over contract-v1; see Changes) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
 
 Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/ad-contracts/`, published copy at
-`/workspace/actor-director/contracts/`. Import in TS from `packages/core/src/ad-contracts/index.ts` (E1 adds the `@brianharness/core/ad-contracts` subpath export; nothing is re-exported from the core index, so protocol-4 is untouched), or use the JSON Schemas.
+`/workspace/actor-director/contracts/`. Import in TS from `@brianharness/core/ad-contracts` (subpath export, added in E1; nothing is re-exported from the core index, so protocol-4 is untouched), or use the JSON Schemas.
+
+## Changes
+
+### contract-v1.1 (2026-11-04, additive; every contract-v1 line still validates)
+1. `blinding.json` + `blinding.ts`: the ONE shared blinding list (arm-key patterns = protocol 4's `ARM_KEYS` exactly,
+   TAB-ONLY fields, sealed-only types, sealed-only health codes, the `.sealed` suffix). `tools/phaseD/check_blinding.mjs`
+   reads the same file, so the client guard and the checker can't drift. Exports: `ARM_KEY_PATTERNS`, `armKeyRegExp()`,
+   `BLINDED_GUARD_CODES`, `blindedGuard()`, `blindedMainLineViolation()`, `findArmKey()`, `SEALED_ONLY_HEALTH_CODES`.
+2. Health code `upload.blinded_guard` (check `upload`): the client guard refused an upload; `detail` is the guard code
+   only (never an event type or arm).
+3. `session_start.contract` accepts `"contract-v1"` or `"contract-v1.1"` (new logs write v1.1).
+4. Optional prompt-slot ids (DirectorBot decision, Nov 4): `session_start.director_format_id` (`fmt1-<sha8>` over
+   `DIRECTOR_OUTPUT_FORMAT_TEXT`), `director_examples_id` (`dex1-<sha8>` over the examples slot),
+   `director_assembled_sha8` (sha256[:8] of the assembled Director system message). `director_prompt_id` stays
+   `dir1-b1d2fd77` over R3's `system_prompt_v1.txt` only.
+5. Optional `director_call.assembled_prompt_sha8` and `director_call.input_tokens_by_slot {system, format, examples,
+   digest}` (o200k_base; the four add up to `input_tokens`).
 
 ## Change policy
 
@@ -507,7 +524,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1",
+  "contract": "contract-v1.1",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -549,7 +566,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1",
+  "contract": "contract-v1.1",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -595,7 +612,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1",
+  "contract": "contract-v1.1",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -859,7 +876,7 @@ Every other event type has an example in `examples/event-*.json`, and all of the
   "appVersion": "0.1.0",
   "platform": "ios",
   "build": "20261105.0900",
-  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
+  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.1\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
 }
 ```
 <!-- example: worker-role-cap-error -->
@@ -932,32 +949,42 @@ Every other event type has an example in `examples/event-*.json`, and all of the
 20. **JSON Schema draft-07**, which iOS, Python and Worker tooling all read. Ajv validates it in the test (`strict`
     on, except `strictRequired`, because closed sub-schemas use `required` to forbid fields).
 
-## Open with Researcher
+## Resolved with Researcher (Nov 4 2026)
 
-1. **Proposed server-side blinded guard** (the Worker has none today; not blocking). For an upload whose
-   `session_start.session_type` is `blinded` and whose sessionId doesn't end in `.sealed`, reject (or flag) if any line
-   has: `session_start.arm` or `p_inject`; `actor_turn.note_id` or `actor_request_sha256`; a non-null
-   `actor_turn.usage.prompt_tokens`; any line of type `director_call | rail_check | injection | note_dropped |
-   context_share | note_outcome | session_share`; or `health.code` `director.leak_breaker`. The `.sealed` upload
-   needs a read key the app never holds, and it's unsealed only after the session's survey and blind guess.
-2. **Differences from the R3 draft `director_output.schema.json`.** All 4 R3 examples validate against
-   `note.schema.json`, and the R3 schema-level invalid fixtures fail it. Remaining differences:
-   - draft-07 here vs 2020-12 there.
-   - Evidence ids: here `u<k>` can't have paragraphs (`u3.p1` is invalid), because only Actor paragraphs are tagged.
-     Here hypotheses' evidence follows the same id pattern; R3 allows any string.
-   - Length limits here where R3 has none: rationale ≤ 800, observation ≤ 400, suggestion.text ≤ 280, target ≤ 160,
-     value ≤ 500, evidence ≤ 24 ids, changed ≤ 8 × 200 chars. Summary, intent, hypothesis count and label length
-     follow R3.
-   - Rendering in R3's `validate.py` differs from the contract: it tags only `e` ids, only on the suggestion line,
-     uses a header with a leading space before "Don't", strips a trailing "." and re-adds it, and counts words over
-     the whole text without the header. The contract renders all ids, on the last line, with no leading space; see
-     decisions 9-11.
-3. Unseal timing for blinded sessions, and whether `note_outcome` judge fields are filled in the sealed log later
-   (re-upload) or in a separate judge file.
-4. A survey/rating event for bh-ad/1 (R5 is still a draft). It isn't in contract-v1 and will come in contract-v2.
+1. **Blinded guard: APPROVED with changes** (implemented client-side in E1; contract-v1.1).
+   - Fail closed: an upload the guard can't prove clean is rejected with a code (`BLINDED_GUARD_CODES`), and the
+     client writes a health line `upload.blinded_guard` (detail = the code).
+   - Besides the field and type rules below, any key that `check_blinding.mjs` treats as an arm key, at any depth
+     in a line, is rejected (`arm_key`).
+   - ONE shared arm-key list (`blinding.json`, exported from ad-contracts) is read by both check_blinding and the guard.
+   - A `.sealed` upload whose base session (or its own session_start) isn't blinded is rejected (`sealed_base_not_blinded`).
+   - The server side is InfrastructureBot's (see Requests below).
+2. **All differences from the R3 draft are accepted; contract-v1 is authoritative.** The Researcher aligns
+   `validate.py` to `note.schema.json` and `renderActorText`. (The differences, for the record: draft-07 vs 2020-12;
+   `u<k>` ids have no paragraphs and hypothesis evidence follows the id pattern; length limits rationale ≤ 800,
+   observation ≤ 400, suggestion.text ≤ 280, target ≤ 160, value ≤ 500, evidence ≤ 24, changed ≤ 8 × 200; rendering
+   per decisions 9-11.)
+3. **Unsealing and judge results.** Unsealing is dataset-level, after the R5 stopping rule is met and the analysis
+   code is hash-frozen. Judge results go in a separate judge file keyed by sessionId, note id or turn, judge prompt
+   id, model and run id. The sealed log is never re-uploaded and stays immutable and hash-pinned. Judge output
+   computed on sealed logs is stored sealed too. Judge fields stay null in the main log. A judge-file type can wait
+   for contract-v2.
+4. A survey/rating event for bh-ad/1 comes in contract-v2.
+
+## Blinded guard rules (shared by the client guard and check_blinding)
+
+For an upload whose `session_start.session_type` is `blinded` and whose sessionId doesn't end in `.sealed`, reject if
+any line has: `session_start.arm` or `p_inject`; `actor_turn.note_id` or `actor_request_sha256`; a non-null
+`actor_turn.usage.prompt_tokens`; a line of type `director_call | rail_check | injection | note_dropped | context_share |
+note_outcome | session_share`; `health.code` `director.leak_breaker`; or any key matching the shared arm-key list at any
+depth. Fail closed: every line must be a bh-ad/1 object of this session and the first line its session_start, else
+reject. A `<id>.sealed` upload is accepted only when its own session_start and the base `<id>` main log are blinded.
+The sealed log needs a read key the app never holds and is unsealed only at dataset level (ruling 3).
+check_blinding.mjs applies the same per-line rules to every bh-ad/1 blinded main log in a folder (sealed files are
+counted, not checked; tab_visible logs carry the arm by design).
 
 ## Requests to InfrastructureBot (no divergence; the contract adopts 9bc90f1 as-is)
 
 1. Accept the `<sessionId>.sealed` companion upload as a normal `ad_session` (it already passes `ID_RE`). Optionally,
    restrict reading it to a separate key.
-2. Optionally implement the blinded guard above at upload.
+2. Implement the server side of the blinded guard (approved by the Researcher): same rules, read from `blinding.json`, fail closed, and reject a `.sealed` upload whose base session isn't blinded. Proposed error: 422 with a code per `BLINDED_GUARD_CODES` (naming is yours).

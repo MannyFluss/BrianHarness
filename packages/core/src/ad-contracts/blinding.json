@@ -1,0 +1,8 @@
+{
+  "$comment": "contract-v1.1: the ONE shared blinding list. Read by ad-contracts (events.ts / blinding.ts: the client-side blinded guard) and by tools/phaseD/check_blinding.mjs, so they cannot drift. armKeyPatterns are regex fragments joined as ^(?:a|b|...)$ with flag i (exactly protocol 4's ARM_KEYS).",
+  "armKeyPatterns": ["adaptation", "study[_-]?mode", "study[_-]?arm", "arm", "condition", "assignment", "schedule", "order", "seed"],
+  "tabOnlyFields": { "session_start": ["arm", "p_inject"], "actor_turn": ["note_id", "actor_request_sha256"] },
+  "sealedOnlyTypes": ["director_call", "rail_check", "injection", "note_dropped", "context_share", "note_outcome", "session_share"],
+  "sealedOnlyHealthCodes": ["director.leak_breaker"],
+  "sealedSessionSuffix": ".sealed"
+}

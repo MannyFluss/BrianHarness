@@ -51,7 +51,7 @@ const gazeSchema = {
 const G = (d) => ({ $ref: BASE + "gaze-sample.schema.json#/definitions/" + d });
 
 // ---------- gaze-plugin ----------
-const HEALTH_CODES = ["gaze.camera_denied", "gaze.arkit_unsupported", "gaze.model_missing", "gaze.calibration_stale", "gaze.thermal_degraded", "gaze.tracker_interrupted", "gaze.low_quality", "gaze.no_consent", "net.worker_unreachable", "auth.no_token", "model.route_unverified", "model.empty_completion", "model.length_cutoff", "budget.director_cap", "budget.actor_cap", "budget.judge_cap", "budget.daily_cap_device", "budget.daily_cap_global", "upload.too_large", "upload.rejected", "upload.cap", "director.schema_invalid", "director.timeout", "director.kill_switch", "director.leak_breaker"];
+const HEALTH_CODES = ["gaze.camera_denied", "gaze.arkit_unsupported", "gaze.model_missing", "gaze.calibration_stale", "gaze.thermal_degraded", "gaze.tracker_interrupted", "gaze.low_quality", "gaze.no_consent", "net.worker_unreachable", "auth.no_token", "model.route_unverified", "model.empty_completion", "model.length_cutoff", "budget.director_cap", "budget.actor_cap", "budget.judge_cap", "budget.daily_cap_device", "budget.daily_cap_global", "upload.too_large", "upload.rejected", "upload.cap", "upload.blinded_guard", "director.schema_invalid", "director.timeout", "director.kill_switch", "director.leak_breaker"];
 const HEALTH_CHECKS = ["camera.permission", "arkit.supported", "mediapipe.model_loaded", "calibration.valid", "thermal", "tracker.running", "gaze.window_quality", "consent.camera", "worker.reachable", "auth.device_token", "model.route", "upstream.reply_shape", "budget", "upload", "director.deadline", "director.enabled", "director.leak_breaker"];
 const healthCode = en(...HEALTH_CODES);
 const orientation = en("portrait", "portrait_upside_down", "landscape_left", "landscape_right");
@@ -183,19 +183,22 @@ const footprint = obj({
 });
 const sessionStart = {
   ...ev("session_start", {
-    profile: { const: "actor-director" }, contract: { const: "contract-v1" }, userId: str(1, 128),
+    profile: { const: "actor-director" }, contract: en("contract-v1", "contract-v1.1"), userId: str(1, 128),
     session_type: { ...en("blinded", "tab_visible"), description: "SESSION TYPE. Fixed at session start by the schedule. blinded => tab hidden, main log redacted (see TAB-ONLY fields)" },
     tab: { ...en("visible", "hidden"), description: "must agree with session_type: blinded=hidden, tab_visible=visible" },
     arm: { ...en("on", "shadow", "off"), description: "TAB-ONLY: tab_visible sessions and the sealed log of a blinded session; NEVER in a blinded main log" },
     p_inject: { ...share01, description: "TAB-ONLY (same rule as arm)" },
     sealed: { const: true }, blind: obj({ index: int(1), total: int(1), scheduleHash: sha }),
     actor_prompt_id: str(1, 32, { pattern: "^ap[0-9]+-[0-9a-f]{8}$" }), director_prompt_id: str(1, 32, { pattern: "^dir[0-9]+-[0-9a-f]{8}$" }),
+    director_format_id: { ...str(1, 32, { pattern: "^fmt[0-9]+-[0-9a-f]{8}$" }), description: "v1.1: id of the output-format slot (DIRECTOR_OUTPUT_FORMAT_TEXT)" },
+    director_examples_id: { ...str(1, 32, { pattern: "^dex[0-9]+-[0-9a-f]{8}$" }), description: "v1.1: id of the in-context examples slot" },
+    director_assembled_sha8: { ...str(8, 8, { pattern: "^[0-9a-f]{8}$" }), description: "v1.1: sha256[:8] of the final assembled Director system message" },
     pipeline_version: str(1, 32), tokenizer: { const: "o200k_base" }, models: obj({ actor: str(1, 128), director: str(1, 128) }),
     consent: obj({ camera: { type: "boolean" }, rawGaze: { type: "boolean" } }),
     gaze: obj({ tracker: en(...GAZE_SRC, "none"), permission: P("CameraPermission") }),
     device: obj({ deviceModel: str(1, 64), platform: en("ios", "mac", "web"), orientation: P("Orientation"), widthPt: num(1, COORD), heightPt: num(1, COORD) }),
     director_enabled: { type: "boolean" },
-  }, ["arm", "p_inject", "sealed", "blind"]),
+  }, ["arm", "p_inject", "sealed", "blind", "director_format_id", "director_examples_id", "director_assembled_sha8"]),
   oneOf: [
     // blinded main log: hidden tab, sealed, schedule position, NO arm
     { properties: { session_type: { const: "blinded" }, tab: { const: "hidden" } }, required: ["sealed", "blind"], not: { anyOf: [{ required: ["arm"] }, { required: ["p_inject"] }] } },
@@ -227,7 +230,9 @@ const events = [
   ev("aoi_dwell", { turn, msg: msgId, dwell: arr(aoiDwell, 0, 400) }),
   ev("attention_digest", { turn, msg: msgId, digest, events: arr(attEvent, 0, 64) }),
   ev("user_turn", { turn, msg: str(2, 12, { pattern: "^u[0-9]+$" }), text: { type: "string" }, sentAt: num(0), hold_ms: num(0, 1500) }),
-  ev("director_call", { turn, msg: msgId, input_sha256: sha, input_tokens: tok, model: str(1, 128), genMs: num(0), usage, footprint, repaired: { type: "boolean" }, deadline_missed: { type: "boolean" }, output: nul(N("DirectorOutput")), error: healthCode }, ["error"]),
+  ev("director_call", { turn, msg: msgId, input_sha256: sha, input_tokens: tok, model: str(1, 128), genMs: num(0), usage, footprint, repaired: { type: "boolean" }, deadline_missed: { type: "boolean" }, output: nul(N("DirectorOutput")), error: healthCode,
+    assembled_prompt_sha8: str(8, 8, { pattern: "^[0-9a-f]{8}$" }),
+    input_tokens_by_slot: obj({ system: tok, format: tok, examples: tok, digest: tok }) }, ["error", "assembled_prompt_sha8", "input_tokens_by_slot"]),
   ev("rail_check", { turn, note_id: str(2, 12, { pattern: "^n[0-9]+$" }), pass: { type: "boolean" }, blocked_by: arr(N("RailCode"), 0, 12), hits: arr(str(1, 64), 0, 32) }, ["hits"]),
   ev("injection", { turn, note_id: str(2, 12, { pattern: "^n[0-9]+$" }), decision: en("inject", "shadow"), kind: N("NoteKind"), move: N("SuggestionMove"), actor_text: str(1, 1200), evidence: arr(N("EvidenceId"), 1, 24), trigger_features: numMap, confidence: share01 }, ["move"]),
   ev("note_dropped", { turn, note_id: str(2, 12, { pattern: "^n[0-9]+$" }), reason: en("late", "superseded", "session_end") }),

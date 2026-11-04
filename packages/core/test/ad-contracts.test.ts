@@ -26,7 +26,7 @@ const EV = "bh-ad-events.schema.json";
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
 test("contract version and frozen date", () => {
-  assert.equal(C.CONTRACT_VERSION, "contract-v1");
+  assert.equal(C.CONTRACT_VERSION, "contract-v1.1");
   assert.equal(C.CONTRACT_FROZEN, "2026-11-04");
   assert.equal(C.BH_AD_SCHEMA, "bh-ad/1");
   const readme = readFileSync(join(DIR, "README.md"), "utf8");

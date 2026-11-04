@@ -59,7 +59,11 @@
           "const": "actor-director"
         },
         "contract": {
-          "const": "contract-v1"
+          "type": "string",
+          "enum": [
+            "contract-v1",
+            "contract-v1.1"
+          ]
         },
         "userId": {
           "type": "string",
@@ -136,6 +140,27 @@
           "minLength": 1,
           "maxLength": 32,
           "pattern": "^dir[0-9]+-[0-9a-f]{8}$"
+        },
+        "director_format_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^fmt[0-9]+-[0-9a-f]{8}$",
+          "description": "v1.1: id of the output-format slot (DIRECTOR_OUTPUT_FORMAT_TEXT)"
+        },
+        "director_examples_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^dex[0-9]+-[0-9a-f]{8}$",
+          "description": "v1.1: id of the in-context examples slot"
+        },
+        "director_assembled_sha8": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 8,
+          "pattern": "^[0-9a-f]{8}$",
+          "description": "v1.1: sha256[:8] of the final assembled Director system message"
         },
         "pipeline_version": {
           "type": "string",
@@ -1597,11 +1622,46 @@
             "upload.too_large",
             "upload.rejected",
             "upload.cap",
+            "upload.blinded_guard",
             "director.schema_invalid",
             "director.timeout",
             "director.kill_switch",
             "director.leak_breaker"
           ]
+        },
+        "assembled_prompt_sha8": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 8,
+          "pattern": "^[0-9a-f]{8}$"
+        },
+        "input_tokens_by_slot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "system",
+            "format",
+            "examples",
+            "digest"
+          ],
+          "properties": {
+            "system": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "format": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "examples": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "digest": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
       }
     },
@@ -2116,6 +2176,7 @@
             "upload.too_large",
             "upload.rejected",
             "upload.cap",
+            "upload.blinded_guard",
             "director.schema_invalid",
             "director.timeout",
             "director.kill_switch",
@@ -2535,6 +2596,7 @@
                 "upload.too_large",
                 "upload.rejected",
                 "upload.cap",
+                "upload.blinded_guard",
                 "director.schema_invalid",
                 "director.timeout",
                 "director.kill_switch",
@@ -3051,6 +3113,7 @@
         "upload.too_large",
         "upload.rejected",
         "upload.cap",
+        "upload.blinded_guard",
         "director.schema_invalid",
         "director.timeout",
         "director.kill_switch",

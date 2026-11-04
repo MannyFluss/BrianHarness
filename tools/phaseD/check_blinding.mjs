@@ -14,10 +14,18 @@
 // bh-feedback-*.json) are also checked for absorption-rating leaks, in ANY session (ratings are always redacted):
 // no rating / absorption / hooked / blindGuess key, no 1-5 digit as a tap name or radio label, and generic
 // "rating option" / "blinding-check option" controls carry no value / checked / pressed / selected / index.
+//
+// Actor/Director (bh-ad/1, contract-v1.1): a bh-ad/1 log whose session_start.session_type is "blinded" is checked with
+// the blinded guard's rules (no arm / p_inject, no tab-only actor_turn fields, no sealed-only event types, null
+// actor_turn.usage.prompt_tokens, no director.leak_breaker health, no arm key at any depth). Its sealed companion
+// (<id>.sealed.jsonl) carries the arm by design and is only counted. The arm-key list and the field lists are read
+// from packages/core/src/ad-contracts/blinding.json, the ONE list shared with the client-side guard.
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ARM_KEYS = /^(?:adaptation|study[_-]?mode|study[_-]?arm|arm|condition|assignment|schedule|order|seed)$/i;
+const BLINDING = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../packages/core/src/ad-contracts/blinding.json"), "utf8"));
+const ARM_KEYS = new RegExp(`^(?:${BLINDING.armKeyPatterns.join("|")})$`, "i");
 const ARM_VALUES = /^\s*(?:adaptive|baseline)\s*$/i;
 const files = [];
 const walk = (p) => { if (statSync(p).isDirectory()) for (const f of readdirSync(p).sort()) walk(join(p, f)); else if (p.endsWith(".jsonl") || isReportFile(p)) files.push(p); };
@@ -50,9 +58,37 @@ function reportRatingLeaks(report, bad) {
 for (const p of process.argv.slice(2)) walk(p);
 if (!files.length) { console.error("usage: check_blinding.mjs <session.jsonl|dir>..."); process.exit(2); }
 
-let leaks = 0, study = 0, practice = 0, plain = 0, blindGuessArm = 0, reports = 0;
+/** bh-ad/1 blinded main log rules (mirror of blindedMainLineViolation in ad-contracts/blinding.ts; a test keeps them equal) */
+function adBlindedViolation(e) {
+  const type = String(e.type);
+  if (BLINDING.sealedOnlyTypes.includes(type)) return "sealed_type";
+  if (type === "session_start" && ("arm" in e || "p_inject" in e)) return "arm_field";
+  for (const f of BLINDING.tabOnlyFields[type] ?? []) if (f in e) return type === "session_start" ? "arm_field" : "tab_only_field";
+  if (type === "actor_turn" && (!e.usage || typeof e.usage !== "object" || e.usage.prompt_tokens !== null)) return "prompt_tokens";
+  if (type === "health" && BLINDING.sealedOnlyHealthCodes.includes(String(e.code))) return "sealed_health";
+  const armKey = (v, path) => {
+    if (Array.isArray(v)) { for (let j = 0; j < v.length; j++) { const p = armKey(v[j], `${path}[${j}]`); if (p) return p; } return null; }
+    if (!v || typeof v !== "object") return null;
+    for (const [k, x] of Object.entries(v)) { if (ARM_KEYS.test(k)) return `${path}.${k}`; const p = armKey(x, `${path}.${k}`); if (p) return p; }
+    return null;
+  };
+  const k = armKey(e, "");
+  return k ? `arm_key ${k}` : null;
+}
+
+let leaks = 0, study = 0, practice = 0, plain = 0, blindGuessArm = 0, reports = 0, adBlinded = 0, adSealed = 0, adVisible = 0;
 for (const f of files) {
   const lines = f.endsWith(".json") ? [JSON.parse(readFileSync(f, "utf8"))] : readFileSync(f, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
+  if (lines[0]?.schema === "bh-ad/1") {
+    const st = lines[0];
+    if (f.endsWith(BLINDING.sealedSessionSuffix + ".jsonl")) { adSealed++; continue; }
+    if (st.type === "session_start" && st.session_type === "tab_visible") { adVisible++; continue; }
+    adBlinded++;
+    // fail closed: a bh-ad/1 log that does not open with a session_start is treated as blinded and must say so
+    if (st.type !== "session_start" || st.session_type !== "blinded") { leaks++; console.log(`LEAK ${f}:1: bh-ad/1 log without a blinded/tab_visible session_start`); continue; }
+    lines.forEach((e, i) => { const why = adBlindedViolation(e); if (why) { leaks++; console.log(`LEAK ${f}:${i + 1}: bh-ad/1 blinded main log: ${why}`); } });
+    continue;
+  }
   const start = lines.find((e) => e.type === "session_start");
   const standalone = f.endsWith(".json");
   // a report .json file: study iff its header says so; arm checks then run on it like on a study session line
@@ -83,5 +119,6 @@ for (const f of files) {
     visit(e, "");
   });
 }
+if (adBlinded + adSealed + adVisible) console.log(`bh-ad/1: ${adBlinded} blinded main (checked), ${adSealed} sealed (arm by design, not checked), ${adVisible} tab_visible (not blinded)`);
 console.log(`${files.length} files: ${study} study (${practice} practice, no protocol${reports ? `, ${reports} report .json` : ""}), ${plain} non-study (plan.mode = pacing, allowed); ${blindGuessArm} blindGuess answers naming an arm (participant guess, allowed); ${leaks} leaks`);
 process.exit(leaks ? 1 : 0);

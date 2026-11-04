@@ -80,7 +80,7 @@ export type BhAdEventBody =
   | {
       type: "session_start";
       profile: "actor-director";
-      contract: "contract-v1";
+      contract: "contract-v1" | "contract-v1.1";
       userId: string;
       session_type: SessionType;
       tab: "visible" | "hidden";
@@ -94,6 +94,8 @@ export type BhAdEventBody =
       blind?: { index: number; total: number; scheduleHash: string };
       actor_prompt_id: string;
       director_prompt_id: string;
+      /** v1.1: output-format slot id (fmt1-<sha8>), examples slot id (dex1-<sha8>), sha256[:8] of the assembled Director system message */
+      director_format_id?: string; director_examples_id?: string; director_assembled_sha8?: string;
       pipeline_version: string;
       tokenizer: "o200k_base";
       models: { actor: string; director: string };
@@ -119,6 +121,8 @@ export type BhAdEventBody =
       type: "director_call"; turn: number; msg: string; input_sha256: string; input_tokens: number; model: string;
       genMs: number; usage: Usage; footprint: DirectorFootprint; repaired: boolean; deadline_missed: boolean;
       output: DirectorOutput | null; error?: HealthCode;
+      /** v1.1: sha256[:8] of the assembled system message; o200k_base tokens per slot (system + format + examples + digest = input_tokens) */
+      assembled_prompt_sha8?: string; input_tokens_by_slot?: { system: number; format: number; examples: number; digest: number };
     }
   | { type: "rail_check"; turn: number; note_id: string; pass: boolean; blocked_by: RailCode[]; hits?: string[] }
   | {
