@@ -5,7 +5,7 @@
  * With h1=1 the tracker numbers + every health code are sent to the shell every 2 s for the H1 report.
  */
 import { useEffect, useRef, useState } from "react";
-import { AdStorage, CalibrationStore, loadO200kBrowser, simActor, simDirector, type CalibrationRecord, type SimReplay } from "@brianharness/core/actor-director/browser";
+import { AdStorage, CalibrationStore, loadO200kBrowser, networkIsolationProbe, simActor, simDirector, type CalibrationRecord, type SimReplay } from "@brianharness/core/actor-director/browser";
 import type { ScreenInfo } from "@brianharness/core/ad-contracts";
 import { LocalStorageKV, MemoryKV } from "@brianharness/core/browser";
 import { AdApp, type AdLayout } from "../AdApp";
@@ -21,6 +21,13 @@ const FALLBACK: SimReplay[] = [{ name: "mac-fallback", file: { screen: null, sam
 ] } } as unknown as SimReplay];
 
 export const macBridge = (): MacBridge | null => (globalThis as { bhAdMac?: MacBridge }).bhAdMac ?? null;
+/** v1.3: the Mac shell's network.isolation probe (skips without the shell's network bridge) */
+export const macNetworkProbe = (tracker: { getStats(): { blocked: string[] } }, bridge: () => MacBridge | null = macBridge) =>
+  networkIsolationProbe(async () => {
+    const b = bridge();
+    if (!b?.network) return null;
+    return { workerBlocked: tracker.getStats().blocked, requests: await b.network() };
+  });
 
 export function MacBoot({ q, replaysUrl, layout, reduce }: { q: URLSearchParams; replaysUrl: string; layout?: AdLayout; reduce?: boolean }) {
   const [boot, setBoot] = useState<{ tracker: MediaPipeGazeTracker; screen: ScreenInfo; calStore: CalibrationStore; kv: LocalStorageKV | MemoryKV; replays: SimReplay[]; counter: Awaited<ReturnType<typeof loadO200kBrowser>> } | null>(null);
@@ -48,14 +55,16 @@ export function MacBoot({ q, replaysUrl, layout, reduce }: { q: URLSearchParams;
   useEffect(() => {
     if (!boot || rec === undefined || ctl) return;
     let c: LiveAdController | null = null;
-    void LiveAdController.open({ sessionType: q.get("type") === "blinded" ? "blinded" : "tab_visible", arm: "on", sessionId: `mac-${Date.now()}`, userId: "local", actor: simActor(boot.replays), director: simDirector(), counter: boot.counter, kv: boot.kv, tracker: boot.tracker, screen: boot.screen, calibration: rec, calStore: boot.calStore, consent: { camera: true, rawGaze: false } }).then((x) => { c = x; setCtl(x); });
+    void LiveAdController.open({ sessionType: q.get("type") === "blinded" ? "blinded" : "tab_visible", arm: "on", sessionId: `mac-${Date.now()}`, userId: "local", actor: simActor(boot.replays), director: simDirector(), counter: boot.counter, kv: boot.kv, tracker: boot.tracker, screen: boot.screen, calibration: rec, calStore: boot.calStore, consent: { camera: true, rawGaze: false },
+      // v1.3 network.isolation: Worker-blocked URLs (informational) + requests that got past the block (pilot FAILS)
+      preflightProbes: [macNetworkProbe(boot.tracker)] }).then((x) => { c = x; setCtl(x); });
     return () => { c?.dispose(); };
   }, [boot, rec, ctl, q]);
   // H1: numbers to the shell every 2 s
   useEffect(() => {
     const bridge = macBridge();
     if (!boot || !bridge?.h1 || q.get("h1") !== "1") return;
-    const id = setInterval(() => { void boot.tracker.getStatus().then((status) => bridge.h1!({ t: performance.now(), status, stats: boot.tracker.getStats(), health: ctl?.healthSeen() ?? [], calibrated: !!rec?.model })); }, 2000);
+    const id = setInterval(() => { void boot.tracker.getStatus().then((status) => bridge.h1!({ t: performance.now(), status, stats: boot.tracker.getStats(), health: ctl?.healthSeen() ?? [], pilotFail: ctl?.pilotFail ?? null, calibrated: !!rec?.model })); }, 2000);
     return () => clearInterval(id);
   }, [boot, ctl, q, rec]);
   if (err && !boot) return <div className="p-6 text-red-400">Could not start: {err}</div>;

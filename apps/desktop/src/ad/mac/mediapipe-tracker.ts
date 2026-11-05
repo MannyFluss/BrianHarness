@@ -19,6 +19,8 @@ export interface MacBridge {
   requestCamera(): Promise<CameraPermission>;
   screen(): Promise<ScreenInfo>;
   h1?(report: Record<string, unknown>): void;
+  /** v1.3: requests that got past the gaze Worker's block (the shell cancelled them) */
+  network?(): Promise<Array<{ url: string }>>;
 }
 export interface WorkerLike { postMessage(m: ToWorker, transfer?: Transferable[]): void; onmessage: ((e: { data: FromWorker }) => void) | null; terminate(): void }
 export interface CameraLike {

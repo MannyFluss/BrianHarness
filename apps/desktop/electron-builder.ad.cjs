@@ -13,7 +13,7 @@ module.exports = {
   productName: name,
   directories: { output: "release-ad" },
   // the shell has no runtime node dependency: the renderer bundle (dist-ad) carries everything
-  files: ["electron/ad-main.mjs", "electron/ad-preload.cjs", "dist-ad/**", "package.json", "!node_modules/**"],
+  files: ["electron/ad-main.mjs", "electron/ad-network.mjs", "electron/ad-preload.cjs", "dist-ad/**", "package.json", "!node_modules/**"],
   extraMetadata: { main: "electron/ad-main.mjs", productName: name, name: `${brand.slug}-director` },
   extraResources: [{ from: "resources/gaze", to: "gaze", filter: ["face_landmarker.task", "vision_wasm_module_internal.js", "vision_wasm_module_internal.wasm", "manifest.json"] }],
   asar: true,

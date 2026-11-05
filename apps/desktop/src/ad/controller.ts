@@ -9,7 +9,7 @@
  */
 import {
   ActorDirectorSession, AdSessionLog, AdStorage, GazeSource, KeystrokeTimes, ParagraphVisibility, buildTabModel, calibrateBatch, calibrationStatus,
-  gazeOptionsFromCalibration, accuracyWords, layoutFromScreen, gazeRef, type Preflight,
+  gazeOptionsFromCalibration, accuracyWords, layoutFromScreen, gazeRef, Preflight, type Probe, type MultiProbe,
   type AdChatBackend, type CalibrationRecord, type LiveGaze, type ParaBox, type TabModel, type TokenCounter,
 } from "@brianharness/core/actor-director/browser";
 import type { Arm, AttentionEvent, BhAdEvent, DirectorOutput, GazeSrc, GazeStatus, GazeTracker, RailCode, ScreenInfo, SessionType } from "@brianharness/core/ad-contracts";
@@ -106,6 +106,9 @@ export interface LiveOptions {
   onReadingLayout?: (msg: string, boxes: Array<{ aoi: string; words: number; x: number; y: number; w: number; h: number }>) => void;
   /** E7 preflight: started with the mode (then every 60 s), consulted before each Director call */
   preflight?: Preflight;
+  /** v1.3: probes for a preflight the controller builds itself, its health lines going to this session's log
+   * (the Mac shell's network.isolation). Ignored when `preflight` is given. */
+  preflightProbes?: Array<Probe | MultiProbe>;
 }
 
 export class LiveAdController implements AdStore {
@@ -146,6 +149,7 @@ export class LiveAdController implements AdStore {
     const storage = await AdStorage.open(o.kv);
     const clock = { now: () => Date.now(), mono: () => c.now() };
     c.log = new AdSessionLog(storage, o.sessionId, o.sessionType, clock);
+    if (!o.preflight && o.preflightProbes?.length) o.preflight = new Preflight({ probes: o.preflightProbes, emit: (h) => c.session?.logGaze(h), now: () => c.now() });
     const kind = o.trackerKind ?? (o.tracker ? trackerLabel(await o.tracker.getStatus().catch(() => null)) : "none");
     c.session = new ActorDirectorSession({
       log: c.log, userId: o.userId, sessionType: o.sessionType, arm: o.arm, actor: o.actor, director: o.director, counter: o.counter, consent: o.consent,
@@ -175,6 +179,8 @@ export class LiveAdController implements AdStore {
   dispose() { if (this.poll) clearInterval(this.poll); this.o.preflight?.stop(); }
   /** E7: the preflight's status line ("code: plain words"), "" when every check passes */
   get healthLine(): string { return this.o.preflight?.lastReport?.statusLine ?? ""; }
+  /** v1.3: the code that FAILS the pilot preflight (net.request_escaped), or null */
+  get pilotFail(): string | null { return this.o.preflight?.lastReport?.pilotFail ?? null; }
 
   // arrow properties: React calls these unbound (useSyncExternalStore, the 10 Hz pull)
   subscribe = (cb: () => void) => { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; };

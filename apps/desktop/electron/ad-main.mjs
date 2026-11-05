@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
+import { networkVerdict } from "./ad-network.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "BrianHarness Director";
@@ -99,6 +100,7 @@ ipcMain.handle("ad:screen", () => {
   const mm = Number(process.env.BH_SCREEN_WIDTH_MM ?? "") || null;
   return { deviceModel: "Mac" + process.arch /* contract: "Mac" + process.arch */, platform: "mac", orientation: "landscape_left", widthPt: d.size.width, heightPt: d.size.height, scale: d.scaleFactor, webview: { x: c.x - d.bounds.x, y: c.y - d.bounds.y, width: c.width, height: c.height }, widthMm: mm };
 });
+ipcMain.handle("ad:network", () => log.network.map((n) => ({ url: n.url })));
 ipcMain.on("ad:h1", (_e, r) => { lastRenderer = r; push(log.renderer, { t: rel(), fps: r?.stats?.fps ?? null, state: r?.status?.state ?? null, code: r?.status?.code ?? null }); });
 
 function sampleMetrics() {
@@ -124,7 +126,9 @@ function report() {
   const cpu = stat((steady.length ? steady : log.metrics).map((m) => m.cpuPct));
   const mem = stat((steady.length ? steady : log.metrics).map((m) => m.memMB));
   const gazeBundle = log.bundle.filter((b) => b.path.startsWith("/gaze/"));
-  const health = [...new Set([...(stats.codes ?? []), ...(r.health ?? []), ...(r.status?.code ? [r.status.code] : [])])];
+  // v1.3: network.isolation (net.worker_blocked informational; net.request_escaped fails the pilot preflight)
+  const net = networkVerdict({ requests: log.network, workerBlocked: stats.blocked ?? [] });
+  const health = [...new Set([...(stats.codes ?? []), ...(r.health ?? []), ...(r.status?.code ? [r.status.code] : []), ...(net.code ? [net.code] : [])])];
   const failures = [];
   if (!lastRenderer) failures.push({ what: "renderer never reported", cause: log.errors[0]?.message ?? "app did not start the tracker (see errors)" });
   if (r.status?.permission && r.status.permission !== "granted") failures.push({ what: "camera permission", cause: `gaze.camera_denied (permission ${r.status.permission}): System Settings > Privacy & Security > Camera > ${APP_NAME}` });
@@ -133,14 +137,14 @@ function report() {
   if (!fps) failures.push({ what: "no fps measured", cause: r.status?.code ?? (stats.frames ? "too few fps windows (run longer than 20 s)" : "no camera frames processed") });
   if (stats.frames > 0 && (stats.faces ?? 0) / stats.frames < 0.5) failures.push({ what: `face found in ${stats.faces}/${stats.frames} frames`, cause: "gaze.low_quality: nobody in front of the camera, face out of frame, or too dark" });
   if (fps && fps.median < 25) failures.push({ what: `fps median ${fps.median} < 25`, cause: `inference ${Math.round(stats.inferMsMean ?? 0)} ms/frame on ${stats.delegate ?? "?"}; faces ${stats.faces}/${stats.frames}` });
-  if (log.network.length) failures.push({ what: `${log.network.length} network request(s) attempted (all cancelled)`, cause: [...new Set(log.network.map((n) => n.url))].slice(0, 5).join(", ") });
+  if (!net.ok) failures.push({ what: `${net.escaped} request(s) got past the gaze Worker's network block (the shell cancelled them)`, code: net.code, cause: `net.request_escaped: pilot preflight FAILED: ${net.origins.join(", ")}` });
   return {
     schema: "bh-h1-report/1", app: APP_NAME, version: app.getVersion(), electron: process.versions.electron, packaged: app.isPackaged,
     machine: { platform: process.platform, arch: process.arch, os: os.release(), cpus: os.cpus()[0]?.model ?? null, cores: os.cpus().length, totalMemMB: Math.round(os.totalmem() / 2 ** 20) },
     ran: { seconds: Math.round(rel() / 1000), requested: H1_SECONDS, calibrated: !!r.calibrated },
     camera: { macos: cameraStatus(), tracker: r.status?.permission ?? null, requests: log.permissions },
     model: { dir: GAZE_DIR, files: gazeManifest(), loadedSha256: stats.modelSha256 ?? null, loadMs: stats.modelMs ?? null, delegate: stats.delegate ?? null, bundleLoads: gazeBundle },
-    network: { requests: log.network.length, log: log.network, workerBlocked: stats.blocked ?? [] },
+    network: { requests: log.network.length, log: log.network, workerBlocked: stats.blocked ?? [], code: net.code, ok: net.ok },
     fps: { ...(fps ?? {}), frames: stats.frames ?? 0, faces: stats.faces ?? 0, inferMsMean: stats.inferMsMean ? Math.round(stats.inferMsMean * 10) / 10 : null, windows: stats.fpsWindows ?? [] },
     cpu: { note: "sum of percentCPUUsage over all app processes (100 = one core), after the first 10 s", ...(cpu ?? {}) },
     memory: { note: "sum of workingSetSize over all app processes, MB, after the first 10 s", ...(mem ?? {}) },
@@ -148,7 +152,7 @@ function report() {
     health,
     trackerErrors: stats.errors ?? [],
     errors: log.errors,
-    done: { fps25: !!fps && fps.median >= 25, cpuMem: !!cpu && !!mem, noTrackerNetwork: log.network.length === 0, failures },
+    done: { fps25: !!fps && fps.median >= 25, cpuMem: !!cpu && !!mem, noTrackerNetwork: log.network.length === 0, noEscape: net.ok, pilotFail: net.pilotFail ?? r.pilotFail ?? null, failures },
   };
 }
 function gazeManifest() {
@@ -193,7 +197,7 @@ app.whenReady().then(() => {
       const d = out.done;
       console.log(`[h1] report: ${H1_FILE}`);
       console.log(`[h1] fps median ${out.fps.median ?? "n/a"} | cpu median ${out.cpu.median ?? "n/a"}% | mem median ${out.memory.median ?? "n/a"} MB | network ${out.network.requests} | health ${out.health.join(",") || "none"}`);
-      console.log(`[h1] done-when: fps>=25 ${d.fps25} | cpu+mem ${d.cpuMem} | no tracker network ${d.noTrackerNetwork}${d.failures.length ? " | failures: " + d.failures.map((f) => `${f.what} <- ${f.cause}`).join("; ") : ""}`);
+      console.log(`[h1] done-when: fps>=25 ${d.fps25} | cpu+mem ${d.cpuMem} | no tracker network ${d.noTrackerNetwork} | pilot preflight ${d.pilotFail ? "FAIL " + d.pilotFail : "ok"}${d.failures.length ? " | failures: " + d.failures.map((f) => `${f.what} <- ${f.cause}`).join("; ") : ""}`);
       app.quit();
     };
     const wait = () => {
