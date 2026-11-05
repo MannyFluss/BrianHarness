@@ -122,7 +122,11 @@ export interface RawSample { t: number; x: number | null; y: number | null; conf
 export interface CleanSample { t: number; x: number; y: number; interp: boolean }
 export interface Gap { t0: number; t1: number; kind: "blink" | "noface" | "offscreen" | "lowconf" }
 export interface Fix { id?: string; t0: number; t1: number; x: number; y: number; dispPx: number; n: number; _s: CleanSample[]; aoi?: string | null }
-export interface Aoi { id: string; msg: string; order: number; x: number; y: number; w: number; h: number; words: number; text?: string; line_h?: number; complete_t?: number; visible?: Array<[number, number]> }
+export interface Aoi { id: string; msg: string; order: number; x: number; y: number; w: number; h: number; words: number; text?: string; line_h?: number; complete_t?: number; visible?: Array<[number, number]>;
+  /** contract-v1.3 (not in the R1 reference; absent = 1): the share of this paragraph's window time that was NOT under a
+   * tab_occluded span. The expected reading time uses words x expect_frac, so time under the sheet is
+   * not demanded of the reader (skip / skim / visible_frac); deep_read still uses the full expectation. Live controller only. */
+  expect_frac?: number }
 export interface Anchor { t: number; x: number; y: number; kind?: string }
 export interface Viewport { w: number; h: number }
 export interface Layout { viewport_w: number; viewport_h: number; css_px_per_cm: number; default_dist_cm: number; min_dist_cm?: number; max_dist_cm?: number; name?: string }
@@ -490,6 +494,19 @@ export function baselineUpdate(history: number[], paras: Array<{ gazeMs: number;
   for (const p of paras) if (p.gazeMs > 0 && p.words >= c.baseline_min_words) h.push(Math.log(p.gazeMs / p.words));
   return h.slice(-pyInt(c.baseline_max));
 }
+/**
+ * contract-v1.3 (not in the R1 reference): a paragraph's uncovered share of a reading window with tab_occluded spans:
+ * visible ms / (visible ms + occluded ms), both clipped to [w0, w1]. The visibility tracker closes every interval while
+ * the sheet covers the chat, so the two never overlap. 1 when nothing was occluded; floored at 0.05.
+ * Used for the skip / skim expectation only (see turnFromL1); the controller also leaves such a window out of the baseline.
+ */
+export function occlusionExpectFrac(visible: Array<[number, number]>, occluded: Array<[number, number]>, w0: number, w1: number): number {
+  const clip = (xs: Array<[number, number]>) => xs.reduce((s, [a, b]) => s + Math.max(0, Math.min(b, w1) - Math.max(a, w0)), 0);
+  const occ = clip(occluded);
+  if (occ <= 0) return 1;
+  const vis = clip(visible);
+  return Math.min(1, Math.max(0.05, vis / (vis + occ)));
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // F-W-WINDOW
@@ -607,15 +624,18 @@ export function turnFromL1(inp: TurnSpec, l1: L1Result, cIn?: Partial<GazeConfig
   if (wq.gate) {
     for (const A of sortBy(aois.filter((a) => a.msg === msg), (a) => [a.order])) {
       const d = dwell.get(A.id)!;
-      const sp = paraSpeed(d.gazeMs, A.words, base);
-      d.msPerWordZ = sp.z;
-      const r = sp.ratio, z = sp.z;
+      const full = paraSpeed(d.gazeMs, A.words, base);
+      // contract-v1.3: time under a tab_occluded span is not demanded (skip / skim / visibility use the uncovered
+      // expectation); deep still needs the full one, so occlusion can never create a deep_read. Absent = R1 exactly.
+      const sp = A.expect_frac === undefined ? full : paraSpeed(d.gazeMs, A.words * A.expect_frac, base);
+      d.msPerWordZ = full.z;
+      const r = sp.ratio, z = full.z;
       const conf = wq.quality * d.conf * maturity;
       const visibleOk = d.visibleMs >= c.visible_frac * sp.expectedMs - 1e-6;
       let label: "skipped" | "skim" | "deep" | "read";
       if (r < c.skip_ratio) label = "skipped";
       else if (r < c.scan_ratio) label = "skim";
-      else if ((z !== null && z >= c.deep_z) || (z === null && r >= c.deep_ratio_prebase)) label = "deep";
+      else if ((z !== null && z >= c.deep_z) || (z === null && full.ratio >= c.deep_ratio_prebase)) label = "deep";
       else label = "read";
       const feats = { gazeMs: d.gazeMs, visibleMs: d.visibleMs, expectedMs: sp.expectedMs, ratio: r, words: A.words };
       const mine: any[] = [];

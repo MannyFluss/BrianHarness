@@ -285,9 +285,12 @@ export class LiveAdController implements AdStore {
     const msg = `a${this.turn}`;
     const wasCovered = this.occStart !== null;
     if (wasCovered) this.endOcclusion(endT);
-    const covered = this.occSpans.length > 0;
-    // a paragraph never uncovered-and-visible in this window is excluded (not "skipped") when the tab covered the chat
-    const aois = this.vis.aois(endT).filter((a) => a.msg === msg && (!covered || (a.visible ?? []).some(([x, y]) => y > (this.openT ?? 0) && x < endT && y > x)));
+    const covered = this.occSpans.length > 0, spans = this.occSpans;
+    const w0 = this.openT;
+    // a paragraph never uncovered-and-visible in this window is excluded (not "skipped") when the tab covered the chat;
+    // a kept one demands reading time only for its uncovered share (contract-v1.3: expected time excludes tab_occluded)
+    const aois = this.vis.aois(endT).filter((a) => a.msg === msg && (!covered || (a.visible ?? []).some(([x, y]) => y > w0 && x < endT && y > x)))
+      .map((a) => (covered ? { ...a, expect_frac: gazeRef.occlusionExpectFrac(a.visible ?? [], spans, w0, endT) } : a));
     this.occSpans = [];
     if (wasCovered) this.occStart = endT;
     if (!aois.length) return;
@@ -301,7 +304,8 @@ export class LiveAdController implements AdStore {
       if (!keep.length) return;
       if (keep.length !== aois.length) out = run(keep);
     }
-    this.history = gazeRef.baselineUpdate(this.history, (out.dwell as Array<{ gazeMs: number; words: number } | undefined>).filter((d): d is { gazeMs: number; words: number } => !!d));
+    // contract-v1.3: a window with tab_occluded time does not update the baseline wpm (its gaze time is incomplete)
+    if (!covered) this.history = gazeRef.baselineUpdate(this.history, (out.dwell as Array<{ gazeMs: number; words: number } | undefined>).filter((d): d is { gazeMs: number; words: number } => !!d));
     this.session.observeReading({ digest: out.digest, events: out.events, faceFrac: out.gaze_quality?.faceFrac ?? null, baselineParagraphs: this.history.length });
   }
   send = async (text: string) => {
