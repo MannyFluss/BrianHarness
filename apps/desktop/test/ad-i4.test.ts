@@ -10,6 +10,7 @@ import type { BhAdEvent, GazeTracker, ScreenInfo } from "@brianharness/core/ad-c
 import { MemoryKV } from "@brianharness/core/browser";
 import { LiveAdController, trackerLabel } from "../src/ad/controller.ts";
 import { demoUrl, webScreen } from "../src/ad/boot.tsx";
+import { nativeSimLookAt } from "../src/ad/sim-look.ts";
 
 const counter = loadO200k();
 const IPAD: ScreenInfo = { deviceModel: "iPad13,4", platform: "ios", orientation: "landscape_left", widthPt: 1194, heightPt: 834, scale: 2, webview: { x: 0, y: 0, width: 1194, height: 834 }, widthMm: 229.8 };
@@ -21,20 +22,23 @@ const of = <T extends BhAdEvent["type"]>(ls: BhAdEvent[], t: T) => ls.filter((l)
 const boxesFor = (msg: string, x0 = 60, w = 900) => PARAS.map((text, p) => ({ msg, p, x: x0, y: 120 + p * 110, w, h: 72, text, words: text.split(/\s+/).length, line_h: 24 }));
 const rec = (orientation: CalibrationRecord["orientation"]): CalibrationRecord => ({ v: 1, deviceModel: "iPad13,4", orientation, fit: "core", affine: [1, 0, 0, 0, 1, 0], model: null, distCm: 44, yaw: 2, errPx: 10, errDeg: 0.3, errParas: 0.1, mode: "gaze", at: 0, t: 0 } as CalibrationRecord);
 
-test("I4.1 lookAt: typeof detection works through a Capacitor-style proxy; absent -> undefined; a rejected call is swallowed", async () => {
+test("I4.1 lookAt (simulator builds only, v1.3): typeof detection works through a Capacitor-style proxy; absent -> undefined; a rejected call is swallowed", async () => {
   const calls: Array<[number, number]> = [];
   // Capacitor's plugin proxy: get returns a wrapper for any name, no `has` trap
   const proxy = new Proxy({}, { get: (_t, prop) => (prop === "lookAt" ? (x: number, y: number) => { calls.push([x, y]); return Promise.resolve(); } : undefined) }) as unknown as GazeTracker;
   assert.equal("lookAt" in proxy, false, "the old `in` check would miss it");
-  simLookAt(proxy)!(10, 20);
+  nativeSimLookAt(proxy)!(10, 20);
   assert.deepEqual(calls, [[10, 20]]);
+  // v1.3: the core (device-reachable) aid never touches a native plugin, only the JS synthetic tracker
+  assert.equal(simLookAt(proxy), undefined);
+  assert.equal(typeof simLookAt(new SyntheticGazeTracker({ screen: IPAD, now: () => 0 })), "function");
   const device = { getStatus: async () => ({}) } as unknown as GazeTracker;
-  assert.equal(simLookAt(device), undefined);
-  assert.equal(simLookAt(null), undefined);
+  assert.equal(nativeSimLookAt(device), undefined);
+  assert.equal(nativeSimLookAt(null), undefined);
   const rejecting = { lookAt: () => Promise.reject(new Error("UNIMPLEMENTED")) } as unknown as GazeTracker;
-  simLookAt(rejecting)!(1, 1);
+  nativeSimLookAt(rejecting)!(1, 1);
   const throwing = { lookAt: () => { throw new Error("x"); } } as unknown as GazeTracker;
-  assert.doesNotThrow(() => simLookAt(throwing)!(1, 1));
+  assert.doesNotThrow(() => nativeSimLookAt(throwing)!(1, 1));
   await new Promise((r) => setTimeout(r, 5));
 });
 

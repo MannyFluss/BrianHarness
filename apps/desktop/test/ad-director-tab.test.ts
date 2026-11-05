@@ -135,7 +135,7 @@ test("E6 UI: shared calibration driver (iPad13,4 landscape primary): fits, saves
   const dots: string[] = [];
   const r = await runCalibration({
     tracker, screen: IPAD, paraHeightPx: 96, now: () => now, wall: () => 0,
-    sleep: async (ms) => { now += ms; tracker.pump(now); }, onDot: (t) => t && dots.push(t.id), lookAt: (x, y) => tracker.lookAt(x, y),
+    sleep: async (ms) => { now += ms; tracker.pump(now); }, onDot: (t) => t && dots.push(t.id), simLook: (x, y) => tracker.simLook(x, y),
   });
   assert.equal(dots.length, 13);
   assert.equal(r.recommend, "use"); assert.equal(r.record.orientation, primaryOrientation("iPad13,4"));

@@ -6,8 +6,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CalibrationRun, accuracyWords, calDeviceOf, primaryOrientation, isLandscape, simLookAt, type CalibrationRecord, type CalibrationStore } from "@brianharness/core/actor-director/browser";
+import { nativeSimLookAt } from "./sim-look";
 import type { CalibrationTarget, GazeTracker, Orientation, ScreenInfo } from "@brianharness/core/ad-contracts";
 import { cn } from "../lib";
+
+/** vite.ad.config.ts define: true for `vite` serve and `AD_SIM_BUILD=1` (iOS simulator) builds; false in a device build */
+declare const __BH_AD_SIM__: boolean | undefined;
 
 export type CalibrationStage = "intro" | "dots" | "result";
 export interface CalibrationOutcome { record: CalibrationRecord; ok: boolean; words: string; recommend: "use" | "recalibrate_or_onscreen" }
@@ -26,8 +30,8 @@ export interface CalibrationDriverOptions {
   timing?: { dotMs?: number; settleMs?: number; gapMs?: number };
   /** the dot being shown (CSS px in the webview) */
   onDot?: (t: CalibrationTarget | null, index: number, total: number) => void;
-  /** synthetic tracker / tests: where the person looks */
-  lookAt?: (screenX: number, screenY: number) => void;
+  /** synthetic tracker / simulator build / tests: where the simulated person looks (never a device plugin call) */
+  simLook?: (screenX: number, screenY: number) => void;
   signal?: AbortSignal;
 }
 
@@ -44,7 +48,7 @@ export async function runCalibration(o: CalibrationDriverOptions): Promise<Calib
       if (o.signal?.aborted) { await o.tracker.calibrate({ phase: "cancel" }); throw new Error("calibration cancelled"); }
       const tg = seq[i]!;
       o.onDot?.(tg, i, seq.length);
-      o.lookAt?.(tg.x + o.screen.webview.x, tg.y + o.screen.webview.y);
+      o.simLook?.(tg.x + o.screen.webview.x, tg.y + o.screen.webview.y);
       const w = run.show(tg.id, now());
       await sleep(run.timing.dotMs);
       await o.tracker.calibrate({ phase: "target", targetId: tg.id, t0: w.t0, t1: w.t1 });
@@ -97,9 +101,10 @@ export function CalibrationFlow({ screen, tracker, store, orientation, paraHeigh
     setErr(null); setStage("dots");
     abort.current = new AbortController();
     try {
-      // simLookAt detects with typeof, not `"lookAt" in tracker` (fails on the Capacitor proxy; IOS Dev I4)
-      const look = simulateLook ? simLookAt(tracker) : undefined;
-      const r = await runCalibration({ tracker, screen, orientation: o, paraHeightPx, signal: abort.current.signal, onDot: (t, i, n) => setDot({ t, i, n }), ...(look ? { lookAt: look } : {}), ...(timing ? { timing } : {}) });
+      // contract-v1.3: the JS synthetic tracker anywhere; a native plugin's lookAt ONLY in a simulator build
+      // (__BH_AD_SIM__ is false in a device build, so this branch and sim-look.ts are stripped; tools/ad/check_device_build.mjs)
+      const look = !simulateLook ? undefined : (typeof __BH_AD_SIM__ !== "undefined" && __BH_AD_SIM__) ? nativeSimLookAt(tracker) : simLookAt(tracker);
+      const r = await runCalibration({ tracker, screen, orientation: o, paraHeightPx, signal: abort.current.signal, onDot: (t, i, n) => setDot({ t, i, n }), ...(look ? { simLook: look } : {}), ...(timing ? { timing } : {}) });
       setOut(r); setStage("result");
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setStage("intro"); }
   }, [tracker, screen, o, paraHeightPx, simulateLook, timing]);

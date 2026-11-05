@@ -104,7 +104,7 @@ test("E7 mac tracker: runs through the shared calibration screens, fits natively
   assert.equal(init.base, "bh-app://app/gaze/");
   assert.equal(init.sha256, FACE_MODEL.sha256);
   try {
-    const out = await runCalibration({ tracker, screen: MAC, paraHeightPx: 90, timing: { dotMs: 260, settleMs: 80, gapMs: 20 }, lookAt: (x, y) => look(x - MAC.webview.x, y - MAC.webview.y) });
+    const out = await runCalibration({ tracker, screen: MAC, paraHeightPx: 90, timing: { dotMs: 260, settleMs: 80, gapMs: 20 }, simLook: (x, y) => look(x - MAC.webview.x, y - MAC.webview.y) });
     assert.equal(out.record.fit, "native");
     assert.ok(out.record.model && out.record.model.length === 2 + 8 * 2 + 9 * 2, "ridge model numbers");
     assert.ok(out.ok, out.words);

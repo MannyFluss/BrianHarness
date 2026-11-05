@@ -75,7 +75,9 @@ export class SyntheticGazeTracker implements GazeTracker {
   /** synthetic only: change the raw-point distortion (simulates the head moving mid-calibration) */
   setDistortion(A: [number, number, number, number, number, number]) { this.o = { ...this.o, distortion: A }; }
   /** synthetic only: where the simulated person looks during calibration (screen points) */
-  lookAt(x: number, y: number) { this.look = { x, y }; }
+  simLook(x: number, y: number) { this.look = { x, y }; }
+  /** GazeTracker.lookAt for callers that hold the interface (same as simLook) */
+  lookAt(x: number, y: number) { this.simLook(x, y); }
   async calibrate(opts: CalibrateOptions): Promise<CalibrateResult> {
     const base = { phase: opts.phase, ok: true, fit: null, model: null, samples: this.calSamples, code: null } as CalibrateResult;
     if (opts.phase === "begin") { this.calibrating = true; this.calSamples = 0; this.windows = []; this.setState({ state: "calibrating" }); return { ...base, samples: 0 }; }
@@ -142,16 +144,13 @@ export class SyntheticGazeTracker implements GazeTracker {
 }
 
 /**
- * v1.2 sim-only aid: the tracker's lookAt as a plain function, or undefined. Detects with typeof (a Capacitor plugin
- * proxy has no `has` trap, so `"lookAt" in proxy` is false even when the native plugin implements it, while `get`
- * returns a method wrapper). A rejected call (e.g. Capacitor "not implemented" on a device build) is swallowed:
- * lookAt is an aid, never a dependency.
+ * contract-v1.3 (ruling B2): the calibration "look here" aid for the JS SyntheticGazeTracker ONLY, or undefined.
+ * It never calls a native plugin's lookAt: a device build has no path to it. The iOS-simulator plugin's lookAt is
+ * reachable only from a simulator build (apps/desktop/src/ad/sim-look.ts behind __BH_AD_SIM__ / AD_SIM_BUILD=1).
  */
 export function simLookAt(tracker: GazeTracker | null | undefined): ((x: number, y: number) => void) | undefined {
-  if (!tracker || typeof tracker.lookAt !== "function") return undefined;
-  return (x, y) => {
-    try { const r = tracker.lookAt!(x, y); if (r && typeof (r as Promise<void>).catch === "function") (r as Promise<void>).catch(() => {}); } catch { /* aid only */ }
-  };
+  if (!(tracker instanceof SyntheticGazeTracker)) return undefined;
+  return (x, y) => tracker.simLook(x, y);
 }
 
 export type DemoReadStyle = "deep" | "read" | "skim" | "skip";

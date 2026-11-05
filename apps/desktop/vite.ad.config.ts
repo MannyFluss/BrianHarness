@@ -9,6 +9,8 @@
  *    folder (the iOS bundle at ad-ios/) loads the demo from "./ad-demo/" with no dev server (IOS Dev I4)
  *  - E7 Mac: dev serves <any base>/gaze/* from resources/gaze (scripts/ad-gaze-assets.mjs); builds never embed
  *    it (the Director Mac shell serves Resources/gaze as bh-app://app/gaze/); the gaze worker is an ES module
+ *  - contract-v1.3: __BH_AD_SIM__ = true for `vite` serve or AD_SIM_BUILD=1 (iOS SIMULATOR builds), else false: a device
+ *    build strips the native lookAt calibration aid (tools/ad/check_device_build.mjs dist-ad asserts it)
  */
 import { defineConfig, mergeConfig, type Plugin, type UserConfig } from "vite";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
@@ -62,5 +64,6 @@ export default defineConfig((env) => {
     build: { outDir: here("./dist-ad"), rollupOptions: { input: { ad: here("./ad.html") } } },
     server: { port: 5175 },
     worker: { format: "es" },
+    define: { __BH_AD_SIM__: JSON.stringify(env.command === "serve" || process.env.AD_SIM_BUILD === "1") },
   } satisfies UserConfig);
 });
