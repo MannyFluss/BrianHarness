@@ -142,13 +142,13 @@ const mockActor = (leakAfterHint = false) => new MockAdBackend([], (req) => {
 });
 const types = (lines: BhAdEvent[]) => lines.map((l) => l.type);
 
-async function runSession(opts: { sessionType?: "tab_visible" | "blinded"; arm?: "on" | "shadow" | "off"; turns?: number; actor?: MockAdBackend; director?: MockAdBackend; holdMs?: number; pInject?: number; enabled?: () => boolean }) {
+async function runSession(opts: { sessionType?: "tab_visible" | "blinded"; arm?: "on" | "shadow" | "off"; turns?: number; actor?: MockAdBackend; director?: MockAdBackend; holdMs?: number; pInject?: number; enabled?: () => boolean; leakGate?: null }) {
   const storage = await AdStorage.open(new MemoryKV());
   const clock = new ManualClock();
   const log = new AdSessionLog(storage, "s-e3-" + (opts.sessionType ?? "tab_visible"), opts.sessionType ?? "tab_visible", clock);
   const s = new ActorDirectorSession({
     log, userId: "u1", sessionType: opts.sessionType ?? "tab_visible", arm: opts.arm ?? "on", pInject: opts.pInject ?? 1, actor: opts.actor ?? mockActor(), director: opts.director ?? mockDirector(),
-    counter: o200k, consent: { camera: true, rawGaze: false }, seed: 7, holdMs: opts.holdMs, directorEnabled: opts.enabled,
+    counter: o200k, consent: { camera: true, rawGaze: false }, seed: 7, holdMs: opts.holdMs, directorEnabled: opts.enabled, ...(opts.leakGate === null ? { leakGate: null } : {}),
     ...(opts.sessionType === "blinded" ? { blind: { index: 1, total: 4, scheduleHash: "0".repeat(64) } } : {}),
   });
   s.start();
@@ -224,8 +224,10 @@ test("E3: a Director slower than the hold: the note is dropped (late), director.
   assert.ok(L.filter((l) => l.type === "context_share").every((c) => (c as { director: number }).director === 0));
 });
 
+// leak-judge set: this E3 test now runs with the pre-display gate OFF (leakGate: null, the E3 post-hoc path). The
+// gated version (the leaking reply is never shown; the drop counts toward the breaker) is in ad-leak-judge.test.ts.
 test("E3: leak breaker: 2 safety leaks after injected notes -> director.leak_breaker, later notes blocked by leak_breaker", async () => {
-  const { log } = await runSession({ turns: 10, actor: mockActor(true) });
+  const { log } = await runSession({ turns: 10, actor: mockActor(true), leakGate: null });
   const L = log.lines;
   const outs = L.filter((l) => l.type === "note_outcome") as Array<Extract<BhAdEvent, { type: "note_outcome" }>>;
   assert.ok(outs[0]!.leaks.includes("provenance"));

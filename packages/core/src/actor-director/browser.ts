@@ -29,3 +29,5 @@ export * from "./calibration.js";
 export * from "./synthetic-tracker.js";
 export * from "./tab-model.js";
 export * from "./sim-session.js";
+// leak-judge set
+export * from "./leak-judge.js";

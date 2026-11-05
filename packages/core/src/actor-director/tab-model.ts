@@ -152,7 +152,12 @@ export function buildTabModel(lines: readonly BhAdEvent[]): TabModel {
       }
       case "note_dropped": {
         const c = byNote.get(l.note_id);
-        if (c) { c.state = "dropped"; c.reason = l.reason === "late" ? "late: answered after the 1.5 s hold" : l.reason === "session_end" ? "session ended" : "superseded"; }
+        if (c) { c.state = "dropped"; c.reason = l.reason === "late" ? "late: answered after the 1.5 s hold" : l.reason === "session_end" ? "session ended" : l.reason === "leak_judge" ? (c.reason?.startsWith("leak judge") ? c.reason : "leak judge: dropped before display") : "superseded"; }
+        break;
+      }
+      case "leak_judge": {
+        const c = byNote.get(l.note_id);
+        if (c && l.dropped) c.reason = `leak judge: ${l.verdict}${l.codes.length ? " (" + l.codes.join(", ") + ")" : ""}${l.status !== "ok" ? " [" + l.status + "]" : ""}, dropped before display`;
         break;
       }
       case "actor_turn": {
