@@ -132,7 +132,7 @@ export interface GazeTracker {
    * v1.2, optional, SIMULATOR / SYNTHETIC ONLY: sets the simulated gaze point (screen pt) the synthetic tracker
    * reports next (the calibration screens call it when they show a dot). Absent on device trackers (ARKit, MediaPipe)
    * or a no-op there. Detect it with `typeof tracker.lookAt === "function"`, never `"lookAt" in tracker` (a Capacitor
-   * plugin proxy answers `in` for every name).
+   * plugin proxy has no `has` trap, so `in` is false even when the native method exists).
    */
   lookAt?(x: number, y: number): void | Promise<void>;
 }

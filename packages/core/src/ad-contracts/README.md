@@ -144,8 +144,8 @@ MediaPipe tracker (Electron Web Worker). The methods are `getStatus`, `requestPe
 `calibrate({phase: begin|target|end|cancel})`, `restoreCalibration`, `syncClock`, and the events `gaze` (a batch of
 samples about every 100 ms) and `status`. v1.2: optional `lookAt?(x, y)` is a **simulator-only aid** (the synthetic
 tracker's simulated gaze point, called by the calibration screens). Device trackers omit it or make it a no-op;
-detect it with `typeof tracker.lookAt === "function"` (not `"lookAt" in tracker`: the Capacitor proxy answers `in`
-for any name).
+detect it with `typeof tracker.lookAt === "function"` (not `"lookAt" in tracker`: the Capacitor plugin proxy has no `has`
+trap, so `in` is false even when the native method exists).
 - Permission states: `prompt | granted | denied | restricted`. An unsupported device has `supported:false` with
   `gaze.arkit_unsupported` or `gaze.model_missing`.
 - Tracker states: `idle | starting | running | calibrating | paused | stopped | error`. Pause reasons:
