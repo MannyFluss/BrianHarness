@@ -23,7 +23,10 @@ import type { PredictInput } from "frozen:actor-director/leak-predict";
 import { LEAK_CODES } from "frozen:ad-contracts/index";
 import { BUILD, VERIFY_GOLD, VERIFY_INPUTS } from "bundle:data";
 
-export const RUNNER_VERSION = "bh-judge-mac-runner/1";
+export const RUNNER_VERSION = "bh-judge-mac-runner/2";
+/** true only in a --test-build bundle (esbuild define); the release build has every TEST-only branch eliminated */
+declare const __BH_TEST_BUILD__: boolean;
+const TEST_BUILD = typeof __BH_TEST_BUILD__ !== "undefined" && __BH_TEST_BUILD__;
 const JUDGE_MODEL = "gemma4:cloud";
 /** response model tags accepted: the gemma4 family (gemma4:cloud as the Worker names it, gemma4:31b upstream, ...) */
 const MODEL_OK = /^gemma4(?::[a-z0-9._-]+)?$/i;
@@ -160,19 +163,37 @@ function readToken(): { path: string } {
   secret = tok;
   return { path };
 }
+/** hosts the Mac must never send judge traffic to: no local / private inference, no local Ollama, no fallback */
+export function localEndpointReason(u: URL): string | null {
+  const h = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h === "0.0.0.0" || h === "::" ) return "a localhost / .local host";
+  if (/ollama/.test(h) && !/(^|\.)ollama\.com$/.test(h)) return "a local Ollama host";
+  if (u.port === "11434") return "port 11434 (Ollama)";
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h.replace(/^::ffff:/, ""));
+  if (v4) { const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)) return "a loopback / private / link-local IPv4 address"; }
+  if (h.includes(":")) { if (h === "::1" || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe[89ab][0-9a-f]:/.test(h) || h.startsWith("::ffff:")) return "a loopback / private / link-local IPv6 address"; }
+  return null;
+}
 function workerUrl(): URL {
   const raw = opt("--worker-url") ?? process.env.BH_WORKER_URL;
   if (!raw) throw new Refused("no Worker URL: pass --worker-url https://... or set BH_WORKER_URL");
   let u: URL;
   try { u = new URL(raw); } catch { throw new Refused("the Worker URL is not a URL"); }
-  const loop = ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname);
-  if (u.protocol !== "https:" && !(loop && u.protocol === "http:")) throw new Refused("the Worker URL must be https:// (http only for a loopback test server)");
   if (u.username || u.password || u.search) throw new Refused("the Worker URL must not carry credentials or a query");
-  if (process.env.BH_JUDGE_TEST_NOW) {
-    if (!loop) throw new Refused("BH_JUDGE_TEST_NOW (a test clock) is honoured only against a loopback test server");
-    if (Number.isNaN(Date.parse(process.env.BH_JUDGE_TEST_NOW))) throw new Refused("BH_JUDGE_TEST_NOW is not a date");
-    clockOverride = process.env.BH_JUDGE_TEST_NOW;
+  const local = localEndpointReason(u);
+  // TEST_ONLY_LOOPBACK_FAKE_JUDGE: the http://127.0.0.1 fake judge and the test clock exist only in a --test-build bundle
+  if (__BH_TEST_BUILD__ && local && u.protocol === "http:" && u.hostname === "127.0.0.1") {
+    warn("BH_TEST_ONLY_LOOPBACK: test build, loopback fake judge");
+    if (process.env.BH_JUDGE_TEST_NOW) {
+      if (Number.isNaN(Date.parse(process.env.BH_JUDGE_TEST_NOW))) throw new Refused("BH_JUDGE_TEST_NOW is not a date");
+      clockOverride = process.env.BH_JUDGE_TEST_NOW;
+    }
+    return u;
   }
+  if (local) throw new Refused(`the Worker URL host ${u.host} is ${local}: inference must be gemma4:cloud via the Worker, never local (no fallback)`);
+  if (u.protocol !== "https:") throw new Refused("the Worker URL must be https://");
+  if (process.env.BH_JUDGE_TEST_NOW) throw new Refused("BH_JUDGE_TEST_NOW (a test clock) is not honoured by a release runner");
   return u;
 }
 
@@ -203,6 +224,7 @@ async function main(): Promise<number> {
   }
   if (stage !== "verify" && stage !== "r4c") { warn("usage: node runner.mjs verify | r4c --in <inputs.jsonl> | manifest   [--worker-url https://...] [--out DIR] [--max-calls N]"); return EXIT.refused; }
   const jm = opt("--judge-model");
+  if (jm !== undefined && !jm.endsWith(":cloud")) throw new Refused(`--judge-model ${jm} refused: not a :cloud model (no local inference on this Mac)`);
   if (jm !== undefined && jm !== JUDGE_MODEL) throw new Refused(`--judge-model ${jm} refused: only ${JUDGE_MODEL} is allowed`);
   if (opt("--temperature") !== undefined && Number(opt("--temperature")) !== 0) throw new Refused("temperature is fixed at 0");
   const url = workerUrl();
@@ -212,6 +234,21 @@ async function main(): Promise<number> {
   let manifestOk: boolean | null = null;
   if (existsSync(mfPath)) { try { manifestOk = (JSON.parse(readFileSync(mfPath, "utf8")) as { runner_mjs_sha256?: string }).runner_mjs_sha256 === self; } catch { manifestOk = false; } }
   if (manifestOk === false) throw new Refused("runner.mjs does not match MANIFEST.json runner_mjs_sha256: the bundle was altered; re-copy it");
+  // the frozen-source hashes embedded at build (from git show 3b425dd:<path>) must be the ones MANIFEST.json lists
+  if (sha256(BUILD.frozen_sources.map((f) => `${f.sha256}  ${f.path}`).join("\n") + "\n") !== BUILD.frozen_digest) throw new Refused("embedded frozen-source list does not match its digest: the bundle was altered");
+  if (existsSync(mfPath)) { const m = JSON.parse(readFileSync(mfPath, "utf8")) as { frozen_modules_digest?: string }; if (m.frozen_modules_digest !== BUILD.frozen_digest) throw new Refused("MANIFEST.json frozen_modules_digest does not match the frozen sources embedded in runner.mjs: the bundle was altered"); }
+  const header = { schema: "bh-judge-run-header/1", runner: RUNNER_VERSION, stage, frozen_commit: BUILD.frozen_commit, frozen_digest: BUILD.frozen_digest, frozen_sources: BUILD.frozen_sources.length,
+    bundle_sha256: null as string | null, bundle_sha_note: "the tarball sha is not knowable from inside it: runner_mjs_sha256 identifies the bundle (SHA256SUMS lists both)",
+    runner_mjs_sha256: self, wrapper_sha256: BUILD.wrapper_sha256, wrapper_commit: BUILD.wrapper_commit, prompt_id: LEAK_JUDGE_PROMPT_ID, judge_model: JUDGE_MODEL, temperature: 0,
+    retries: 1, deadline_ms: 90_000, endpoint_host: url.host, test_build: __BH_TEST_BUILD__ ? "BH_TEST_ONLY_LOOPBACK" : false };
+  if (stage === "r4c") {
+    const vp = resolve(opt("--verify-summary") ?? join(homedir(), "BrianHarness/judge-runs/verify/summary.json"));
+    if (!existsSync(vp)) throw new Refused(`R4c needs the completed verify's summary.json (${vp}): run verify first with this same bundle`);
+    let v: { stage?: string; exit_code?: number; runner_mjs_sha256?: string; wrapper_sha256?: string };
+    try { v = JSON.parse(readFileSync(vp, "utf8")); } catch { throw new Refused(`${vp} is not valid JSON`); }
+    if (v.stage !== "verify" || v.exit_code !== 0) throw new Refused(`${vp} is not a completed verify (exit ${String(v.exit_code)})`);
+    if (v.runner_mjs_sha256 !== self || v.wrapper_sha256 !== BUILD.wrapper_sha256) throw new Refused(`R4c must use the same bundle as the verify: verify ran runner.mjs ${String(v.runner_mjs_sha256).slice(0, 12)} wrapper ${String(v.wrapper_sha256).slice(0, 12)}, this is runner.mjs ${self.slice(0, 12)} wrapper ${BUILD.wrapper_sha256.slice(0, 12)}`);
+  }
 
   const outDir = resolve(opt("--out") ?? join(homedir(), "BrianHarness/judge-runs", stage));
   let inPath: string, inputsText: string;
@@ -238,6 +275,9 @@ async function main(): Promise<number> {
     if (!Number.isInteger(userCap) || userCap < 1) throw new Refused("--max-calls must be a positive integer");
     const budget = Math.min(userCap, ledger.remaining(stage));
     const recPath = join(outDir, "requests.jsonl");
+    // predictions.jsonl is the frozen one-prediction-per-line format (no header line): the header is the sidecar
+    // predictions.header.json, and is also embedded as config.run_header (so it lands in predictions.meta.json)
+    atomicWrite(join(outDir, "predictions.header.json"), JSON.stringify(header, null, 2) + "\n", 0o644);
     const guard = new GuardBackend(new WorkerChatBackend({ baseUrl: url.origin + url.pathname.replace(/\/$/, ""), token: () => secret }), ledger, stage, recPath);
     const startDone = readJsonl<DoneLine>(join(outDir, "ckpt/done.jsonl")).length;
     let r: FreezeRunResult | null = null, refused: string | null = null;
@@ -245,7 +285,7 @@ async function main(): Promise<number> {
       try {
         // the frozen CLI's (scripts/ad-leak-freeze.ts @ 3b425dd) exact runFreeze call for --judge worker
         r = await runFreeze({ items, inputsText, backend: guard, checkpointDir: join(outDir, "ckpt"), outPath: join(outDir, "predictions.jsonl"), maxCalls: budget, retries: 1, deadlineMs: 90_000,
-          config: { commit: BUILD.frozen_commit, leak_judge_prompt_id: LEAK_JUDGE_PROMPT_ID, judge_model: JUDGE_MODEL, actor_model: ACTOR_MODEL, temperature: 0, uncertain_policy: "positive", backend: "worker" },
+          config: { commit: BUILD.frozen_commit, leak_judge_prompt_id: LEAK_JUDGE_PROMPT_ID, judge_model: JUDGE_MODEL, actor_model: ACTOR_MODEL, temperature: 0, uncertain_policy: "positive", backend: "worker", run_header_file: "predictions.header.json", run_header: header } as Parameters<typeof runFreeze>[0]["config"],
           log: (s) => say(s) });
       } catch (e) { if (e instanceof FreezeRefused || (e instanceof Error && /judge model/i.test(e.message))) refused = e.message; else throw e; }
     }
@@ -260,7 +300,7 @@ async function main(): Promise<number> {
     const http: Record<string, number> = {}; for (const x of recs) http[String(x.status)] = (http[String(x.status)] ?? 0) + 1;
     const doneLines = readJsonl<DoneLine>(join(outDir, "ckpt/done.jsonl"));
     const summary: Record<string, unknown> = {
-      schema: "bh-judge-run-summary/1", runner: RUNNER_VERSION, runner_mjs_sha256: self, manifest_match: manifestOk, stage, exit_code: code,
+      schema: "bh-judge-run-summary/2", runner: RUNNER_VERSION, runner_mjs_sha256: self, wrapper_sha256: BUILD.wrapper_sha256, wrapper_commit: BUILD.wrapper_commit, header, manifest_match: manifestOk, stage, exit_code: code,
       status: code === 0 ? "complete" : code === 3 ? "paused (cap)" : code === 4 ? "stopped (worker 429 / 5xx storm)" : "stopped (model tag)", stop_reason: stop?.reason ?? r?.stopped ?? null,
       items: { total: items.length, done: doneLines.length, done_this_run: doneLines.length - startDone },
       requests_this_run: guard.requests, today: { date_pacific: today, requests: d.requests, cap: CAP_PER_DAY }, verify_total: { requests: l.verify_total, cap: CAP_VERIFY_TOTAL }, r4c_runs_today: d.r4c_runs,
@@ -269,7 +309,7 @@ async function main(): Promise<number> {
       retries: doneLines.reduce((s, x) => s + x.attempts - 1, 0), final_status: doneLines.reduce<Record<string, number>>((m, x) => { m[x.pred.status] = (m[x.pred.status] ?? 0) + 1; return m; }, {}),
       frozen_commit: BUILD.frozen_commit, prompt_id: LEAK_JUDGE_PROMPT_ID, judge_model: JUDGE_MODEL, actor_model: ACTOR_MODEL, temperature: 0,
       worker_host: url.host, token_file: tok.path, inputs_sha256: sha256(inputsText), ...(clockOverride ? { test_clock: clockOverride } : {}),
-      outputs: code === 0 ? ["predictions.jsonl", "predictions.meta.json", ...(stage === "verify" ? ["mock-predictions.jsonl", "report.txt"] : []), "requests.jsonl", "summary.json"] : ["requests.jsonl", "summary.json"],
+      outputs: code === 0 ? ["predictions.jsonl", "predictions.meta.json", "predictions.header.json", ...(stage === "verify" ? ["mock-predictions.jsonl", "report.txt"] : []), "requests.jsonl", "summary.json"] : ["requests.jsonl", "summary.json"],
       written_at: now().toISOString(),
     };
     const lines: string[] = [];

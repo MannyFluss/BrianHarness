@@ -57,6 +57,17 @@ export BH_WORKER_URL="https://<the Worker URL from the Engineer>"
 node runner.mjs r4c --in ~/BH-judge/r4c-inputs.jsonl --judge-model gemma4:cloud; echo "exit $?"
 ```
 
+- **Same bundle as the verify.** R4c refuses (exit 2) unless `~/BrianHarness/judge-runs/verify/summary.json` is a
+  completed verify (exit 0) whose `runner_mjs_sha256` and `wrapper_sha256` equal this runner's. Don't re-copy or rebuild
+  the bundle between verify and R4c. (`--verify-summary PATH` points elsewhere.)
+- **Cloud only, no fallback.** `--judge-model` must end in `:cloud` and be `gemma4:cloud`. The Worker URL must be
+  https and is refused (exit 2, nothing sent) if its host is localhost, loopback, private or link-local (10/8, 172.16/12,
+  192.168/16, 169.254/16, ::1, fc00::/7, fe80::/10), `*.local`, port 11434, or a local `ollama` host.
+- **Run header.** `predictions.jsonl` is the frozen one-line-per-item format, so the header goes in the sidecar
+  `predictions.header.json`. It is also embedded as `run_header` in `predictions.meta.json` and as `header` in
+  `summary.json`. It holds the frozen commit and digest, runner.mjs sha256 (stands in for the bundle; the tarball sha
+  can't be known from inside it, and is in SHA256SUMS), wrapper sha256 and commit, prompt id, model, temperature 0,
+  retries 1, deadline 90 s, and the endpoint host only. It never holds the token.
 - **One R4c run per day.** The runner refuses a second R4c run on the same Pacific day. If it pauses (exit 3), run
   the SAME command the next day: it resumes from `~/BrianHarness/judge-runs/r4c/ckpt/`. It refuses to resume if the
   inputs, prompt, model or commit changed.

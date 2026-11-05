@@ -14,7 +14,7 @@ const PIN = join(ROOT, "../wt-freeze-3b425dd");
 const HAVE = existsSync(join(PIN, "packages/core/src/actor-director/leak-freeze.ts")) && existsSync(join(ROOT, "../research-runs/r4-live-check/inputs.jsonl"));
 const NODE = process.env.BH_JM_NODE || process.execPath; // BH_JM_NODE=/path/to/node18 checks the minimum version
 const FAKE = "tok_FAKE_judgecal_9f8e7d6c5b4a3210";
-let T = "", BUNDLE = "", server: Server, URL_ = "";
+let T = "", BUNDLE = "", RELEASE = "", MF: { runner_mjs_sha256: string; wrapper_sha256: string } = { runner_mjs_sha256: "", wrapper_sha256: "" }, server: Server, URL_ = "";
 // fake judge behaviour
 const S = { model: "gemma4:31b" as string | null, status: [] as number[], body500: "", requests: 0, bad: [] as string[] };
 const reset = () => { S.model = "gemma4:31b"; S.status = []; S.body500 = ""; S.requests = 0; S.bad = []; };
@@ -24,11 +24,14 @@ before(async () => {
   if (!HAVE) return;
   T = mkdtempSync(join(tmpdir(), "bh-jm-test-"));
   const { buildBundle } = await import("../../../scripts/judge-mac/build.ts");
-  const b = await buildBundle(join(T, "build"), { tar: true, allowDirty: true });
+  const b = await buildBundle(join(T, "build"), { tar: true, allowDirty: true, testBuild: true });
+  const rel = await buildBundle(join(T, "release"), { tar: false, allowDirty: true });
+  RELEASE = rel.runner;
   // unpack the tarball somewhere with no node_modules anywhere above it
   mkdirSync(join(T, "mac"));
   await new Promise<void>((res, rej) => execFile("tar", ["-xzf", b.tarPath!, "-C", join(T, "mac")], (e) => (e ? rej(e) : res())));
   BUNDLE = join(T, "mac/brianharness-judge-runner/runner.mjs");
+  MF = JSON.parse(readFileSync(join(T, "mac/brianharness-judge-runner/MANIFEST.json"), "utf8"));
   server = createServer((req, res) => {
     let body = ""; req.on("data", (c) => (body += c));
     req.on("end", async () => {
@@ -56,9 +59,9 @@ function home(tokenMode = 0o600, token = FAKE + "\n") {
   return h;
 }
 const all: string[] = [];
-function run(h: string, args: string[], env: Record<string, string> = {}): Promise<{ code: number; out: string }> {
+function run(h: string, args: string[], env: Record<string, string> = {}, bundle = BUNDLE): Promise<{ code: number; out: string }> {
   return new Promise((res) => {
-    execFile(NODE, [BUNDLE, ...args], { cwd: h, env: { PATH: process.env.PATH ?? "", HOME: h, BH_WORKER_URL: URL_, ...env } }, (e, so, se) => {
+    execFile(NODE, [bundle, ...args], { cwd: h, env: { PATH: process.env.PATH ?? "", HOME: h, BH_WORKER_URL: URL_, ...env } }, (e, so, se) => {
       const out = so + se; all.push(out);
       res({ code: e ? Number((e as { code?: number }).code ?? 1) : 0, out });
     });
@@ -67,6 +70,10 @@ function run(h: string, args: string[], env: Record<string, string> = {}): Promi
 const ledger = (h: string) => JSON.parse(readFileSync(join(h, ".config/brianharness/judge-cal-ledger.json"), "utf8"));
 const summary = (h: string, st = "verify") => JSON.parse(readFileSync(join(h, "BrianHarness/judge-runs", st, "summary.json"), "utf8"));
 function seed(h: string, l: object) { writeFileSync(join(h, ".config/brianharness/judge-cal-ledger.json"), JSON.stringify({ schema: "bh-judge-ledger/1", tz: "America/Los_Angeles", caps: { verify_total: 35, per_day: 95 }, verify_total: 0, r4c_total: 0, days: {}, updated: null, ...l })); }
+function verified(h: string, o: Partial<typeof MF> = {}) {
+  mkdirSync(join(h, "BrianHarness/judge-runs/verify"), { recursive: true });
+  writeFileSync(join(h, "BrianHarness/judge-runs/verify/summary.json"), JSON.stringify({ stage: "verify", exit_code: 0, runner_mjs_sha256: MF.runner_mjs_sha256, wrapper_sha256: MF.wrapper_sha256, ...o }));
+}
 function r4cInputs(h: string, k = 30) {
   const lines = readFileSync(join(ROOT, "../research-runs/r4-live-check/inputs.jsonl"), "utf8").split("\n").filter(Boolean).slice(0, k).map((l, i) => JSON.stringify({ ...JSON.parse(l), id: `fake-r4c-${i}` }));
   const p = join(h, "fake-r4c.jsonl"); writeFileSync(p, lines.join("\n") + "\n"); return p;
@@ -105,10 +112,11 @@ test("JM.2 verify cap 35 ever: a pre-seeded 30 allows 5 more, then exit 3 with n
 });
 
 test("JM.3 95/day across runs and stages (Pacific day); rollover with an injected clock; one R4c run per day", { skip: !HAVE }, async () => {
-  reset(); const h = home(); const inp = r4cInputs(h);
+  reset(); const h = home(); const inp = r4cInputs(h); verified(h);
   seed(h, { days: { "2026-11-04": { requests: 90, verify: 0, r4c: 90, r4c_runs: 0 } } });
   const v = await run(h, ["verify"], { BH_JUDGE_TEST_NOW: D1 });
   assert.equal(v.code, 3, v.out); assert.equal(S.requests, 5); assert.equal(ledger(h).days["2026-11-04"].requests, 95);
+  verified(h); // the paused verify above rewrote summary.json; R4c needs a completed verify from this bundle
   reset(); const r = await run(h, ["r4c", "--in", inp], { BH_JUDGE_TEST_NOW: D1 });
   assert.equal(r.code, 3, r.out); assert.equal(S.requests, 0); // the day is spent: nothing sent, and no R4c run counted
   // the next Pacific day: R4c runs (capped by --max-calls), then a second R4c run that day is refused
@@ -129,7 +137,7 @@ test("JM.3 95/day across runs and stages (Pacific day); rollover with an injecte
 
 test("JM.4 model allowlist: --judge-model other refused; a non-gemma4 or missing response model tag stops at once (exit 5)", { skip: !HAVE }, async () => {
   reset(); const h = home();
-  const r = await run(h, ["verify", "--judge-model", "gpt-oss:120b-cloud"]);
+  const r = await run(h, ["verify", "--judge-model", "qwen3:cloud"]);
   assert.equal(r.code, 2); assert.match(r.out, /only gemma4:cloud/); assert.equal(S.requests, 0);
   reset(); S.model = "qwen3:32b";
   const r2 = await run(h, ["verify"]);
@@ -151,7 +159,7 @@ test("JM.5 token file: missing, empty, group/world-readable refused with chmod 6
   const e = await run(h, ["verify", "--max-calls", "1"], { BH_JUDGE_TOKEN_FILE: alt, BH_JUDGE_TEST_NOW: D1 });
   assert.equal(e.code, 3, e.out); assert.equal(S.requests, 1); assert.deepEqual(S.bad, []);
   const u = await run(home(), ["verify"], { BH_WORKER_URL: "http://judge.example.invalid" }); assert.equal(u.code, 2); assert.match(u.out, /https/);
-  const k = await run(home(), ["verify"], { BH_WORKER_URL: "https://judge.example.invalid", BH_JUDGE_TEST_NOW: D1 }); assert.equal(k.code, 2); assert.match(k.out, /loopback/);
+  const k = await run(home(), ["verify"], { BH_WORKER_URL: "https://judge.example.invalid", BH_JUDGE_TEST_NOW: D1 }); assert.equal(k.code, 2); assert.match(k.out, /test clock/);
   const w = await run(home(), ["verify"], { BH_WORKER_URL: "" }); assert.equal(w.code, 2); assert.match(w.out, /no Worker URL/);
 });
 
@@ -179,6 +187,54 @@ test("JM.7 tampered bundle refused; manifest pins every frozen module to 3b425dd
   reset(); const h = home();
   const r = await new Promise<{ code: number; out: string }>((res) => execFile(NODE, [join(d, "runner.mjs"), "verify"], { cwd: h, env: { PATH: process.env.PATH ?? "", HOME: h, BH_WORKER_URL: URL_ } }, (e, so, se) => { all.push(so + se); res({ code: e ? Number((e as { code?: number }).code) : 0, out: so + se }); }));
   assert.equal(r.code, 2, r.out); assert.match(r.out, /altered/); assert.equal(S.requests, 0);
+});
+
+test("JM.9 --judge-model without :cloud hard-refused (exit 2, nothing sent)", { skip: !HAVE }, async () => {
+  for (const m of ["gemma4", "gemma4:31b", "llama3:8b", "gemma4:latest"]) {
+    reset(); const r = await run(home(), ["verify", "--judge-model", m], { BH_JUDGE_TEST_NOW: D1 });
+    assert.equal(r.code, 2, m); assert.match(r.out, /not a :cloud model/); assert.equal(S.requests, 0);
+  }
+});
+
+test("JM.10 every local / private endpoint class refused, no fallback; the release build refuses the loopback fake judge", { skip: !HAVE }, async () => {
+  const bad = ["https://localhost/", "https://foo.localhost/", "https://127.0.0.1/", "https://127.9.9.9/", "https://10.1.2.3/", "https://172.16.0.1/", "https://172.31.255.1/", "https://192.168.1.10/",
+    "https://169.254.1.1/", "https://[::1]/", "https://[fc00::1]/", "https://[fd12:3456::1]/", "https://[fe80::1]/", "https://[::ffff:127.0.0.1]/", "https://mac.local/", "https://judge.example.com:11434/",
+    "https://ollama.internal/", "http://localhost:11434/", "https://0.0.0.0/"];
+  for (const u of bad) { reset(); const r = await run(home(), ["verify"], { BH_WORKER_URL: u }); assert.equal(r.code, 2, u + r.out); assert.match(r.out, /never local|not a URL/, u); assert.equal(S.requests, 0); }
+  reset(); const r = await run(home(), ["verify"], { BH_WORKER_URL: URL_ }, RELEASE);
+  assert.equal(r.code, 2, r.out); assert.match(r.out, /never local/); assert.equal(S.requests, 0);
+  reset(); const t = await run(home(), ["verify"], { BH_WORKER_URL: "https://judge.example.invalid", BH_JUDGE_TEST_NOW: D1 }, RELEASE);
+  assert.equal(t.code, 2); assert.match(t.out, /not honoured by a release runner/);
+});
+
+test("JM.11 release runner.mjs has no test-only marker; the test build has it", { skip: !HAVE }, () => {
+  assert.ok(!readFileSync(RELEASE, "utf8").includes("BH_TEST_ONLY_LOOPBACK"));
+  assert.ok(!readFileSync(RELEASE, "utf8").includes('hostname === "127.0.0.1"'));
+  assert.ok(readFileSync(BUNDLE, "utf8").includes("BH_TEST_ONLY_LOOPBACK"));
+  const m = JSON.parse(readFileSync(join(T, "release/brianharness-judge-runner/MANIFEST.json"), "utf8"));
+  assert.equal(m.test_build, false); assert.equal(m.frozen_modules.length, 34);
+});
+
+test("JM.12 header fields in predictions.header.json, .meta.json and summary.json; no token", { skip: !HAVE }, async () => {
+  reset(); const h = home();
+  const r = await run(h, ["verify"], { BH_JUDGE_TEST_NOW: D1 }); assert.equal(r.code, 0, r.out);
+  const out = join(h, "BrianHarness/judge-runs/verify");
+  const hdr = JSON.parse(readFileSync(join(out, "predictions.header.json"), "utf8"));
+  const meta = JSON.parse(readFileSync(join(out, "predictions.meta.json"), "utf8"));
+  const sm = summary(h);
+  for (const x of [hdr, meta.run_header, sm.header]) {
+    assert.equal(x.frozen_commit, "3b425dda90116f5cda7e0ca0d5f99625688888b5"); assert.equal(x.runner_mjs_sha256, MF.runner_mjs_sha256); assert.equal(x.wrapper_sha256, MF.wrapper_sha256);
+    assert.match(x.wrapper_commit, /^[0-9a-f]{40}$/); assert.equal(x.prompt_id, "lj2-eeca9847"); assert.equal(x.judge_model, "gemma4:cloud"); assert.equal(x.temperature, 0);
+    assert.equal(x.retries, 1); assert.equal(x.deadline_ms, 90000); assert.equal(x.endpoint_host, new URL(URL_).host); assert.ok("bundle_sha256" in x);
+  }
+  assert.equal(meta.run_header_file, "predictions.header.json");
+  for (const f of ["predictions.header.json", "predictions.meta.json", "summary.json"]) assert.ok(!readFileSync(join(out, f), "utf8").includes(FAKE));
+});
+
+test("JM.13 R4c refuses without a completed verify, or with a verify from a different bundle / wrapper", { skip: !HAVE }, async () => {
+  const cases: Array<[(h: string) => void, RegExp]> = [[() => {}, /run verify first/], [(h) => verified(h, { runner_mjs_sha256: "0".repeat(64) }), /same bundle/],
+    [(h) => verified(h, { wrapper_sha256: "1".repeat(64) }), /same bundle/], [(h) => verified(h, { exit_code: 3 } as never), /not a completed verify/]];
+  for (const [prep, re] of cases) { reset(); const h = home(); prep(h); const r = await run(h, ["r4c", "--in", r4cInputs(h)], { BH_JUDGE_TEST_NOW: D1 }); assert.equal(r.code, 2, r.out); assert.match(r.out, re); assert.equal(S.requests, 0); }
 });
 
 test("JM.8 the fake token never appears in any output or any file the runner wrote", { skip: !HAVE }, async () => {

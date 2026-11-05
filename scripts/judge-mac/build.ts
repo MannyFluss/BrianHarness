@@ -11,6 +11,7 @@ import { build, type Plugin } from "esbuild";
 
 export const FROZEN_COMMIT = "3b425dda90116f5cda7e0ca0d5f99625688888b5";
 export const NODE_MIN = "18.17.0";
+export const TEST_MARKER = "BH_TEST_ONLY_LOOPBACK";
 const ROOT = resolve(new URL("../..", import.meta.url).pathname);
 const PIN = resolve(process.env.BH_FREEZE_WT ?? join(ROOT, "../wt-freeze-3b425dd"));
 const VERIFY_DIR = resolve(process.env.BH_R4_LIVE_DIR ?? join(ROOT, "../research-runs/r4-live-check"));
@@ -21,7 +22,7 @@ const sha = (b: string | Buffer) => createHash("sha256").update(b).digest("hex")
 const git = (cwd: string, ...x: string[]) => execFileSync("git", x, { cwd, encoding: "utf8" }).trim();
 const die = (m: string): never => { console.error("judge-mac build: " + m); process.exit(2); };
 
-export async function buildBundle(outRoot: string, o: { tar: boolean; allowDirty: boolean }) {
+export async function buildBundle(outRoot: string, o: { tar: boolean; allowDirty: boolean; testBuild?: boolean }) {
   // 1. the pinned worktree: detached at the frozen commit, nothing tracked modified (node_modules is an untracked symlink)
   const pinHead = git(PIN, "rev-parse", "HEAD");
   if (pinHead !== FROZEN_COMMIT) die(`pinned worktree ${PIN} is at ${pinHead}, not ${FROZEN_COMMIT}`);
@@ -41,7 +42,9 @@ export async function buildBundle(outRoot: string, o: { tar: boolean; allowDirty
     if (x.split !== "dev" && x.split !== "test") die(`${id} is not R4 dev/test`);
     return JSON.stringify({ id, codes: x.codes, answer_first_violation: x.answer_first_violation, af_scored: x.unit === "reply" && !!x.context });
   }).join("\n") + "\n";
-  const BUILD = { frozen_commit: FROZEN_COMMIT, wrapper_commit: wrapperHead, verify_inputs_sha256: sha(inputs), verify_gold_sha256: sha(gold), node_min: NODE_MIN };
+  const wrapperSha = sha(readFileSync(join(ROOT, "scripts/judge-mac/runner.ts")));
+  let frozenSources: Array<{ path: string; sha256: string }> = [];
+  const BUILD = { wrapper_sha256: wrapperSha, frozen_digest: "", frozen_sources: frozenSources, frozen_commit: FROZEN_COMMIT, wrapper_commit: wrapperHead, verify_inputs_sha256: sha(inputs), verify_gold_sha256: sha(gold), node_min: NODE_MIN };
   // 3. esbuild: frozen:* -> the pinned worktree; bundle:data -> the embedded verify data
   const plugin: Plugin = { name: "bh-frozen", setup(b) {
     b.onResolve({ filter: /^frozen:/ }, (r) => ({ path: join(PIN, "packages/core/src", r.path.slice("frozen:".length) + ".ts") }));
@@ -52,9 +55,20 @@ export async function buildBundle(outRoot: string, o: { tar: boolean; allowDirty
   const dir = join(outRoot, "brianharness-judge-runner");
   rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
   const runner = join(dir, "runner.mjs");
-  const res = await build({ entryPoints: [join(ROOT, "scripts/judge-mac/runner.ts")], outfile: runner, bundle: true, platform: "node", format: "esm", target: "node18",
-    metafile: true, legalComments: "none", plugins: [plugin], logLevel: "warning", absWorkingDir: ROOT,
+  const esb = (write: boolean) => build({ entryPoints: [join(ROOT, "scripts/judge-mac/runner.ts")], outfile: runner, bundle: true, platform: "node", format: "esm", target: "node18",
+    metafile: true, write, minifySyntax: true, define: { __BH_TEST_BUILD__: o.testBuild ? "true" : "false" }, legalComments: "none", plugins: [plugin], logLevel: "warning", absWorkingDir: ROOT,
     banner: { js: `// BrianHarness leak-judge Mac runner. Frozen judging code from ${FROZEN_COMMIT} (see MANIFEST.json). Run: node runner.mjs verify. Node >= ${NODE_MIN}.` } });
+  // pass 1 (not written): which pinned files get bundled; their texts are hashed from `git show <frozen>:<path>`
+  // and must equal the bytes esbuild read; pass 2 embeds that list so the runner can check it against MANIFEST.json
+  const pass1 = await esb(false);
+  frozenSources = Object.keys(pass1.metafile.inputs).map((p) => relative(PIN, resolve(ROOT, p))).filter((r) => !r.startsWith("..") && !r.startsWith("bh-data")).sort((x, y) => x.localeCompare(y)).map((rel) => {
+    const atCommit = sha(execFileSync("git", ["show", `${FROZEN_COMMIT}:${rel}`], { cwd: PIN }));
+    if (sha(readFileSync(join(PIN, rel))) !== atCommit) die(`${rel} differs from ${FROZEN_COMMIT}`);
+    return { path: rel, sha256: atCommit };
+  });
+  BUILD.frozen_sources = frozenSources;
+  BUILD.frozen_digest = sha(frozenSources.map((f) => `${f.sha256}  ${f.path}`).join("\n") + "\n");
+  const res = await esb(true);
   // 4. the manifest: every bundled input; frozen ones checked against git show <frozen>:<path>
   const frozen: Array<{ path: string; sha256: string; sha256_at_frozen_commit: string; git_blob: string; bytes_in_bundle: number }> = [];
   const other: Array<{ path: string; sha256: string | null; bytes_in_bundle: number }> = [];
@@ -77,14 +91,18 @@ export async function buildBundle(outRoot: string, o: { tar: boolean; allowDirty
   if (other.some((x) => x.path.includes("node_modules"))) die("a node_modules package got bundled: the runner must be the frozen code + the wrapper only");
   const required = ["leak-judge", "leaks", "leak-predict", "leak-freeze", "director"].map((n) => `packages/core/src/actor-director/${n}.ts`);
   for (const r of required) if (!frozen.some((f) => f.path === r)) die(`${r} is not in the bundle`);
+  if (frozen.map((f) => `${f.sha256}  ${f.path}`).join("\n") !== frozenSources.map((f) => `${f.sha256}  ${f.path}`).join("\n")) die("pass-2 bundle inputs differ from the embedded frozen-source list");
+  const runnerText = readFileSync(runner, "utf8");
+  if (!o.testBuild && runnerText.includes(TEST_MARKER)) die(`release runner.mjs contains the test-only marker ${TEST_MARKER}`);
+  if (o.testBuild && !runnerText.includes(TEST_MARKER)) die("test build is missing its marker");
   const runnerSha = sha(readFileSync(runner));
   const manifest = { schema: "bh-judge-mac-manifest/1", built_at: new Date().toISOString(), frozen_commit: FROZEN_COMMIT, frozen_worktree_clean: true,
-    wrapper_commit: wrapperHead, wrapper_dirty: !!wrapperDirty, node_min: NODE_MIN, esbuild: (await import("esbuild")).version, target: "node18", format: "esm",
+    test_build: !!o.testBuild, wrapper_sha256: wrapperSha, wrapper_commit: wrapperHead, wrapper_dirty: !!wrapperDirty, node_min: NODE_MIN, esbuild: (await import("esbuild")).version, target: "node18", format: "esm",
     runner_mjs: "runner.mjs", runner_mjs_sha256: runnerSha, runner_mjs_bytes: readFileSync(runner).length,
     judge_model: "gemma4:cloud", model_tags_accepted: "^gemma4(:[a-z0-9._-]+)?$ (gemma4:cloud, gemma4:31b)", temperature: 0,
     caps: { verify_requests_ever: 35, requests_per_pacific_day: 95, r4c_runs_per_day: 1 },
     verify_inputs: { source: "research-runs/r4-live-check/inputs.jsonl (30 R4 dev+test items; NOT R4c)", sha256: BUILD.verify_inputs_sha256, gold_sha256: BUILD.verify_gold_sha256 },
-    frozen_modules_digest: sha(frozen.map((f) => `${f.sha256}  ${f.path}`).join("\n") + "\n"), frozen_modules: frozen, wrapper_modules: other };
+    frozen_modules_digest: BUILD.frozen_digest, frozen_modules: frozen, wrapper_modules: other };
   writeFileSync(join(dir, "MANIFEST.json"), JSON.stringify(manifest, null, 2) + "\n");
   copyFileSync(join(ROOT, "docs/AD_JUDGE_MAC_RUNNER.md"), join(dir, "RUN_ON_MAC.md"));
   let tarSha: string | null = null, tarPath: string | null = null, tarBytes = 0;
@@ -102,7 +120,9 @@ export async function buildBundle(outRoot: string, o: { tar: boolean; allowDirty
 if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
   const out = resolve(opt("--out", join(ROOT, "../release/judge-mac"))!);
   mkdirSync(dirname(out), { recursive: true });
-  const r = await buildBundle(out, { tar: !a.includes("--no-tar"), allowDirty: a.includes("--allow-dirty") });
+  const testBuild = a.includes("--test-build");
+  if (testBuild && out === resolve(join(ROOT, "../release/judge-mac"))) die("--test-build never goes into the release folder: pass --out");
+  const r = await buildBundle(out, { tar: !a.includes("--no-tar"), allowDirty: a.includes("--allow-dirty"), testBuild });
   console.log(`runner.mjs ${r.runnerSha} (${r.manifest.runner_mjs_bytes} B); ${r.manifest.frozen_modules.length} frozen modules @ ${FROZEN_COMMIT.slice(0, 12)} digest ${r.manifest.frozen_modules_digest}`);
   for (const f of r.manifest.frozen_modules) console.log(`  ${f.sha256}  ${f.path}  (blob ${f.git_blob.slice(0, 12)}, ${f.bytes_in_bundle} B used)`);
   for (const f of r.manifest.wrapper_modules) console.log(`  wrapper: ${f.path} ${f.sha256 ?? ""}`);
