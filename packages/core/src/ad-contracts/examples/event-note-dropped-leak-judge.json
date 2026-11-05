@@ -1,0 +1,11 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:17:01.411Z",
+  "mono": 421411,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 112,
+  "type": "note_dropped",
+  "turn": 13,
+  "note_id": "n7",
+  "reason": "leak_judge"
+}

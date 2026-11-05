@@ -1,6 +1,6 @@
 # Actor/Director shared contracts
 
-**Version: contract-v1.1** (additive over contract-v1; see Changes) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
+**Version: contract-v1.2** (additive over contract-v1 and v1.1; see Changes) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
 
 Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/ad-contracts/`, published copy at
 `/workspace/actor-director/contracts/`. Import in TS from `@brianharness/core/ad-contracts` (subpath export, added in E1; nothing is re-exported from the core index, so protocol-4 is untouched), or use the JSON Schemas.
@@ -28,6 +28,18 @@ Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/a
    `dir1-b1d2fd77` over R3's `system_prompt_v1.txt` only.
 5. Optional `director_call.assembled_prompt_sha8` and `director_call.input_tokens_by_slot {system, format, examples,
    digest}` (o200k_base; the four add up to `input_tokens`).
+
+### contract-v1.2 (2026-11-04, additive; every contract-v1 / v1.1 line still validates)
+1. New event `leak_judge` (**sealed-only**; added to `SEALED_ONLY_TYPES` and `blinding.json` `sealedOnlyTypes`): the
+   pre-display leak gate on the as-if-injected Actor reply of every rail-passing note, in every arm with the same
+   deadline: `{turn, note_id, decision inject|shadow, judge_prompt_id "lj1-<sha8>", model, deadline_ms, ms,
+   status ok|timeout|error|unparseable, regex, uncertain, judge (null unless ok), codes, answered_first,
+   verdict pass|flagged|uncertain, dropped, reply_sha256, error?}`. The as-if-injected reply text itself is never
+   logged unless it is the displayed reply.
+2. `note_dropped.reason` gains `"leak_judge"`: any verdict but `pass` drops the note (fail safe).
+3. `session_start.contract` accepts `"contract-v1.2"` too (new logs write v1.2).
+4. Semantics (no field change): a flagged or uncertain gate verdict counts toward the leak breaker in every arm; a
+   dropped note gets no `note_outcome` and reads `blocked` in the Director footprint.
 
 ## Change policy
 
@@ -489,7 +501,7 @@ Every line has `{schema "bh-ad/1", type, t ISO, mono ms (GazeSample clock), sess
 `aT` is the Actor message of turn T, and `uT` is the user message answering it. Director-side events carry the turn
 of the Actor request they affect. Types: `session_start, gaze_quality, aoi_layout, scroll, gaze_l1, gaze_raw (off by
 default), aoi_dwell, attention_digest, user_turn, director_call (with the director footprint), rail_check, injection,
-note_dropped, context_share, actor_turn, note_outcome, session_share, health, session_end`.
+note_dropped, leak_judge (v1.2), context_share, actor_turn, note_outcome, session_share, health, session_end`.
 
 **Context share** (`context_share` per Actor request, `session_share` at the end) uses o200k_base token counts of
 each segment's content: `system` S, `history` H, `history_echo` E, `user` U, `director` D (the hint block including
@@ -513,10 +525,12 @@ http_status 429, worker_code "role_cap_<role>", role}` (`WORKER_CAP_TO_HEALTH`).
 | `session_start.sealed`, `blind {index,total,scheduleHash}` | absent | present |
 | `actor_turn.note_id`, `actor_request_sha256` | present | **TAB-ONLY**: sealed log only; main has `sealed:true` |
 | `actor_turn.usage.prompt_tokens` | number or null | **null** in the main log |
-| `director_call, rail_check, injection, note_dropped, context_share, note_outcome, session_share` | written | **sealed log only** |
+| `director_call, rail_check, injection, note_dropped, leak_judge, context_share, note_outcome, session_share` | written | **sealed log only** |
 | `health` with `director.leak_breaker` | written | sealed log only |
 
 The Director runs and the 1.5 s hold applies in every arm of a blinded session, so timing and request counts match.
+From v1.2 the same holds for the leak gate: every rail-passing note gets both Actor requests and the judge, with one
+deadline, whatever the arm.
 The sealed log is the full record, the same shape as a tab_visible log. It's stored in the sealed namespace, never
 shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`. The field lists are in
 `TAB_ONLY_FIELDS` and `SEALED_ONLY_TYPES` (events.ts).
@@ -531,7 +545,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.1",
+  "contract": "contract-v1.2",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -573,7 +587,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.1",
+  "contract": "contract-v1.2",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -619,7 +633,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.1",
+  "contract": "contract-v1.2",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -773,6 +787,60 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "confidence": 0.78
 }
 ```
+<!-- example: event-leak-judge -->
+```json
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:17:01.410Z",
+  "mono": 421410,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 111,
+  "type": "leak_judge",
+  "turn": 12,
+  "note_id": "n5",
+  "decision": "inject",
+  "judge_prompt_id": "lj1-11631f45",
+  "model": "gemma4:cloud",
+  "deadline_ms": 2500,
+  "ms": 912,
+  "status": "ok",
+  "regex": [],
+  "uncertain": [],
+  "judge": [],
+  "codes": [],
+  "answered_first": true,
+  "verdict": "pass",
+  "dropped": false,
+  "reply_sha256": "5d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1c"
+}
+```
+<!-- example: event-leak-judge-timeout -->
+```json
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:17:01.410Z",
+  "mono": 421410,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 111,
+  "type": "leak_judge",
+  "turn": 13,
+  "note_id": "n7",
+  "decision": "shadow",
+  "judge_prompt_id": "lj1-11631f45",
+  "model": "gemma4:cloud",
+  "deadline_ms": 2500,
+  "ms": 2500,
+  "status": "timeout",
+  "regex": [],
+  "uncertain": [],
+  "judge": null,
+  "codes": [],
+  "answered_first": null,
+  "verdict": "uncertain",
+  "dropped": true,
+  "reply_sha256": "6e2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d"
+}
+```
 <!-- example: event-context-share -->
 ```json
 {
@@ -883,7 +951,7 @@ Every other event type has an example in `examples/event-*.json`, and all of the
   "appVersion": "0.1.0",
   "platform": "ios",
   "build": "20261105.0900",
-  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.1\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
+  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.2\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
 }
 ```
 <!-- example: worker-role-cap-error -->
@@ -936,7 +1004,7 @@ Every other event type has an example in `examples/event-*.json`, and all of the
 13. **Turn numbering** follows the existing harness, with turn 0 as the opener. Director-side events carry the
     affected Actor request's turn, and `director_call.msg` names the message whose reading window triggered it.
 14. **Events the spec lacked but replay needs**: `user_turn` (text, `hold_ms`), `aoi_layout`, `scroll`, `gaze_l1`,
-    `aoi_dwell`, `note_dropped` (late, superseded or session_end), `session_end`, and `gaze_raw` (off by default).
+    `aoi_dwell`, `note_dropped` (late, superseded, session_end, or leak_judge from v1.2), `session_end`, and `gaze_raw` (off by default).
     Added fields: `director_call.footprint/repaired/deadline_missed`, `context_share.note_id/opener`,
     `session_share.shadow_notes/blocked_notes/session_dynamic_share`, `note_outcome.decision/leak_source`,
     `health.detail/http_status/worker_code/role`.

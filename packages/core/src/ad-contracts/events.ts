@@ -80,7 +80,7 @@ export type BhAdEventBody =
   | {
       type: "session_start";
       profile: "actor-director";
-      contract: "contract-v1" | "contract-v1.1";
+      contract: "contract-v1" | "contract-v1.1" | "contract-v1.2";
       userId: string;
       session_type: SessionType;
       tab: "visible" | "hidden";
@@ -129,7 +129,22 @@ export type BhAdEventBody =
       type: "injection"; turn: number; note_id: string; decision: "inject" | "shadow"; kind: NoteKind; move?: SuggestionMove;
       actor_text: string; evidence: EvidenceId[]; trigger_features: Record<string, number>; confidence: number;
     }
-  | { type: "note_dropped"; turn: number; note_id: string; reason: "late" | "superseded" | "session_end" }
+  /** v1.2: reason "leak_judge" = the pre-display leak gate flagged the as-if-injected reply, was uncertain, timed out or errored */
+  | { type: "note_dropped"; turn: number; note_id: string; reason: "late" | "superseded" | "session_end" | "leak_judge" }
+  /**
+   * v1.2, sealed-only: the pre-display leak gate on the as-if-injected Actor reply of one rail-passing note, in EVERY arm
+   * (inject and shadow) with the same deadline. regex = certain regex codes, uncertain = codes the regex layer could not
+   * decide (sent to the judge), judge = codes the judge returned (null unless status ok), codes = the final union.
+   * verdict: pass | flagged (codes non-empty) | uncertain (status not ok, or the judge left a code undecided). Anything
+   * but pass drops the note (dropped: true + note_dropped reason "leak_judge") and counts toward the leak breaker.
+   * reply_sha256 = sha256 of the as-if-injected reply text (the text itself is never logged unless it was displayed).
+   */
+  | {
+      type: "leak_judge"; turn: number; note_id: string; decision: "inject" | "shadow"; judge_prompt_id: string; model: string;
+      deadline_ms: number; ms: number; status: "ok" | "timeout" | "error" | "unparseable";
+      regex: LeakCode[]; uncertain: LeakCode[]; judge: LeakCode[] | null; codes: LeakCode[]; answered_first: boolean | null;
+      verdict: "pass" | "flagged" | "uncertain"; dropped: boolean; reply_sha256: string | null; error?: HealthCode;
+    }
   | {
       type: "context_share"; turn: number; note_id: string | null; opener: boolean;
       system: number; history: number; history_echo: number; user: number; director: number; total: number;
@@ -160,7 +175,7 @@ export type BhAdEvent = Envelope & BhAdEventBody;
 export type BhAdEventType = BhAdEventBody["type"];
 
 /** event types that exist only in the sealed log of a blinded session */
-export const SEALED_ONLY_TYPES: readonly BhAdEventType[] = ["director_call", "rail_check", "injection", "note_dropped", "context_share", "note_outcome", "session_share"];
+export const SEALED_ONLY_TYPES: readonly BhAdEventType[] = ["director_call", "rail_check", "injection", "note_dropped", "leak_judge", "context_share", "note_outcome", "session_share"];
 /** gaze_l1 rate limit: batches cover <= 5 s; <= 20 fixations, <= 10 back/jump saccades, <= 10 gaps per batch */
 export const GAZE_L1_MAX_FIXATIONS = 20;
 export const GAZE_L1_MAX_SACCADES = 10;

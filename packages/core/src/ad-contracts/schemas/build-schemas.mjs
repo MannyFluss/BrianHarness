@@ -185,7 +185,7 @@ const footprint = obj({
 });
 const sessionStart = {
   ...ev("session_start", {
-    profile: { const: "actor-director" }, contract: en("contract-v1", "contract-v1.1"), userId: str(1, 128),
+    profile: { const: "actor-director" }, contract: en("contract-v1", "contract-v1.1", "contract-v1.2"), userId: str(1, 128),
     session_type: { ...en("blinded", "tab_visible"), description: "SESSION TYPE. Fixed at session start by the schedule. blinded => tab hidden, main log redacted (see TAB-ONLY fields)" },
     tab: { ...en("visible", "hidden"), description: "must agree with session_type: blinded=hidden, tab_visible=visible" },
     arm: { ...en("on", "shadow", "off"), description: "TAB-ONLY: tab_visible sessions and the sealed log of a blinded session; NEVER in a blinded main log" },
@@ -237,7 +237,11 @@ const events = [
     input_tokens_by_slot: obj({ system: tok, format: tok, examples: tok, digest: tok }) }, ["error", "assembled_prompt_sha8", "input_tokens_by_slot"]),
   ev("rail_check", { turn, note_id: str(2, 12, { pattern: "^n[0-9]+$" }), pass: { type: "boolean" }, blocked_by: arr(N("RailCode"), 0, 12), hits: arr(str(1, 64), 0, 32) }, ["hits"]),
   ev("injection", { turn, note_id: str(2, 12, { pattern: "^n[0-9]+$" }), decision: en("inject", "shadow"), kind: N("NoteKind"), move: N("SuggestionMove"), actor_text: str(1, 1200), evidence: arr(N("EvidenceId"), 1, 24), trigger_features: numMap, confidence: share01 }, ["move"]),
-  ev("note_dropped", { turn, note_id: str(2, 12, { pattern: "^n[0-9]+$" }), reason: en("late", "superseded", "session_end") }),
+  ev("note_dropped", { turn, note_id: str(2, 12, { pattern: "^n[0-9]+$" }), reason: en("late", "superseded", "session_end", "leak_judge") }),
+  ev("leak_judge", { turn, note_id: str(2, 12, { pattern: "^n[0-9]+$" }), decision: en("inject", "shadow"), judge_prompt_id: str(1, 32, { pattern: "^lj[0-9]+-[0-9a-f]{8}$" }), model: str(1, 128),
+    deadline_ms: num(0), ms: num(0), status: en("ok", "timeout", "error", "unparseable"),
+    regex: { ...arr(N("LeakCode"), 0, 6), uniqueItems: true }, uncertain: { ...arr(N("LeakCode"), 0, 6), uniqueItems: true }, judge: nul({ ...arr(N("LeakCode"), 0, 6), uniqueItems: true }), codes: { ...arr(N("LeakCode"), 0, 6), uniqueItems: true },
+    answered_first: nul({ type: "boolean" }), verdict: en("pass", "flagged", "uncertain"), dropped: { type: "boolean" }, reply_sha256: nul(sha), error: healthCode }, ["error"]),
   ev("context_share", { turn, note_id: nul(str(2, 12, { pattern: "^n[0-9]+$" })), opener: { type: "boolean" }, system: tok, history: tok, history_echo: tok, user: tok, director: tok, total: tok, share: share01, dynamic_share: share01, provider_prompt_tokens: nul(tok) }),
   actorTurn,
   ev("note_outcome", { turn, note_id: str(2, 12, { pattern: "^n[0-9]+$" }), decision: en("inject", "shadow"), used: share01, followed: nul({ type: "boolean" }), answered_first: nul({ type: "boolean" }), leaks: { ...arr(N("LeakCode"), 0, 6), uniqueItems: true }, leak_source: en("regex", "judge", "both"), next_dwell_ratio: nul(num(0)), next_rating: nul(num(1, 5)), pushback: nul({ type: "boolean" }) }),

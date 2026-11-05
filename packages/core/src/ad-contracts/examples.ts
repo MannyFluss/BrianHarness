@@ -55,7 +55,7 @@ export const directorOutputNoNote = {
 export const actorText = renderActorText(directorOutputNote.note);
 
 const device = { deviceModel: "iPhone18,1", platform: "ios", orientation: "portrait", widthPt: 402, heightPt: 874 } as const;
-const common = { profile: "actor-director", contract: "contract-v1.1", userId: "manny", actor_prompt_id: "ap1-3c9e1b07", director_prompt_id: "dir1-b1d2fd77", pipeline_version: "gp1.0.0", tokenizer: "o200k_base", models: { actor: "gpt-oss:20b-cloud", director: "gpt-oss:120b-cloud" }, consent: { camera: true, rawGaze: false }, gaze: { tracker: "arkit", permission: "granted" }, device, director_enabled: true } as const;
+const common = { profile: "actor-director", contract: "contract-v1.2", userId: "manny", actor_prompt_id: "ap1-3c9e1b07", director_prompt_id: "dir1-b1d2fd77", pipeline_version: "gp1.0.0", tokenizer: "o200k_base", models: { actor: "gpt-oss:20b-cloud", director: "gpt-oss:120b-cloud" }, consent: { camera: true, rawGaze: false }, gaze: { tracker: "arkit", permission: "granted" }, device, director_enabled: true } as const;
 const blind = { index: 3, total: 10, scheduleHash: "9f2c4e1a7b3d5c6e8f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e" };
 const usage = { prompt_tokens: 1788, completion_tokens: 212, reasoning_tokens: 64 };
 
@@ -79,6 +79,11 @@ export const events = {
   rail_check_blocked: { ...env(109, 413512), type: "rail_check", turn: 12, note_id: "n6", pass: false, blocked_by: ["lint_sensor"], hits: ["reread"] },
   injection: { ...env(110, 413513), type: "injection", turn: 12, note_id: "n5", decision: "inject", kind: "both", move: "go_deeper", actor_text: actorText, evidence: ["e31", "e32", "e33"], trigger_features: { "e31.z": 2.6, "e32.z": -1.9, "e33.ms": 3100 }, confidence: 0.78 },
   note_dropped: { ...env(110, 413513), type: "note_dropped", turn: 13, note_id: "n7", reason: "late" },
+  /** v1.2: the pre-display leak gate (sealed-only); a pass, so the note stays */
+  leak_judge: { ...env(111, 421410), type: "leak_judge", turn: 12, note_id: "n5", decision: "inject", judge_prompt_id: "lj1-11631f45", model: "gemma4:cloud", deadline_ms: 2500, ms: 912, status: "ok", regex: [], uncertain: [], judge: [], codes: [], answered_first: true, verdict: "pass", dropped: false, reply_sha256: "5d1c2b3a4f5e6d7c8b9a0f1e2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1c" },
+  /** v1.2: a judge timeout counts as uncertain: the note is dropped (fail safe) */
+  leak_judge_timeout: { ...env(111, 421410), type: "leak_judge", turn: 13, note_id: "n7", decision: "shadow", judge_prompt_id: "lj1-11631f45", model: "gemma4:cloud", deadline_ms: 2500, ms: 2500, status: "timeout", regex: [], uncertain: [], judge: null, codes: [], answered_first: null, verdict: "uncertain", dropped: true, reply_sha256: "6e2d3c4b5a6f7e8d9c0b1a2f3e4d5c6b7a8f9e0d1c2b3a4f5e6d7c8b9a0f1e2d" },
+  note_dropped_leak_judge: { ...env(112, 421411), type: "note_dropped", turn: 13, note_id: "n7", reason: "leak_judge" },
   /** the spec's illustrative turn: S 230, H 1420, U 60, D 41 */
   context_share: { ...env(111, 413520), type: "context_share", turn: 12, note_id: "n5", opener: false, system: 230, history: 1420, history_echo: 310, user: 60, director: 41, total: 1751, share: 41 / 1751, dynamic_share: 41 / 1521, provider_prompt_tokens: 1788 },
   actor_turn: { ...env(112, 421400), type: "actor_turn", turn: 12, msg: "a12", text: "Give it 4 to 6 hours at room temperature, until it's domed and bubbly...", model: "gpt-oss:20b-cloud", genMs: 7880, firstTokenMs: 640, usage, finish_reason: "stop", opener_cue: false, note_id: "n5", actor_request_sha256: "0c7e1d2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d" },
