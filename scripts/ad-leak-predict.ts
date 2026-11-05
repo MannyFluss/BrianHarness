@@ -4,7 +4,8 @@
 // --judge worker: a live judge model behind the Worker's judge route (X-BH-Role: judge, model gemma4:cloud). REFUSED
 //   unless BH_JUDGE_TOKEN and BH_WORKER_URL are set AND --approved-token-use is passed (needs DirectorBot/Manny approval).
 //   The token is read from the environment only and never printed.
-// Refuses to run unless HEAD == --commit and the predictor files are clean, so the predictions are from the frozen code.
+// Refuses to run unless the predictor files at HEAD (and in the working tree) are byte-identical to --commit, so the
+// predictions come from the frozen code. Later commits that don't touch the predictor files are fine.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -24,7 +25,12 @@ if (!["positive", "negative"].includes(policy)) die("--uncertain must be positiv
 const root = new URL("..", import.meta.url).pathname;
 const git = (...x: string[]) => execFileSync("git", x, { cwd: root, encoding: "utf8" }).trim();
 const head = git("rev-parse", "HEAD");
-if (!head.startsWith(commit) || commit.length < 7) die(`HEAD ${head.slice(0, 12)} != --commit ${commit}`);
+let frozen = "";
+try { frozen = commit.length >= 7 ? git("rev-parse", "--verify", "--quiet", commit + "^{commit}") : ""; } catch { frozen = ""; }
+if (!frozen) die(`--commit ${commit} is not a commit in this repo`);
+// HEAD may be later than the frozen commit only if every predictor file is byte-identical to it
+const changed = frozen === head ? "" : git("diff", "--name-only", frozen, head, "--", ...PREDICTOR_PATHS);
+if (changed) die(`HEAD ${head.slice(0, 12)} != --commit ${commit}: predictor files differ:\n${changed}\n(run in a worktree at the frozen commit)`);
 const dirty = git("status", "--porcelain", "--", ...PREDICTOR_PATHS);
 if (dirty) die("predictor files are not clean at the frozen commit:\n" + dirty);
 
@@ -44,8 +50,8 @@ const preds = await predictAll(items, gate, policy);
 const out = preds.map((p) => JSON.stringify(p)).join("\n") + "\n";
 writeFileSync(outPath, out);
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
-const meta = { commit: head, leak_judge_prompt_id: LEAK_JUDGE_PROMPT_ID, judge, judge_model: LEAK_JUDGE_MODEL, uncertain_policy: policy, n: preds.length,
+const meta = { commit: frozen, head, leak_judge_prompt_id: LEAK_JUDGE_PROMPT_ID, judge, judge_model: LEAK_JUDGE_MODEL, uncertain_policy: policy, n: preds.length,
   inputs_sha256: sha(inputText), predictions_sha256: sha(out), answer_first_field: "answer_first = answer-first VIOLATION (same as answer_first_violation)", written_at: new Date().toISOString() };
 writeFileSync(outPath.replace(/\.jsonl$/, "") + ".meta.json", JSON.stringify(meta, null, 2) + "\n");
 const st = preds.reduce<Record<string, number>>((m, p) => ((m[p.verdict] = (m[p.verdict] ?? 0) + 1), m), {});
-console.log(`wrote ${preds.length} predictions -> ${outPath} (commit ${head.slice(0, 12)}, ${LEAK_JUDGE_PROMPT_ID}, judge=${judge}, uncertain=${policy}) verdicts ${JSON.stringify(st)}`);
+console.log(`wrote ${preds.length} predictions -> ${outPath} (frozen ${frozen.slice(0, 12)}, HEAD ${head.slice(0, 12)}, ${LEAK_JUDGE_PROMPT_ID}, judge=${judge}, uncertain=${policy}) verdicts ${JSON.stringify(st)}`);

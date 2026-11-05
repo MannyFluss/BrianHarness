@@ -23,14 +23,16 @@ test("frozen predictor: predictAll (mock judge path) == the E2 checks on the R4 
   writeFileSync(inp, items.slice(0, 5).map((it) => JSON.stringify({ id: it.id, unit: it.unit, context: it.context, note: it.note || null, text: it.text })).join("\n") + "\n");
   const cli = (...a: string[]) => spawnSync(process.execPath, ["--import", "tsx", join(root, "scripts/ad-leak-predict.ts"), ...a], { cwd: root, encoding: "utf8", env: { ...process.env, BH_JUDGE_TOKEN: "" } });
   const wrong = cli("--in", inp, "--out", out, "--commit", "0000000");
-  assert.equal(wrong.status, 2); assert.match(wrong.stderr, /HEAD .* != --commit/);
+  assert.equal(wrong.status, 2); assert.match(wrong.stderr, /not a commit/);
+  const old = cli("--in", inp, "--out", out, "--commit", "507e85c"); // E6: before the leak-judge predictor existed
+  assert.equal(old.status, 2); assert.match(old.stderr, /predictor files differ/);
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
   const live = cli("--in", inp, "--out", out, "--commit", head, "--judge", "worker");
   assert.equal(live.status, 2); assert.ok(!existsSync(out));
   const ok = cli("--in", inp, "--out", out, "--commit", head);
   if (ok.status === 0) {
     const meta = JSON.parse(readFileSync(out.replace(/\.jsonl$/, ".meta.json"), "utf8"));
-    assert.equal(meta.commit, head); assert.equal(meta.leak_judge_prompt_id, LEAK_JUDGE_PROMPT_ID); assert.equal(meta.judge, "mock");
+    assert.equal(meta.commit, head); assert.equal(meta.head, head); assert.equal(meta.leak_judge_prompt_id, LEAK_JUDGE_PROMPT_ID); assert.equal(meta.judge, "mock");
     assert.equal(readFileSync(out, "utf8").trim().split("\n").length, 5);
-  } else assert.match(ok.stderr, /not clean|!= --commit/, "only a dirty predictor tree may refuse: " + ok.stderr);
+  } else assert.match(ok.stderr, /not clean/, "only a dirty predictor tree may refuse: " + ok.stderr);
 });
