@@ -184,6 +184,8 @@ export class LeakGate {
   readonly model: string; readonly deadlineMs: number; readonly promptId = LEAK_JUDGE_PROMPT_ID;
   private now: () => number;
   readonly stats: GateStats = emptyGateStats();
+  /** the backend error of the last check (undefined when it answered); the freeze run reads it to stop on a Worker cap */
+  lastError: unknown = undefined;
   constructor(private o: LeakGateOptions) {
     this.model = o.model ?? LEAK_JUDGE_MODEL;
     assertJudgeModel(this.model, o.actorModel);
@@ -191,6 +193,7 @@ export class LeakGate {
     this.now = o.now ?? (() => (typeof performance !== "undefined" ? performance.now() : Date.now()));
   }
   async check(input: LeakInput): Promise<GateResult> {
+    this.lastError = undefined;
     const rs = regexStage(input);
     const decide = decideCodes(input, rs.uncertain);
     const t0 = this.now();
@@ -205,6 +208,7 @@ export class LeakGate {
       else { ans = parseJudgeAnswer(res.text, decide); if (!ans) status = "unparseable"; }
     } catch (err) {
       status = "error";
+      this.lastError = err;
       error = workerErrorHealth(err, "judge")?.code ?? undefined;
     } finally { clearTimeout(timer); }
     const ms = Math.round(this.now() - t0);

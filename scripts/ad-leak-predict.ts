@@ -15,7 +15,7 @@ import { WorkerChatBackend } from "../packages/core/src/actor-director/director.
 import type { AdChatBackend } from "../packages/core/src/actor-director/director.ts";
 
 const PREDICTOR_PATHS = ["packages/core/src/actor-director", "packages/core/src/ad-contracts", "scripts/ad-leak-predict.ts"];
-const ACTOR_MODEL = "gpt-oss:20b-cloud";
+import { ACTOR_MODEL } from "../packages/core/src/actor-director/session.ts";
 const a = process.argv.slice(2);
 const opt = (k: string, d?: string) => (a.includes(k) ? a[a.indexOf(k) + 1] : d);
 const die = (m: string, code = 2): never => { console.error("ad-leak-predict: " + m); process.exit(code); };
