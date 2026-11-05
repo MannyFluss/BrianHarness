@@ -46,8 +46,8 @@ Import from `@brianharness/core/actor-director/browser` and `apps/desktop/src/ad
 - `LiveAdController.open({ sessionType, arm, sessionId, userId, actor, director, counter, kv, tracker, screen,
   calibration, consent, blind?, now? })` + `<AdApp store={controller} />` runs the whole mode. For the counter, use
   `loadO200kBrowser()`; it reads `ad/o200k_base.tiktoken.gz` from the app bundle.
-- `SyntheticGazeTracker` (implements `GazeTracker`) works for the Simulator. `lookAt(x, y)` is the simulated gaze
-  during calibration.
+- `SyntheticGazeTracker` (implements `GazeTracker`) works for the Simulator. `lookAt({x, y})` (contract-v1.4) is the
+  simulated gaze during calibration; `setDistCm(d)` sets the head distance it reports.
 
 ## Not in v1 (E7 inputs)
 - `DecompressionStream("gzip")` needs Safari 16.4+ / iOS 16.4+, but the web build target is `safari15`. The iOS
@@ -61,9 +61,10 @@ Import from `@brianharness/core/actor-director/browser` and `apps/desktop/src/ad
 - **Simulator device model.** The simulator reports `iPad13,5` as a stand-in for `iPad13,4` (the study iPad). Calibration
   records are keyed per `deviceModel` + orientation, so a record saved in the simulator is never loaded on the device:
   the device uses its own `iPad13,4` key and asks for its own calibration. This is expected, not a bug.
-- **lookAt (contract v1.2, additive optional).** `GazeTracker.lookAt?(x, y)` is a simulator-only aid. On the device it
-  is absent or a no-op. Detect it with `typeof tracker.lookAt === "function"` (`simLookAt()` in core), never
-  `"lookAt" in tracker`, because the Capacitor plugin proxy has no `has` trap. Errors and rejections are swallowed.
+- **lookAt (contract v1.2; v1.4 signature).** `GazeTracker.lookAt?({x, y})` is a simulator-only aid. On the device it
+  is absent or a no-op. v1.4 (I5): one options object, and support is `getStatus().mode === "synthetic"`, not
+  `typeof` (a Capacitor proxy is "function" for every name). Reachable only in `AD_SIM_BUILD=1` builds
+  (`sim-look.ts`); core `simLookAt()` serves only the JS synthetic tracker. Errors and rejections are swallowed.
 - **Tracker label.** `session_start.gaze.tracker` comes from the tracker's start mode (`getStatus()`): synthetic gives
   "synthetic", camera gives arkit/mediapipe, no tracker gives "none". It no longer reads "synthetic" whenever a tracker exists.
 - **Demo URLs.** Demo snapshots and replays resolve against `document.baseURI` with the default `./ad-demo/`, so the
@@ -84,3 +85,29 @@ Import from `@brianharness/core/actor-director/browser` and `apps/desktop/src/ad
   In a reading window with occlusion, a paragraph with no uncovered gaze is left out of that turn's digest and
   baseline. It may have been read under the sheet, so it is never labelled "skipped". Covered time is excluded from dwell.
   An occlusion still open at the window's close is logged up to the close and continues into the next window.
+
+## E7 addendum: IOS Dev I5 notes (native 9fc02ce), contract-v1.4
+
+- **lookAt({x, y})** and the `mode === "synthetic"` capability: see the contract README, contract-v1.4.
+- **Demo distance.** LiveBoot's simulated reader (`liveDemoGaze`, `demoReadingPath({distCm})`, the hold samples) uses
+  the current calibration's `distCm` (iPhone ~30 cm; swapped with the calibration on rotation). 42 cm only when
+  uncalibrated, so the demo no longer trips "Recalibrate (distance changed 40%)" on iPhone.
+- **Orientation.** `apps/desktop/src/ad/orientation.ts` `watchOrientation`: screen.orientation change, matchMedia
+  (landscape/portrait), window orientationchange + resize, a 1 s poll of `screen.orientation.type` (or the legacy
+  `window.orientation` angle), and a native push (`status` event `orientation`, v1.4). One report per distinct
+  orientation + size. A web-observed change wins over an older native push.
+- **Blinded LiveBoot.** `sessionTypeFrom(q)` (`?type=blinded` or `__BH_AD__.session`) and `blindFrom(q)`
+  (`__BH_AD__.blind` or `?blind=<index>/<total>&scheduleHash=<sha256>`) pass `blind {index,total,scheduleHash}` to the
+  session, so session_start logs it (sealed:true, no arm in the main log). Missing or invalid: logged without it and
+  a console warning; never guessed.
+
+## Box worktree dependencies (node_modules)
+
+Until Nov 4 2026 18:05 PT the box worktree `/workspace/actor-director/wt` had a `node_modules` of symlinks: 302 top-level
+entries (and `.bin`) into `/workspace/eeg-harness-siwa/node_modules`, `@mediapipe` and `fflate` into
+`/workspace/ad-scratch/deps/node_modules`, and `@brianharness/*` as relative workspace links. A change to siwa's install
+would have changed this worktree's toolchain. It is now **self-contained**: a plain copy of those trees (687 MB, the
+`@brianharness/*` workspace links kept relative). siwa was only read, never modified. The old link farm is kept at
+`/workspace/actor-director/wt-node_modules.linked-backup` (a directory of symlinks) for rollback:
+`mv node_modules ../wt-node_modules.self && mv ../wt-node_modules.linked-backup node_modules`. Still never run a plain
+`npm install` here (it would rewrite the lockfile-driven tree; add a package by copying it in, as above).
