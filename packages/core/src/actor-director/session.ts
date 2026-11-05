@@ -67,6 +67,9 @@ export interface AdSessionOptions {
   judgeBackend?: AdChatBackend;
   /** tests only: a shorter judge deadline, capped at LEAK_JUDGE_DEADLINE_MS; the same value for every arm */
   judgeDeadlineMs?: number;
+  /** E7: the preflight (preflight.ts). Consulted synchronously before each Director call; a blocking code
+   *  (no token, Worker unreachable, route unverified, caps, kill switch) skips the call: chat continues without notes */
+  preflight?: { directorBlock(): HealthCode | null };
 }
 
 interface Pending {
@@ -188,6 +191,7 @@ export class ActorDirectorSession {
   /** start the Director call for the next Actor request (turn + 1). No-op before the opener, when disabled or capped. */
   beginDirector(): void {
     if (this.turn < 0 || this.pending?.turn === this.turn + 1 || !this.enabled() || this.directorCapped) return;
+    if (this.o.preflight?.directorBlock()) return; // the preflight logged the root cause when it changed
     const counter = (t: string) => this.tracker.tokens(t);
     const footprint = this.footprint();
     const d: DigestInput = { chat: this.chat, digest: this.digest, events: this.events, faceFrac: this.faceFrac, baselineParagraphs: this.baselineParagraphs, ledger: this.ledger, footprint };

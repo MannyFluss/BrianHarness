@@ -9,7 +9,7 @@
  */
 import {
   ActorDirectorSession, AdSessionLog, AdStorage, GazeSource, KeystrokeTimes, ParagraphVisibility, buildTabModel, calibrateBatch, calibrationStatus,
-  gazeOptionsFromCalibration, accuracyWords, layoutFromScreen, gazeRef,
+  gazeOptionsFromCalibration, accuracyWords, layoutFromScreen, gazeRef, type Preflight,
   type AdChatBackend, type CalibrationRecord, type LiveGaze, type ParaBox, type TabModel, type TokenCounter,
 } from "@brianharness/core/actor-director/browser";
 import type { Arm, AttentionEvent, BhAdEvent, DirectorOutput, GazeTracker, RailCode, ScreenInfo, SessionType } from "@brianharness/core/ad-contracts";
@@ -83,6 +83,10 @@ export interface LiveOptions {
   consent: { camera: boolean; rawGaze: boolean };
   blind?: { index: number; total: number; scheduleHash: string };
   now?: () => number;
+  /** E7: "synthetic" | "mediapipe" (Mac) | "arkit"; logged in session_start */
+  trackerKind?: "synthetic" | "mediapipe" | "arkit";
+  /** E7 preflight: started with the mode (then every 60 s), consulted before each Director call */
+  preflight?: Preflight;
 }
 
 export class LiveAdController implements AdStore {
@@ -120,7 +124,8 @@ export class LiveAdController implements AdStore {
     c.log = new AdSessionLog(storage, o.sessionId, o.sessionType, clock);
     c.session = new ActorDirectorSession({
       log: c.log, userId: o.userId, sessionType: o.sessionType, arm: o.arm, actor: o.actor, director: o.director, counter: o.counter, consent: o.consent,
-      gaze: { tracker: o.tracker ? "synthetic" : "none", permission: o.consent.camera ? "granted" : "denied" },
+      gaze: { tracker: o.tracker ? o.trackerKind ?? "synthetic" : "none", permission: o.consent.camera ? "granted" : "denied" },
+      ...(o.preflight ? { preflight: o.preflight } : {}),
       device: { deviceModel: o.screen.deviceModel, platform: o.screen.platform, orientation: o.screen.orientation, widthPt: o.screen.widthPt, heightPt: o.screen.heightPt },
       ...(o.blind ? { blind: o.blind } : {}),
     });
@@ -134,6 +139,7 @@ export class LiveAdController implements AdStore {
       });
     }
     c.session.start();
+    if (o.preflight) await o.preflight.start();
     c.busy = true; c.emit();
     const text = await c.session.opener();
     c.chat.push({ id: "a0", role: "assistant", text });
@@ -141,7 +147,9 @@ export class LiveAdController implements AdStore {
     c.poll = setInterval(() => c.tick(), 100);
     return c;
   }
-  dispose() { if (this.poll) clearInterval(this.poll); }
+  dispose() { if (this.poll) clearInterval(this.poll); this.o.preflight?.stop(); }
+  /** E7: the preflight's status line ("code: plain words"), "" when every check passes */
+  get healthLine(): string { return this.o.preflight?.lastReport?.statusLine ?? ""; }
 
   // arrow properties: React calls these unbound (useSyncExternalStore, the 10 Hz pull)
   subscribe = (cb: () => void) => { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; };
