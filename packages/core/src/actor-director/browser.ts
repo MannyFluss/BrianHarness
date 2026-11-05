@@ -33,3 +33,4 @@ export * from "./sim-session.js";
 export * from "./leak-judge.js";
 export * from "./leak-predict.js";
 export * from "./preflight.js";
+export * from "./replay.js";

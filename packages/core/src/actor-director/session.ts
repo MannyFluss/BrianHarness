@@ -70,6 +70,9 @@ export interface AdSessionOptions {
   /** E7: the preflight (preflight.ts). Consulted synchronously before each Director call; a blocking code
    *  (no token, Worker unreachable, route unverified, caps, kill switch) skips the call: chat continues without notes */
   preflight?: { directorBlock(): HealthCode | null };
+  /** E7 replay only: a candidate Director system prompt (id "dirN-<sha8>"; dir0 = an unversioned candidate).
+   *  session_start logs its id and assembled sha8; default = the frozen prompt */
+  directorPrompt?: { id: string; assemble: (withExamples: boolean) => string };
 }
 
 interface Pending {
@@ -139,8 +142,8 @@ export class ActorDirectorSession {
     this.emit({
       type: "session_start", profile: "actor-director", contract: "contract-v1.2", userId: this.o.userId, session_type: this.o.sessionType,
       tab: tabVisible ? "visible" : "hidden", arm: this.o.arm, p_inject: this.pInject, ...(tabVisible ? {} : { sealed: true as const, ...(this.o.blind ? { blind: this.o.blind } : {}) }),
-      actor_prompt_id: ACTOR_PROMPT_ID, director_prompt_id: DIRECTOR_PROMPT_ID, director_format_id: DIRECTOR_FORMAT_SLOT.id,
-      director_examples_id: DIRECTOR_EXAMPLES_SLOT.id, director_assembled_sha8: DIRECTOR_ASSEMBLED_SHA8, pipeline_version: PIPELINE_VERSION,
+      actor_prompt_id: ACTOR_PROMPT_ID, director_prompt_id: this.o.directorPrompt?.id ?? DIRECTOR_PROMPT_ID, director_format_id: DIRECTOR_FORMAT_SLOT.id,
+      director_examples_id: DIRECTOR_EXAMPLES_SLOT.id, director_assembled_sha8: this.o.directorPrompt ? sha8(this.o.directorPrompt.assemble(true)) : DIRECTOR_ASSEMBLED_SHA8, pipeline_version: PIPELINE_VERSION,
       tokenizer: "o200k_base", models: this.models, consent: this.o.consent,
       gaze: this.o.gaze ?? { tracker: "none", permission: "prompt" },
       device: this.o.device ?? { deviceModel: "sim", platform: "web", orientation: "portrait", widthPt: 390, heightPt: 844 },
@@ -207,7 +210,7 @@ export class ActorDirectorSession {
       input = renderDirectorInput(d, drop, keepLedger);
       bySlot = slotTokens(counter, input, withExamples);
     }
-    const system = assembleDirectorSystem(withExamples);
+    const system = (this.o.directorPrompt?.assemble ?? assembleDirectorSystem)(withExamples);
     const p: Pending = {
       turn: this.turn + 1, startedMono: this.mono(), input, inputTokens: sumSlots(bySlot), bySlot, assembledSha8: sha8(system),
       invalid: invalidEventIds(d), footprint, settled: null,

@@ -9,7 +9,7 @@ import type { BhAdEvent, GazeReplayFile, SessionType, Arm } from "../ad-contract
 import { baselineUpdate, type Anchor, type Aoi, type Layout, type RawSample } from "./gaze-ref.js";
 import { GazeSource } from "./gaze-stream.js";
 import { streamPpd } from "./gaze-replay.js";
-import { MockAdBackend, type AdChatRequest } from "./director.js";
+import { MockAdBackend, type AdChatBackend, type AdChatRequest } from "./director.js";
 import { ActorDirectorSession } from "./session.js";
 import { AdSessionLog, ManualClock } from "./log.js";
 import { AdStorage } from "./storage.js";
@@ -34,6 +34,12 @@ export interface SimOptions {
   seed?: number;
   /** calibration distance (ruling 3); null = from the samples before each reading window */
   distCm?: number | null;
+  /** E7 replay: backends and switches (defaults: simActor / simDirector, Director on, the frozen prompt) */
+  actor?: AdChatBackend;
+  director?: AdChatBackend;
+  judgeBackend?: AdChatBackend;
+  directorEnabled?: () => boolean;
+  directorPrompt?: { id: string; assemble: (withExamples: boolean) => string };
 }
 export interface SimChatMessage { id: string; role: "user" | "assistant"; text: string; mono: number }
 export interface SimResult {
@@ -109,10 +115,12 @@ export async function runSimSession(o: SimOptions): Promise<SimResult> {
   const screen = r0.file.screen;
   const s = new ActorDirectorSession({
     log, userId: "sim", sessionType, arm: o.arm ?? "on", ...(o.pInject !== undefined ? { pInject: o.pInject } : {}),
-    actor: simActor(o.replays), director: simDirector(), counter: o.counter, consent: { camera: true, rawGaze: false }, seed: o.seed ?? 7,
+    actor: o.actor ?? simActor(o.replays), director: o.director ?? simDirector(), counter: o.counter, consent: { camera: true, rawGaze: false }, seed: o.seed ?? 7,
     gaze: { tracker: "synthetic", permission: "granted" },
     device: { deviceModel: screen.deviceModel, platform: screen.platform, orientation: screen.orientation, widthPt: screen.widthPt, heightPt: screen.heightPt },
     sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 1))),
+    ...(o.judgeBackend ? { judgeBackend: o.judgeBackend } : {}), ...(o.directorEnabled ? { directorEnabled: o.directorEnabled } : {}),
+    ...(o.directorPrompt ? { directorPrompt: o.directorPrompt } : {}),
     ...(sessionType === "blinded" ? { blind: { index: 1, total: 4, scheduleHash: "0".repeat(64) } } : {}),
   });
   const chat: SimChatMessage[] = [];
