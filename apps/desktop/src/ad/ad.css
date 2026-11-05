@@ -1,0 +1,21 @@
+/* E6: Director tab motion. Everything here has a Reduce Motion fallback (no travel, no pulse scale). */
+.ad-fresh { background: color-mix(in srgb, var(--signal) 12%, transparent); transition: background-color 600ms; }
+.ad-pulse { animation: ad-pulse 1.6s ease-in-out infinite; }
+@keyframes ad-pulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal) 0%, transparent); } 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 35%, transparent); } }
+.ad-travel .ad-path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ad-draw 700ms ease-out forwards, ad-out 400ms 900ms ease-in forwards; }
+.ad-travel .ad-runner { offset-distance: 0%; animation: ad-run 700ms ease-out forwards, ad-out 400ms 900ms ease-in forwards; }
+.ad-fade .ad-path { opacity: 0; animation: ad-in 250ms ease-out forwards, ad-out 400ms 900ms ease-in forwards; }
+.ad-hold .ad-path, .ad-hold .ad-runner { animation: none !important; opacity: 1; stroke-dashoffset: 0; offset-distance: 70%; }
+@keyframes ad-draw { to { stroke-dashoffset: 0; } }
+@keyframes ad-run { to { offset-distance: 100%; } }
+@keyframes ad-in { to { opacity: 1; } }
+@keyframes ad-out { to { opacity: 0; } }
+.ad-composer-pulse { box-shadow: 0 0 0 2px color-mix(in srgb, var(--signal) 55%, transparent); border-radius: 16px; transition: box-shadow 300ms; }
+.ad-dot { animation: ad-shrink 1.5s ease-in forwards; }
+@keyframes ad-shrink { from { transform: scale(1.6); opacity: .6; } to { transform: scale(.5); opacity: 1; } }
+.ad-mark { position: absolute; left: -18px; top: 4px; width: 6px; height: 6px; border-radius: 9999px; background: var(--signal); }
+@media (prefers-reduced-motion: reduce) {
+  .ad-pulse, .ad-dot { animation: none; }
+  .ad-travel .ad-path, .ad-travel .ad-runner { animation: ad-in 250ms ease-out forwards, ad-out 400ms 900ms ease-in forwards; stroke-dashoffset: 0; offset-distance: 100%; }
+  .ad-swipe, .ad-fresh { transition: none; }
+}
