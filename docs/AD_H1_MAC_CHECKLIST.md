@@ -13,9 +13,9 @@ built-in simulators, and the demo replies are bundled.
 
 | | |
 |---|---|
-| File (on the box) | `/workspace/actor-director/release/E7/BrianHarness Director-0.1.0-arm64-mac.zip` |
-| sha256 | `f4a50c67a75a587753d262f70c57466bbe93d992b630a3a56ef5d9d6dcda7aa5` (also in `SHA256SUMS` next to it) |
-| Built from | branch `actor-director`, `npm run dist:ad-mac` in apps/desktop (Electron 45.2.1, arm64, **unsigned**) |
+| File (on the box) | `/workspace/actor-director/release/E7b/BrianHarness Director-0.1.0-arm64-mac.zip` |
+| sha256 | `54d1ab40d796cccd71962be26c9ff135ce4e1eb38f75b375e5163ea7789346ba` (also in `SHA256SUMS` next to it). **E7b**, Nov 4 2026 18:08 PT; replaces the E7 zip `f4a50c67…` (that one has no `network.isolation` check: do not use it) |
+| Built from | branch `actor-director` at `3f2139b` (contract-v1.4), `npm run dist:ad-mac` in apps/desktop (Electron 45.2.1, arm64, **unsigned**). The asar holds `electron/ad-main.mjs`, `electron/ad-network.mjs` (the `net.request_escaped` verdict), `electron/ad-preload.cjs`, `dist-ad/` (device build: `check_device_build` clean) |
 | Bundled model | `Contents/Resources/gaze/face_landmarker.task`, 3,758,596 B, sha256 `64184e229b26…0bc9ff` (verified again in the worker before loading) |
 | Bundled wasm | `vision_wasm_module_internal.js/.wasm` from @mediapipe/tasks-vision 1.2.2 |
 
@@ -25,7 +25,7 @@ Copy the zip to the Mac, e.g. into `~/Downloads`.
 
 ```sh
 cd ~/Downloads
-shasum -a 256 "BrianHarness Director-0.1.0-arm64-mac.zip"      # must print f4a50c67a75a587753d262f70c57466bbe93d992b630a3a56ef5d9d6dcda7aa5
+shasum -a 256 "BrianHarness Director-0.1.0-arm64-mac.zip"      # must print 54d1ab40d796cccd71962be26c9ff135ce4e1eb38f75b375e5163ea7789346ba
 mkdir -p ~/BH-H1 && ditto -x -k "BrianHarness Director-0.1.0-arm64-mac.zip" ~/BH-H1/
 APP=~/BH-H1/"BrianHarness Director.app"
 xattr -cr "$APP"                                  # drop the download quarantine
@@ -68,7 +68,9 @@ the report says whether calibration finished.
 
 ## 4. Send back
 
-1. `~/Desktop/h1-A.json` (plus `h1-A2.json` / `h1-B.json` if run). These are plain JSON with no frames, images or
+1. `~/Desktop/h1-A.json` (plus `h1-A2.json` / `h1-B.json` if run). Also quote, per report: `network.code`, `network.ok`,
+   `network.requests`, `network.workerBlocked`, `done.noEscape` and `done.pilotFail` (the terminal's last `[h1] done-when`
+   line now ends with `pilot preflight ok` or `pilot preflight FAIL net.request_escaped`). These are plain JSON with no frames, images or
    personal data: only counts, timings, the network log and health codes.
 2. Whether the camera prompt appeared, and what was clicked.
 3. The `sw_vers` / CPU / `hw.memsize` lines, on power or battery, and the optional `lsof`/`ps` outputs.
@@ -84,9 +86,10 @@ the report says whether calibration finished.
 | `network.workerBlocked` | URLs the gaze worker's fetch guard refused before they reached the network. **Expect** `https://odml.pa.googleapis.com/v1/log` (see the note below) |
 | `fps` | per-2 s windows after the first 5 (warm-up), with `median/p10/p90`, frames, faces, `inferMsMean` |
 | `cpu`, `memory` | all app processes summed, sampled every 2 s after the first 10 s (CPU 100 = one core, memory = working set MB) |
-| `health` | every gaze health code seen in the session |
+| `health` | every gaze health code seen in the session, plus the network.isolation code (`net.worker_blocked` or `net.request_escaped`) |
 | `trackerErrors`, `errors` | the worker/tracker error text, and renderer console errors and warnings |
-| `done` | `fps25`, `cpuMem`, `noTrackerNetwork`, and `failures[]` (each with a `cause`) |
+| `network.code`, `network.ok` | v1.3 **network.isolation** verdict: `net.worker_blocked` (`ok:true`, informational: the worker's guard stopped the attempts), `net.request_escaped` (`ok:false`: a request got past that block to a non-bundle origin; **the pilot preflight FAILS**), or `null` (nothing attempted) |
+| `done` | `fps25`, `cpuMem`, `noTrackerNetwork`, `noEscape` (= `network.ok`), `pilotFail` (`"net.request_escaped"` or `null`), and `failures[]` (each with a `cause`; an escape has `code: "net.request_escaped"`) |
 
 **About the telemetry:** @mediapipe/tasks-vision 1.2.2 has a built-in usage logger. About 60 s after start it tries to
 POST to `https://odml.pa.googleapis.com/v1/log`, and there is no opt-out. The worker refuses it in-process, and it
@@ -104,7 +107,7 @@ would also be stopped by the CSP and the shell's network cancel. So `network.wor
 | `gaze.low_quality` / "face found in x/y frames" | Nobody in view, the face is partly out of frame, it's too dark or backlit, or calibration fit fewer than 4 dots | Sit centred about 50 cm away, light the face from the front, and rerun |
 | `gaze.calibration_stale` | No stored calibration for this orientation (expected on Run A, which is uncalibrated), or the window was resized | Expected on Run A. Run B calibrates |
 | `fps median < 25` | `inferMsMean` is high (above 35 ms suggests CPU delegate or thermal throttling), `delegate` = CPU (GPU init failed), or the Mac is on battery or in Low Power Mode | Send `model.delegate`, `inferMsMean`, and power state. Close other apps |
-| `network.requests > 0` | Something other than the bundle asked for the network (`network.log` lists the URLs, all cancelled) | Send `network.log`. Counts as an H1 failure until explained |
+| `net.request_escaped` / `network.requests > 0` / `done.pilotFail` set | A request got past the gaze worker's block to a non-bundle origin (`network.log` lists the URLs; the shell cancelled them all). The pilot preflight FAILS and the Director is paused in-session | Send `network.log`, `network.code` and `done.failures`. Counts as an H1 failure until explained |
 | Blank window or Gatekeeper "damaged" dialog | Quarantine is still set, or the ad-hoc sign step was skipped | Rerun `xattr -cr` and `codesign --force --deep -s -` |
 
 ## 7. Reference: box smoke (not H1)
