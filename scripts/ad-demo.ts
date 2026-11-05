@@ -52,7 +52,7 @@ for (const [dev, names] of Object.entries(devs)) {
   const good = await calibrate(SCREENS[dev]!, false), bad = await calibrate(SCREENS[dev]!, true);
   W(`cal-${dev}-good.json`, good); W(`cal-${dev}-bad.json`, bad);
   const sim = await runSimSession({ turns: 20, counter, replays, kv: new MemoryKV(), sessionId: `demo-${dev}`, distCm: good.record.distCm });
-  const L = sim.lines;
+  const L = sim.tabLines; // v1.3: the demo files hold only what the tab may read (no leak_judge)
   // N: the latest request turn whose note was injected, with at least 8 earlier turns of history
   const inj = L.filter((l): l is Extract<BhAdEvent, { type: "injection" }> => l.type === "injection" && l.decision === "inject" && l.turn >= 9 && l.turn <= 14);
   const N = inj[inj.length - 1]!.turn;

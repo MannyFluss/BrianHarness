@@ -63,7 +63,8 @@
           "enum": [
             "contract-v1",
             "contract-v1.1",
-            "contract-v1.2"
+            "contract-v1.2",
+            "contract-v1.3"
           ]
         },
         "userId": {
@@ -1678,6 +1679,8 @@
             "gaze.low_quality",
             "gaze.no_consent",
             "net.worker_unreachable",
+            "net.worker_blocked",
+            "net.request_escaped",
             "auth.no_token",
             "model.route_unverified",
             "model.empty_completion",
@@ -1960,7 +1963,8 @@
             "late",
             "superseded",
             "session_end",
-            "leak_judge"
+            "leak_judge",
+            "withheld"
           ]
         }
       }
@@ -2117,6 +2121,19 @@
             }
           ]
         },
+        "answer_first_violation": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "const": "uncertain"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "verdict": {
           "type": "string",
           "enum": [
@@ -2153,6 +2170,8 @@
             "gaze.low_quality",
             "gaze.no_consent",
             "net.worker_unreachable",
+            "net.worker_blocked",
+            "net.request_escaped",
             "auth.no_token",
             "model.route_unverified",
             "model.empty_completion",
@@ -2442,6 +2461,8 @@
             "gaze.low_quality",
             "gaze.no_consent",
             "net.worker_unreachable",
+            "net.worker_blocked",
+            "net.request_escaped",
             "auth.no_token",
             "model.route_unverified",
             "model.empty_completion",
@@ -2842,7 +2863,8 @@
             "upload",
             "director.deadline",
             "director.enabled",
-            "director.leak_breaker"
+            "director.leak_breaker",
+            "network.isolation"
           ]
         },
         "ok": {
@@ -2862,6 +2884,8 @@
                 "gaze.low_quality",
                 "gaze.no_consent",
                 "net.worker_unreachable",
+                "net.worker_blocked",
+                "net.request_escaped",
                 "auth.no_token",
                 "model.route_unverified",
                 "model.empty_completion",
@@ -3379,6 +3403,8 @@
         "gaze.low_quality",
         "gaze.no_consent",
         "net.worker_unreachable",
+        "net.worker_blocked",
+        "net.request_escaped",
         "auth.no_token",
         "model.route_unverified",
         "model.empty_completion",

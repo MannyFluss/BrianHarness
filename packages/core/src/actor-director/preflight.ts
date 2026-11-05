@@ -17,7 +17,7 @@ import { ROLE_HEADER } from "../ad-contracts/index.js";
 
 export type HealthLine = Extract<BhAdEventBody, { type: "health" }>;
 export type ProbeResult =
-  | { ok: true; detail?: string }
+  | { ok: true; detail?: string; /** v1.3: an informational code on an ok line (net.worker_blocked) */ code?: HealthCode }
   | { ok: false; code: HealthCode; detail?: string; http_status?: number; worker_code?: WorkerErrorCode; role?: Role }
   | { skip: true };
 export interface Probe { check: HealthCheck; run(): ProbeResult | Promise<ProbeResult> }
@@ -30,8 +30,10 @@ export const PREFLIGHT_PROBE_TIMEOUT_MS = 4_000;
 /** codes that stop the Director call (chat continues without notes); everything else degrades gaze only */
 export const DIRECTOR_BLOCKING: ReadonlySet<HealthCode> = new Set<HealthCode>([
   "auth.no_token", "net.worker_unreachable", "model.route_unverified", "budget.director_cap", "budget.daily_cap_device",
-  "budget.daily_cap_global", "director.kill_switch",
+  "budget.daily_cap_global", "director.kill_switch", "net.request_escaped",
 ]);
+/** v1.3: codes that FAIL the pilot preflight (PreflightReport.pilotFail): the run is not a valid pilot run */
+export const PILOT_FAILING: ReadonlySet<HealthCode> = new Set<HealthCode>(["net.request_escaped"]);
 
 const SECRETISH = /\b(bhd_[A-Za-z0-9_-]{4,}|sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_.-]+)/g;
 export const scrubDetail = (s: string | undefined) => (s === undefined ? undefined : s.replace(SECRETISH, "[redacted]").slice(0, 200));
@@ -65,6 +67,8 @@ export function healthWords(code: HealthCode, detail?: string, http?: number): s
     case "director.timeout": return "The Director was late; that turn went without a note";
     case "director.kill_switch": return "Director switched off; chat continues without notes";
     case "director.leak_breaker": return "Notes paused for this session (leak breaker); chat continues without notes";
+    case "net.worker_blocked": return `The face tracker tried the network and was blocked${detail ? ` (${detail})` : ""}; nothing left the device`;
+    case "net.request_escaped": return `A request got past the tracker's network block${detail ? ` (${detail})` : ""}; pilot preflight FAILED; Director paused, chat continues without notes`;
   }
 }
 
@@ -115,6 +119,25 @@ export const trackerProbe = (get: () => { running: boolean; lastSampleAgoMs: num
 export const tokenProbe = (hasToken: () => boolean): Probe => ({
   check: "auth.device_token", run: () => (hasToken() ? { ok: true } : { ok: false, code: "auth.no_token" }),
 });
+/**
+ * v1.3 (E7): the Mac shell's no-network rule as a health check. workerBlocked = URLs the gaze Web Worker's fetch block
+ * stopped (informational: ok:true, code net.worker_blocked); requests = requests the shell saw at the session layer,
+ * i.e. that got PAST the Worker block. Any request to a non-bundle origin -> net.request_escaped (fail; pilot fails).
+ */
+export const BUNDLE_ORIGIN = "bh-app://app";
+export interface NetworkIsolationState { workerBlocked: readonly string[]; requests: ReadonlyArray<{ url: string }> }
+const originOf = (u: string) => { try { const x = new URL(u); return x.protocol === "bh-app:" ? `bh-app://${x.host}` : x.origin; } catch { return u.split("/").slice(0, 3).join("/"); } };
+export function networkIsolationResult(s: NetworkIsolationState, bundleOrigin = BUNDLE_ORIGIN): ProbeResult {
+  const escaped = s.requests.filter((r) => originOf(r.url) !== bundleOrigin);
+  if (escaped.length) return { ok: false, code: "net.request_escaped", detail: `${escaped.length} request(s): ${[...new Set(escaped.map((r) => originOf(r.url)))].slice(0, 3).join(", ")}` };
+  if (s.workerBlocked.length) return { ok: true, code: "net.worker_blocked", detail: `${s.workerBlocked.length} blocked: ${[...new Set(s.workerBlocked.map(originOf))].slice(0, 3).join(", ")}` };
+  return { ok: true };
+}
+export const networkIsolationProbe = (get: () => NetworkIsolationState | null | Promise<NetworkIsolationState | null>, bundleOrigin = BUNDLE_ORIGIN): Probe => ({
+  check: "network.isolation",
+  async run() { const st = await get(); return st ? networkIsolationResult(st, bundleOrigin) : { skip: true }; },
+});
+
 /** passive: the last reply shape the session saw (model.empty_completion | model.length_cutoff | director.schema_invalid) */
 export const replyShapeProbe = (last: () => HealthCode | null | undefined): Probe => ({
   check: "upstream.reply_shape", run: () => { const c = last(); return c === undefined ? { skip: true } : c ? { ok: false, code: c } : { ok: true }; },
@@ -182,6 +205,8 @@ export interface PreflightReport {
   statusLine: string;
   /** the blocking code that pauses the Director, or null */
   directorBlock: HealthCode | null;
+  /** v1.3: the first PILOT_FAILING code (the pilot preflight FAILS), or null */
+  pilotFail: HealthCode | null;
 }
 
 export class Preflight {
@@ -220,19 +245,20 @@ export class Preflight {
       results.push({ check, ...r });
       if ("skip" in r) continue;
       const line: HealthLine = r.ok
-        ? { type: "health", check, ok: true, code: null, ...(r.detail ? { detail: scrubDetail(r.detail)! } : {}) }
+        ? { type: "health", check, ok: true, code: r.code ?? null, ...(r.detail ? { detail: scrubDetail(r.detail)! } : {}) }
         : { type: "health", check, ok: false, code: r.code, ...(r.detail ? { detail: scrubDetail(r.detail)! } : {}), ...(r.http_status ? { http_status: r.http_status } : {}), ...(r.worker_code ? { worker_code: r.worker_code } : {}), ...(r.role ? { role: r.role } : {}) };
       if (!r.ok) failures.push(line);
-      const key = r.ok ? "ok" : r.code;
+      const key = r.ok ? (r.code ? `ok:${r.code}` : "ok") : r.code;
       const prev = this.last.get(check);
-      if (reason === "start" || (prev !== undefined && prev !== key) || (prev === undefined && !r.ok)) this.o.emit(line);
+      if (reason === "start" || (prev !== undefined && prev !== key) || (prev === undefined && (!r.ok || !!r.code))) this.o.emit(line);
       this.last.set(check, key);
     }
     const ext = this.o.external?.() ?? null;
     const block = failures.find((f) => f.code && DIRECTOR_BLOCKING.has(f.code))?.code ?? (ext && DIRECTOR_BLOCKING.has(ext) ? ext : null);
     const first = failures.find((f) => f.code && DIRECTOR_BLOCKING.has(f.code)) ?? failures[0];
     const statusLine = first?.code ? `${first.code}: ${healthWords(first.code, first.detail, first.http_status)}` : "";
-    this.report = { reason, at: this.o.now(), results, failures, statusLine, directorBlock: block ?? null };
+    const pilotFail = failures.find((f) => f.code && PILOT_FAILING.has(f.code))?.code ?? null;
+    this.report = { reason, at: this.o.now(), results, failures, statusLine, directorBlock: block ?? null, pilotFail };
     return this.report;
   }
 
@@ -272,6 +298,7 @@ function probeCrashCode(check: HealthCheck): HealthCode {
     case "director.enabled": return "director.kill_switch";
     case "director.leak_breaker": return "director.leak_breaker";
     case "upstream.reply_shape": return "model.empty_completion";
+    case "network.isolation": return "net.request_escaped"; // fail closed: an unproven no-network rule fails the pilot
     default: return "net.worker_unreachable";
   }
 }

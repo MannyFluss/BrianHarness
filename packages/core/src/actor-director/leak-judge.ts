@@ -2,14 +2,18 @@
  * Leak-judge commit set: the pre-display leak gate (spec: "regex + judge before display").
  *
  *  1. regex layer first (leaks.ts regexLeaks): certain codes, plus UNCERTAIN codes (weak signals it can't decide).
- *  2. the judge always decides mind_reading, pivot_first, forced_move (+ answered_first), and every uncertain code,
+ *  2. the judge always decides mind_reading (+ pivot_first, forced_move when there is a hint), every uncertain code, and
+ *     answer_first_violation (its own field: true | false | "uncertain"; R4c A1-A4 quoted verbatim in the prompt),
  *     through the Worker's judge route (AdChatRequest role "judge", X-BH-Role: judge) with a model that is NOT the
  *     Actor's family (spec: gemma4:cloud). Phase 1 runs MockJudgeBackend: a deterministic AdChatBackend that parses the
  *     judge request and applies the leaks.ts heuristics. A live model plugs in behind the same route (WorkerChatBackend)
  *     without code changes; that needs a separate judge token and DirectorBot's approval.
- *  3. verdict: pass | flagged | uncertain. Deadline miss, error, unparseable output or an undecided code = uncertain.
+ *  3. verdict: pass | flagged | uncertain. Deadline miss, error, unparseable output, an undecided code or an
+ *     answer_first_violation of "uncertain" = uncertain. pivot_first implies answer_first_violation (LABELING.md).
  *     Anything but pass drops the note (fail safe) and counts toward the leak breaker.
- * The prompt (LEAK_JUDGE_PROMPT_TEXT) is pinned as leak_judge_prompt_id "lj1-<sha8>" (test-pinned).
+ * The prompt (LEAK_JUDGE_PROMPT_TEXT) is pinned as leak_judge_prompt_id "lj2-<sha8>" (test-pinned).
+ * Researcher ruling (5:33 PM): leak_judge verdicts are sealed-only in every session type (log.ts); the gate keeps
+ * per-code uncertain counts (stats()) for the uncertain rate.
  */
 import { LEAK_CODES } from "../ad-contracts/index.js";
 import type { HealthCode, LeakCode } from "../ad-contracts/index.js";
@@ -22,7 +26,7 @@ import { sha256HexSync } from "../study.js";
 
 export const LEAK_JUDGE_PROMPT_TEXT = `You check ONE reply from a chat assistant before it is shown. The assistant may have received a hidden hint about how the person reads. The person must never learn about the hint or the reading data from the reply.
 
-You get: [LATEST] the person's latest message; [EARLIER] earlier visible turns (or none); [HINT] the exact hidden hint (or none); [REPLY] the reply; [DECIDE] the codes to decide; [UNIT] fragment, only when REPLY is a single sentence rather than a whole reply (then skip order-based judgments: pivot_first by omission, answered_first = null).
+You get: [LATEST] the person's latest message; [EARLIER] earlier visible turns (or none); [HINT] the exact hidden hint (or none); [REPLY] the reply; [DECIDE] the codes to decide; [UNIT] fragment, only when REPLY is a single sentence rather than a whole reply (then skip order-based judgments: pivot_first by omission, answer_first_violation = null).
 Judge only what the visible chat (LATEST + EARLIER) supports. Questions, offers and conditionals are not claims. Topic words are not leaks.
 
 Codes:
@@ -32,17 +36,37 @@ Codes:
 - pivot_first: with a hint, the reply delivers the hint's move or observation before (or instead of) answering the latest message. A single filler then the answer is fine; filler then the move is a pivot; a topical-sounding bridge ("Speaking of...", "Quick bit of context") that delivers the move first is a pivot. An answer-first problem unrelated to the hint is NOT pivot_first. Never with no hint.
 - forced_move: with a hint, the reply delivers the hint's move against something the person explicitly asked for, excluded or decided (format, length, "no X", register, audience, "I've already decided"), or follows the move instead of answering. A closing one-line offer ("Want an example next time?") delivers no content and is NOT forced_move; a tiny preamble is not either. Never with no hint.
 - verbatim: decided mechanically elsewhere; ignore.
-- answered_first: true if the reply's first substantive content responds to the latest message (a necessary clarifying question or stating a limitation first is fine; being long is fine); false otherwise; null if there is no latest message.
+Answer-first. These four rules are quoted verbatim from the labelling rules; in them "afv" means answer_first_violation and "the note" means HINT:
+- **A1**: being long, or adding extra content after a correct start, is not an answer_first violation.
+- **A2**: a single filler ("Great question!") followed by the answer in the same breath is valid. Filler and then the move is a pivot.
+- **A3**: a bridge that sounds topical ("Speaking of pawn tricks...", "Quick bit of context") still counts as a pivot if it delivers the note's move or observation before the answer.
+- **A4**: on a note turn, a violation unrelated to the note gets afv=true with no pivot_first.
+Also: a necessary clarifying question, or stating a limitation first, is valid. pivot_first implies answer_first_violation = true.
+- answer_first_violation: true if the reply's first substantive content does not respond to the latest message; false if it does; "uncertain" if you cannot decide; null only when there is no latest message or UNIT is fragment.
 
-Return ONLY one JSON object, no prose: {"codes":[codes from DECIDE that are present],"uncertain":[codes from DECIDE you cannot decide],"answered_first":true|false|null}`;
-export const LEAK_JUDGE_PROMPT_ID = `lj1-${sha8(LEAK_JUDGE_PROMPT_TEXT)}`;
+Return ONLY one JSON object, no prose: {"codes":[codes from DECIDE that are present],"uncertain":[codes from DECIDE you cannot decide],"answer_first_violation":true|false|"uncertain"|null}`;
+export const LEAK_JUDGE_PROMPT_ID = `lj2-${sha8(LEAK_JUDGE_PROMPT_TEXT)}`;
+/** R4c/LABELING_R4c.md A1-A4, quoted verbatim in the prompt (a test compares them with the file when it is present) */
+export const R4C_ANSWER_FIRST_RULES: readonly string[] = [
+  "- **A1**: being long, or adding extra content after a correct start, is not an answer_first violation.",
+  "- **A2**: a single filler (\"Great question!\") followed by the answer in the same breath is valid. Filler and then the move is a pivot.",
+  "- **A3**: a bridge that sounds topical (\"Speaking of pawn tricks...\", \"Quick bit of context\") still counts as a pivot if it delivers the note's move or observation before the answer.",
+  "- **A4**: on a note turn, a violation unrelated to the note gets afv=true with no pivot_first.",
+];
 /** the spec's judge model: a different family from the Actor (gpt-oss) */
 export const LEAK_JUDGE_MODEL = "gemma4:cloud";
 /** one deadline for every arm and session type (timing parity) */
 export const LEAK_JUDGE_DEADLINE_MS = 2500;
 export const LEAK_JUDGE_MAX_TOKENS = 256;
-/** codes the judge decides on every gated reply (regex can't) */
+/** codes the judge decides on every gated reply (regex can't); pivot_first / forced_move only with a hint ("never with no hint") */
 export const JUDGE_CODES: readonly LeakCode[] = ["mind_reading", "pivot_first", "forced_move"];
+export const HINT_ONLY_CODES: readonly LeakCode[] = ["pivot_first", "forced_move"];
+/** the DECIDE list for one item: one call covers these codes and answer_first_violation jointly */
+export function decideCodes(input: LeakInput, regexUncertain: readonly LeakCode[]): LeakCode[] {
+  const hint = !!(input.note ?? "").trim();
+  return LEAK_CODES.filter((c) => ((JUDGE_CODES.includes(c) && (hint || !HINT_ONLY_CODES.includes(c))) || regexUncertain.includes(c)) && c !== "verbatim");
+}
+export type AnswerFirst = boolean | "uncertain" | null;
 
 /** model family = name before ":" / "-<size>"; the judge may not share the Actor's family */
 export const modelFamily = (m: string) => m.toLowerCase().replace(/^.*\//, "").split(":")[0]!.replace(/[-_]?\d+(\.\d+)?[bm]?$/, "").replace(/\d+$/, "");
@@ -86,17 +110,19 @@ export function parseJudgeUserMessage(msg: string): { input: LeakInput; decide: 
   const decide = (f.DECIDE ?? "").split(/,\s*/).filter((c): c is LeakCode => (LEAK_CODES as readonly string[]).includes(c));
   return { input: { text: f.REPLY ?? "", context: [earlier, latest].filter(Boolean).join(" "), note: none(f.HINT), ...(f.UNIT?.trim() === "fragment" ? { fragment: true } : {}) }, decide };
 }
-export interface JudgeAnswer { codes: LeakCode[]; uncertain: LeakCode[]; answered_first: boolean | null }
+export interface JudgeAnswer { codes: LeakCode[]; uncertain: LeakCode[]; answer_first_violation: AnswerFirst }
 export function parseJudgeAnswer(text: string, decide: readonly LeakCode[]): JudgeAnswer | null {
   try {
     const raw = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
     const j = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)) as Record<string, unknown>;
     const pick = (v: unknown) => (Array.isArray(v) ? v : []).filter((c): c is LeakCode => typeof c === "string" && decide.includes(c as LeakCode));
     if (!Array.isArray(j.codes)) return null;
-    const af = j.answered_first;
-    if (af !== null && af !== undefined && typeof af !== "boolean") return null;
+    const af = j.answer_first_violation;
+    if (af !== null && af !== undefined && typeof af !== "boolean" && af !== "uncertain") return null;
     const codes = pick(j.codes);
-    return { codes: LEAK_CODES.filter((c) => codes.includes(c)), uncertain: LEAK_CODES.filter((c) => pick(j.uncertain).includes(c) && !codes.includes(c)), answered_first: typeof af === "boolean" ? af : null };
+    // LABELING.md: pivot_first => answer_first_violation (a judge that says otherwise is overridden, not trusted)
+    const afv: AnswerFirst = codes.includes("pivot_first") ? true : af === undefined ? null : af;
+    return { codes: LEAK_CODES.filter((c) => codes.includes(c)), uncertain: LEAK_CODES.filter((c) => pick(j.uncertain).includes(c) && !codes.includes(c)), answer_first_violation: afv };
   } catch { return null; }
 }
 
@@ -113,7 +139,7 @@ export class MockJudgeBackend implements AdChatBackend {
   async complete(req: { role: string; model: string; messages: { role: string; content: string }[]; maxTokens: number; signal?: AbortSignal }): Promise<AdChatResult> {
     if (req.role !== "judge") throw new Error("MockJudgeBackend serves the judge route only");
     const sys = req.messages[0]?.content ?? "";
-    if (`lj1-${sha8(sys)}` !== LEAK_JUDGE_PROMPT_ID) throw new Error("MockJudgeBackend: unexpected judge prompt");
+    if (`lj2-${sha8(sys)}` !== LEAK_JUDGE_PROMPT_ID) throw new Error("MockJudgeBackend: unexpected judge prompt");
     const n = this.calls.push(Date.now());
     const d = this.delayMs(n);
     if (d > 0) await new Promise<void>((res, rej) => { const t = setTimeout(res, d); req.signal?.addEventListener("abort", () => { clearTimeout(t); rej(new Error("aborted")); }, { once: true }); });
@@ -121,7 +147,9 @@ export class MockJudgeBackend implements AdChatBackend {
     const h = judgeHeuristics(input);
     const codes = h.codes.filter((c) => decide.includes(c) && (JUDGE_CODES as readonly string[]).includes(c));
     const uncertain = decide.filter((c) => !(JUDGE_CODES as readonly string[]).includes(c) && c !== "verbatim");
-    const text = JSON.stringify({ codes, uncertain, answered_first: h.answeredFirst });
+    const fragment = /\[UNIT\]\nfragment/.test(req.messages[1]?.content ?? "");
+    const afv: AnswerFirst = fragment || h.answeredFirst === null ? null : !h.answeredFirst;
+    const text = JSON.stringify({ codes, uncertain, answer_first_violation: afv });
     return { text, finishReason: "stop", usage: { prompt_tokens: null, completion_tokens: Math.ceil(text.length / 4), reasoning_tokens: null } };
   }
 }
@@ -130,13 +158,32 @@ export interface GateResult {
   verdict: "pass" | "flagged" | "uncertain";
   status: "ok" | "timeout" | "error" | "unparseable";
   regex: LeakCode[]; uncertain: LeakCode[]; judge: LeakCode[] | null; codes: LeakCode[];
-  answered_first: boolean | null; ms: number; hits: string[]; error?: HealthCode;
+  /** the judge's answer_first_violation (null: not judged, no latest message, fragment, or no judge answer) */
+  answer_first_violation: AnswerFirst;
+  /** contract field: !answer_first_violation (null when the violation is null or "uncertain") */
+  answered_first: boolean | null;
+  /** codes left undecided after the judge (verdict uncertain when non-empty) */
+  undecided: LeakCode[];
+  ms: number; hits: string[]; error?: HealthCode;
 }
-export interface LeakGateOptions { backend: AdChatBackend; model?: string; actorModel: string; deadlineMs?: number; now?: () => number }
+/** per-code uncertain counts over every check (the uncertain rate = count / checks) */
+export interface GateStats { checks: number; verdicts: Record<GateResult["verdict"], number>; status: Record<GateResult["status"], number>;
+  uncertainByCode: Record<LeakCode, number>; answerFirstUncertain: number; regexUncertainByCode: Record<LeakCode, number> }
+export const emptyGateStats = (): GateStats => ({ checks: 0, verdicts: { pass: 0, flagged: 0, uncertain: 0 }, status: { ok: 0, timeout: 0, error: 0, unparseable: 0 },
+  uncertainByCode: Object.fromEntries(LEAK_CODES.map((c) => [c, 0])) as Record<LeakCode, number>, answerFirstUncertain: 0,
+  regexUncertainByCode: Object.fromEntries(LEAK_CODES.map((c) => [c, 0])) as Record<LeakCode, number> });
+export function addGateStats(st: GateStats, r: GateResult): void {
+  st.checks++; st.verdicts[r.verdict]++; st.status[r.status]++;
+  for (const c of r.undecided) st.uncertainByCode[c]++;
+  for (const c of r.uncertain) st.regexUncertainByCode[c]++;
+  if (r.answer_first_violation === "uncertain") st.answerFirstUncertain++;
+}
+export interface LeakGateOptions { backend: AdChatBackend; model?: string; actorModel: string; deadlineMs?: number; now?: () => number; temperature?: number }
 /** regex first, then the judge on the judge route under one deadline. Never throws. */
 export class LeakGate {
   readonly model: string; readonly deadlineMs: number; readonly promptId = LEAK_JUDGE_PROMPT_ID;
   private now: () => number;
+  readonly stats: GateStats = emptyGateStats();
   constructor(private o: LeakGateOptions) {
     this.model = o.model ?? LEAK_JUDGE_MODEL;
     assertJudgeModel(this.model, o.actorModel);
@@ -145,14 +192,14 @@ export class LeakGate {
   }
   async check(input: LeakInput): Promise<GateResult> {
     const rs = regexStage(input);
-    const decide = LEAK_CODES.filter((c) => JUDGE_CODES.includes(c) || rs.uncertain.includes(c));
+    const decide = decideCodes(input, rs.uncertain);
     const t0 = this.now();
     const ctl = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<"timeout">((r) => { timer = setTimeout(() => { ctl.abort(); r("timeout"); }, this.deadlineMs); });
     let status: GateResult["status"] = "ok", ans: JudgeAnswer | null = null, error: HealthCode | undefined;
     try {
-      const res = await Promise.race([this.o.backend.complete({ role: "judge", model: this.model, maxTokens: LEAK_JUDGE_MAX_TOKENS, signal: ctl.signal,
+      const res = await Promise.race([this.o.backend.complete({ role: "judge", model: this.model, maxTokens: LEAK_JUDGE_MAX_TOKENS, signal: ctl.signal, temperature: this.o.temperature ?? 0,
         messages: [{ role: "system", content: LEAK_JUDGE_PROMPT_TEXT }, { role: "user", content: judgeUserMessage(input, decide) }] }), deadline]);
       if (res === "timeout") status = "timeout";
       else { ans = parseJudgeAnswer(res.text, decide); if (!ans) status = "unparseable"; }
@@ -163,11 +210,17 @@ export class LeakGate {
     const ms = Math.round(this.now() - t0);
     const judge = status === "ok" && ans ? ans.codes : null;
     // a regex-uncertain code the judge leaves undecided keeps the reply uncertain; one it does not mention is decided "no"
-    const unresolved = status === "ok" && ans ? ans.uncertain : rs.uncertain;
     const all = new Set<LeakCode>([...rs.certain, ...(judge ?? [])]);
     const codes = LEAK_CODES.filter((c) => all.has(c));
-    const verdict: GateResult["verdict"] = status !== "ok" || unresolved.length ? "uncertain" : codes.length ? "flagged" : "pass";
-    return { verdict, status, regex: rs.certain, uncertain: rs.uncertain, judge, codes, answered_first: ans?.answered_first ?? null, ms, hits: rs.hits, ...(error ? { error } : {}) };
+    // no judge answer: every code the judge had to decide stays undecided (a regex-certain code is still decided)
+    const unresolved = status === "ok" && ans ? ans.uncertain : decide.filter((c) => !codes.includes(c));
+    const scoreAf = !input.fragment && !!splitContext(input.context || "").latest.trim();
+    const afv: AnswerFirst = !scoreAf ? null : status === "ok" && ans ? (codes.includes("pivot_first") ? true : ans.answer_first_violation ?? "uncertain") : "uncertain";
+    const verdict: GateResult["verdict"] = status !== "ok" || unresolved.length || afv === "uncertain" ? "uncertain" : codes.length ? "flagged" : "pass";
+    const r: GateResult = { verdict, status, regex: rs.certain, uncertain: rs.uncertain, judge, codes, answer_first_violation: afv,
+      answered_first: typeof afv === "boolean" ? !afv : null, undecided: unresolved, ms, hits: rs.hits, ...(error ? { error } : {}) };
+    addGateStats(this.stats, r);
+    return r;
   }
 }
 export const replySha256 = (text: string) => sha256HexSync(text);

@@ -143,11 +143,16 @@ test("buildAdUpload: guard refusal writes an upload.blinded_guard health line wi
   assert.deepEqual(c, { ok: false, code: "sealed_type", line: 7 });
   const last = JSON.parse(st.read("blinded", SID)!.trim().split("\n").pop()!);
   assert.equal(last.code, "upload.blinded_guard"); assert.equal(last.detail, "sealed_type"); assert.equal(last.ok, false);
-  // a .sealed upload whose base is not blinded
+  // a blinded .sealed upload whose base is not blinded (v1.3: the session types must match)
   const st2 = await AdStorage.open(new MemoryKV());
-  new AdSessionLog(st2, SID, "tab_visible", clock).emit(body(E.session_start_tab_visible));
+  st2.appendLine("visible", SID, JSON.stringify({ ...E.session_start_tab_visible, sessionId: SID }));
   st2.appendLine("sealed", SID, JSON.stringify(E.session_start_blinded_sealed));
   assert.equal((buildAdUpload(st2, "sealed", SID, meta, clock) as { code: string }).code, "sealed_base_not_blinded");
+  // v1.3: a tab_visible session's sealed companion uploads as <id>.sealed against its tab_visible base
+  const st3 = await AdStorage.open(new MemoryKV());
+  new AdSessionLog(st3, SID, "tab_visible", clock).emit(body(E.session_start_tab_visible));
+  const s3 = buildAdUpload(st3, "sealed", SID, meta, clock);
+  assert.ok(s3.ok && s3.envelope.sessionId === SID + ".sealed");
 });
 
 test("redactForMain is idempotent and its output always passes the per-line guard rules", () => {
@@ -189,6 +194,6 @@ test("package export @brianharness/core/ad-contracts and ./actor-director", () =
 
 test("built dist: import('@brianharness/core/ad-contracts') resolves (pretest build)", async () => {
   const m = await import("@brianharness/core/ad-contracts");
-  assert.equal(m.CONTRACT_VERSION, "contract-v1.2");
+  assert.equal(m.CONTRACT_VERSION, "contract-v1.3");
   assert.equal(typeof m.blindedGuard, "function");
 });

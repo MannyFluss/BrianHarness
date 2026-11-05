@@ -191,7 +191,7 @@ export class LiveAdController implements AdStore {
     const calibration = calibrationSummary(this.o.calibration, stale?.stale ? stale.words : null);
     const camera = { on: !!this.o.tracker && !this.paused, paused: this.paused };
     if (this.o.sessionType !== "tab_visible" || !this.log) return blindedView(this.chat, calibration, camera, this.busy);
-    return { ...visibleView(this.log.lines, [...this.chat], { calibration, camera, busy: this.busy, pending: this.pendingNote(), live: null }), occluded: this.occStart !== null };
+    return { ...visibleView(this.log.tabLines, [...this.chat], { calibration, camera, busy: this.busy, pending: this.pendingNote(), live: null }), occluded: this.occStart !== null };
   }
   private pendingNote(): PendingNote | null {
     const p = this.session?.peekPending();

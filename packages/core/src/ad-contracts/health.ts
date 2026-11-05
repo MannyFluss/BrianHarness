@@ -13,6 +13,8 @@ export const HEALTH_CODES = [
   "gaze.low_quality", // reading window quality < 0.6 or face present < 70 %: no gaze events this window
   "gaze.no_consent", // camera consent off: the pipeline runs on on-screen time only
   "net.worker_unreachable", // (spec) /v1/models (+ http_status)
+  "net.worker_blocked", // (v1.3) informational, ok:true: the gaze Web Worker's fetch block stopped N attempts (network.workerBlocked)
+  "net.request_escaped", // (v1.3) FAIL: a request got past the Worker block to a non-bundle origin (network.requests > 0); pilot preflight fails
   "auth.no_token", // (spec) device token missing (never prints the token)
   "model.route_unverified", // (spec) e.g. gemma4:cloud verified:false
   "model.empty_completion", // (spec)
@@ -51,6 +53,7 @@ export const HEALTH_CHECKS = [
   "director.deadline",
   "director.enabled",
   "director.leak_breaker",
+  "network.isolation", // (v1.3) Mac shell: the tracker's no-network rule (net.worker_blocked info / net.request_escaped fail)
 ] as const;
 export type HealthCheck = (typeof HEALTH_CHECKS)[number];
 

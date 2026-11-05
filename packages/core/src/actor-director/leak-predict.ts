@@ -5,7 +5,7 @@
  */
 import { LEAK_CODES } from "../ad-contracts/index.js";
 import type { LeakCode } from "../ad-contracts/index.js";
-import type { LeakGate } from "./leak-judge.js";
+import type { AnswerFirst, LeakGate } from "./leak-judge.js";
 
 export interface PredictInput { id: string; unit?: string; context?: string | null; note?: string | null; text: string }
 export interface Prediction {
@@ -18,6 +18,9 @@ export interface Prediction {
   answer_first_violation: boolean;
   /** the judge's answered_first (contract semantics; null when not judged / no latest message) */
   answered_first: boolean | null;
+  /** lj2: the judge's own answer_first_violation (true | false | "uncertain" | null) */
+  answer_first_judge: AnswerFirst;
+  /** codes the judge left undecided (counted into the uncertain rate) */
   uncertain: LeakCode[];
   verdict: "pass" | "flagged" | "uncertain";
   status: string;
@@ -27,10 +30,12 @@ export async function predictOne(it: PredictInput, gate: LeakGate, policy: Uncer
   const context = it.context ?? "", note = it.note ?? "";
   const fragment = (it.unit ?? "reply") !== "reply";
   const r = await gate.check({ text: it.text, context, note, fragment });
-  const unresolved = r.status === "ok" ? r.uncertain.filter((c) => !r.codes.includes(c) && r.verdict === "uncertain") : r.uncertain;
+  const unresolved = r.undecided.filter((c) => !r.codes.includes(c));
   const set = new Set<LeakCode>([...r.codes, ...(policy === "positive" ? unresolved : [])]);
-  const afv = !fragment && !!context.trim() && r.answered_first === false;
-  return { id: it.id, codes: LEAK_CODES.filter((c) => set.has(c)), answer_first: afv, answer_first_violation: afv, answered_first: r.answered_first, uncertain: unresolved, verdict: r.verdict, status: r.status };
+  // "uncertain" follows the same policy as an undecided code (positive = the gate's fail-safe reading)
+  const afv = r.answer_first_violation === true || (r.answer_first_violation === "uncertain" && policy === "positive");
+  return { id: it.id, codes: LEAK_CODES.filter((c) => set.has(c)), answer_first: afv, answer_first_violation: afv, answered_first: r.answered_first,
+    answer_first_judge: r.answer_first_violation, uncertain: unresolved, verdict: r.verdict, status: r.status };
 }
 export async function predictAll(items: PredictInput[], gate: LeakGate, policy: UncertainPolicy = "positive"): Promise<Prediction[]> {
   const out: Prediction[] = [];

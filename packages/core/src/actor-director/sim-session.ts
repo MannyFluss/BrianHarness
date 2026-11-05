@@ -46,6 +46,8 @@ export interface SimResult {
   sessionId: string; sessionType: SessionType;
   /** FULL lines (tab / sealed); for blinded sessions never hand these to the UI */
   lines: BhAdEvent[];
+  /** v1.3: the main-log lines (what the Director tab may read) */
+  tabLines: BhAdEvent[];
   chat: SimChatMessage[];
   storage: AdStorage;
   log: AdSessionLog;
@@ -165,5 +167,5 @@ export async function runSimSession(o: SimOptions): Promise<SimResult> {
   }
   await s.end("replay_end");
   await storage.flush();
-  return { sessionId, sessionType, lines: log.lines, chat, storage, log, live, layout };
+  return { sessionId, sessionType, lines: log.lines, tabLines: log.tabLines, chat, storage, log, live, layout };
 }

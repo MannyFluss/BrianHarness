@@ -20,6 +20,8 @@
 // actor_turn.usage.prompt_tokens, no director.leak_breaker health, no arm key at any depth). Its sealed companion
 // (<id>.sealed.jsonl) carries the arm by design and is only counted. The arm-key list and the field lists are read
 // from packages/core/src/ad-contracts/blinding.json, the ONE list shared with the client-side guard.
+// contract-v1.3: leak_judge verdicts are sealed-only in EVERY session type, so a tab_visible log is checked too: no
+// sealedEverywhereTypes line (leak_judge) and no sealedEverywhereReasons value (note_dropped reason leak_judge).
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,7 +84,15 @@ for (const f of files) {
   if (lines[0]?.schema === "bh-ad/1") {
     const st = lines[0];
     if (f.endsWith(BLINDING.sealedSessionSuffix + ".jsonl")) { adSealed++; continue; }
-    if (st.type === "session_start" && st.session_type === "tab_visible") { adVisible++; continue; }
+    if (st.type === "session_start" && st.session_type === "tab_visible") {
+      adVisible++;
+      lines.forEach((e, i) => {
+        const type = String(e.type), m = (BLINDING.sealedEverywhereReasons ?? {})[type];
+        const why = (BLINDING.sealedEverywhereTypes ?? []).includes(type) ? type : m && typeof e.reason === "string" && e.reason in m ? `${type} reason ${e.reason}` : null;
+        if (why) { leaks++; console.log(`LEAK ${f}:${i + 1}: bh-ad/1 tab_visible log: sealed_everywhere (${why})`); }
+      });
+      continue;
+    }
     adBlinded++;
     // fail closed: a bh-ad/1 log that does not open with a session_start is treated as blinded and must say so
     if (st.type !== "session_start" || st.session_type !== "blinded") { leaks++; console.log(`LEAK ${f}:1: bh-ad/1 log without a blinded/tab_visible session_start`); continue; }
@@ -119,6 +129,6 @@ for (const f of files) {
     visit(e, "");
   });
 }
-if (adBlinded + adSealed + adVisible) console.log(`bh-ad/1: ${adBlinded} blinded main (checked), ${adSealed} sealed (arm by design, not checked), ${adVisible} tab_visible (not blinded)`);
+if (adBlinded + adSealed + adVisible) console.log(`bh-ad/1: ${adBlinded} blinded main (checked), ${adSealed} sealed (arm by design, not checked), ${adVisible} tab_visible (checked for sealed-everywhere verdicts only)`);
 console.log(`${files.length} files: ${study} study (${practice} practice, no protocol${reports ? `, ${reports} report .json` : ""}), ${plain} non-study (plan.mode = pacing, allowed); ${blindGuessArm} blindGuess answers naming an arm (participant guess, allowed); ${leaks} leaks`);
 process.exit(leaks ? 1 : 0);

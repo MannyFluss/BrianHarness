@@ -11,6 +11,10 @@ export const ARM_KEY_PATTERNS: readonly string[] = BLINDING.armKeyPatterns;
 /** ^(?:adaptation|study[_-]?mode|...)$ with flag i: a key that check_blinding and the guard treat as an arm key */
 export const armKeyRegExp = (): RegExp => new RegExp(`^(?:${ARM_KEY_PATTERNS.join("|")})$`, "i");
 export const SEALED_ONLY_HEALTH_CODES: readonly string[] = BLINDING.sealedOnlyHealthCodes;
+/** v1.3: event types sealed-only in EVERY session type (tab_visible included): never in a visible or blinded main log */
+export const SEALED_EVERYWHERE_TYPES: readonly string[] = BLINDING.sealedEverywhereTypes;
+/** v1.3: type -> field "reason" value -> the generic value a non-sealed log carries instead (note_dropped leak_judge -> withheld) */
+export const SEALED_EVERYWHERE_REASONS: Readonly<Record<string, Readonly<Record<string, string>>>> = BLINDING.sealedEverywhereReasons;
 
 /** why the guard rejected an upload (client health detail; proposed to InfrastructureBot for the server side) */
 export const BLINDED_GUARD_CODES = [
@@ -23,7 +27,8 @@ export const BLINDED_GUARD_CODES = [
   "prompt_tokens", // non-null actor_turn.usage.prompt_tokens in a blinded main log
   "sealed_health", // a director.leak_breaker health line in a blinded main log
   "arm_key", // any key matching the shared arm-key list, at any depth, in a blinded main log line
-  "sealed_base_not_blinded", // a ".sealed" upload whose base session (or its own session_start) is not blinded
+  "sealed_base_not_blinded", // a ".sealed" upload whose base session (or its own session_start) is not blinded (v1.3: or tab_visible with a matching base)
+  "sealed_everywhere", // (v1.3) a sealedEverywhereTypes line, or a sealed-only reason value, in a non-sealed (visible or blinded main) log
 ] as const;
 export type BlindedGuardCode = (typeof BLINDED_GUARD_CODES)[number];
 export type GuardResult = { ok: true } | { ok: false; code: BlindedGuardCode; line: number };
@@ -47,6 +52,14 @@ export function findArmKey(v: unknown, re = armKeyRegExp(), path = ""): string |
     if (p) return p;
   }
   return null;
+}
+
+/** v1.3: a line that must never be in a non-sealed log (visible or blinded main) in any session type */
+export function sealedEverywhereViolation(e: Line): boolean {
+  const type = String(e.type);
+  if (SEALED_EVERYWHERE_TYPES.includes(type)) return true;
+  const m = SEALED_EVERYWHERE_REASONS[type];
+  return !!m && typeof e.reason === "string" && e.reason in m;
 }
 
 /** rules for ONE line of a blinded main log; null = clean */
@@ -80,12 +93,17 @@ export function blindedGuard(sessionId: string, jsonl: string, baseMainJsonl?: s
   const start = lines[0];
   if (!start || start.type !== "session_start") return { ok: false, code: "no_session_start", line: 1 };
   if (sealed) {
-    if (start.session_type !== "blinded") return { ok: false, code: "sealed_base_not_blinded", line: 1 };
+    // v1.3: a tab_visible session has a sealed companion too (leak_judge is sealed-only everywhere); the base must match
+    if (start.session_type !== "blinded" && start.session_type !== "tab_visible") return { ok: false, code: "sealed_base_not_blinded", line: 1 };
     const b = baseMainJsonl ? parse(baseMainJsonl)[0] : null;
-    if (!b || b.type !== "session_start" || b.session_type !== "blinded" || b.sessionId !== base) return { ok: false, code: "sealed_base_not_blinded", line: 1 };
+    if (!b || b.type !== "session_start" || b.session_type !== start.session_type || b.sessionId !== base) return { ok: false, code: "sealed_base_not_blinded", line: 1 };
     return { ok: true };
   }
-  if (start.session_type === "tab_visible") return { ok: true };
+  if (start.session_type === "tab_visible") {
+    // v1.3: the visible log carries arm openly but never a leak_judge verdict (a blinded main log fails sealed_type first)
+    for (let i = 0; i < lines.length; i++) if (sealedEverywhereViolation(lines[i]!)) return { ok: false, code: "sealed_everywhere", line: i + 1 };
+    return { ok: true };
+  }
   if (start.session_type !== "blinded") return { ok: false, code: "no_session_start", line: 1 };
   const re = armKeyRegExp();
   for (let i = 0; i < lines.length; i++) {

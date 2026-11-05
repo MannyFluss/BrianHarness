@@ -140,7 +140,7 @@ export class ActorDirectorSession {
   start(): void {
     const tabVisible = this.o.sessionType === "tab_visible";
     this.emit({
-      type: "session_start", profile: "actor-director", contract: "contract-v1.2", userId: this.o.userId, session_type: this.o.sessionType,
+      type: "session_start", profile: "actor-director", contract: "contract-v1.3", userId: this.o.userId, session_type: this.o.sessionType,
       tab: tabVisible ? "visible" : "hidden", arm: this.o.arm, p_inject: this.pInject, ...(tabVisible ? {} : { sealed: true as const, ...(this.o.blind ? { blind: this.o.blind } : {}) }),
       actor_prompt_id: ACTOR_PROMPT_ID, director_prompt_id: this.o.directorPrompt?.id ?? DIRECTOR_PROMPT_ID, director_format_id: DIRECTOR_FORMAT_SLOT.id,
       director_examples_id: DIRECTOR_EXAMPLES_SLOT.id, director_assembled_sha8: this.o.directorPrompt ? sha8(this.o.directorPrompt.assemble(true)) : DIRECTOR_ASSEMBLED_SHA8, pipeline_version: PIPELINE_VERSION,
@@ -309,12 +309,12 @@ export class ActorDirectorSession {
     const candText = cand.ok ? cand.r.text : "";
     let g: GateResult;
     if (cand.ok && candText.trim()) g = await this.gate!.check({ text: candText, context: user, note: rec.actor_text ?? "" });
-    else g = { verdict: "uncertain", status: "error", regex: [], uncertain: [], judge: null, codes: [], answered_first: null, ms: 0, hits: [] };
+    else g = { verdict: "uncertain", status: "error", regex: [], uncertain: [], judge: null, codes: [], answer_first_violation: "uncertain", answered_first: null, undecided: [], ms: 0, hits: [] };
     const dropped = g.verdict !== "pass";
     this.emit({
       type: "leak_judge", turn, note_id: rec.note_id, decision: inject ? "inject" : "shadow", judge_prompt_id: this.gate!.promptId, model: this.gate!.model,
       deadline_ms: this.gate!.deadlineMs, ms: g.ms, status: g.status, regex: g.regex, uncertain: g.uncertain, judge: g.judge, codes: g.codes,
-      answered_first: g.answered_first, verdict: g.verdict, dropped, reply_sha256: cand.ok ? replySha256(candText) : null, ...(g.error ? { error: g.error } : {}),
+      answered_first: g.answered_first, answer_first_violation: g.answer_first_violation, verdict: g.verdict, dropped, reply_sha256: cand.ok ? replySha256(candText) : null, ...(g.error ? { error: g.error } : {}),
     });
     if (g.error === "budget.judge_cap") this.emit({ type: "health", check: "budget", ok: false, code: "budget.judge_cap", role: "judge", worker_code: "role_cap_judge", http_status: 429 });
     if (dropped) {

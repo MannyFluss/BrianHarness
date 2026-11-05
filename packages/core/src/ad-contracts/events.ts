@@ -80,7 +80,7 @@ export type BhAdEventBody =
   | {
       type: "session_start";
       profile: "actor-director";
-      contract: "contract-v1" | "contract-v1.1" | "contract-v1.2";
+      contract: "contract-v1" | "contract-v1.1" | "contract-v1.2" | "contract-v1.3";
       userId: string;
       session_type: SessionType;
       tab: "visible" | "hidden";
@@ -136,8 +136,12 @@ export type BhAdEventBody =
       type: "injection"; turn: number; note_id: string; decision: "inject" | "shadow"; kind: NoteKind; move?: SuggestionMove;
       actor_text: string; evidence: EvidenceId[]; trigger_features: Record<string, number>; confidence: number;
     }
-  /** v1.2: reason "leak_judge" = the pre-display leak gate flagged the as-if-injected reply, was uncertain, timed out or errored */
-  | { type: "note_dropped"; turn: number; note_id: string; reason: "late" | "superseded" | "session_end" | "leak_judge" }
+  /**
+   * v1.2: reason "leak_judge" = the pre-display leak gate flagged the as-if-injected reply, was uncertain, timed out or errored.
+   * v1.3: "leak_judge" is sealed-only in EVERY session type; a tab_visible session's visible log carries the same line with
+   * reason "withheld" (generic: the tab shows only "note dropped"), its sealed companion log keeps "leak_judge".
+   */
+  | { type: "note_dropped"; turn: number; note_id: string; reason: "late" | "superseded" | "session_end" | "leak_judge" | "withheld" }
   /**
    * v1.2, sealed-only: the pre-display leak gate on the as-if-injected Actor reply of one rail-passing note, in EVERY arm
    * (inject and shadow) with the same deadline. regex = certain regex codes, uncertain = codes the regex layer could not
@@ -145,11 +149,15 @@ export type BhAdEventBody =
    * verdict: pass | flagged (codes non-empty) | uncertain (status not ok, or the judge left a code undecided). Anything
    * but pass drops the note (dropped: true + note_dropped reason "leak_judge") and counts toward the leak breaker.
    * reply_sha256 = sha256 of the as-if-injected reply text (the text itself is never logged unless it was displayed).
+   * v1.3: sealed-only in EVERY session type, tab_visible included (blinding.json sealedEverywhereTypes); optional
+   * answer_first_violation = the judge's own answer-first field (true | false | "uncertain" | null; "uncertain" makes the
+   * verdict uncertain; pivot_first forces true); judge_prompt_id "lj2-<sha8>".
    */
   | {
       type: "leak_judge"; turn: number; note_id: string; decision: "inject" | "shadow"; judge_prompt_id: string; model: string;
       deadline_ms: number; ms: number; status: "ok" | "timeout" | "error" | "unparseable";
       regex: LeakCode[]; uncertain: LeakCode[]; judge: LeakCode[] | null; codes: LeakCode[]; answered_first: boolean | null;
+      answer_first_violation?: boolean | "uncertain" | null;
       verdict: "pass" | "flagged" | "uncertain"; dropped: boolean; reply_sha256: string | null; error?: HealthCode;
     }
   | {

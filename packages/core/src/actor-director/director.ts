@@ -9,8 +9,12 @@ import type { BhAdEventBody, HealthCode, Role, Usage, WorkerErrorBody, WorkerErr
 import type { ChatMessage } from "../types.js";
 import { parseDirectorText, validateDirectorOutput } from "./validate.js";
 
-export interface AdChatRequest { role: Role; model: string; messages: ChatMessage[]; maxTokens: number; signal?: AbortSignal }
-export interface AdChatResult { text: string; usage: Usage; finishReason: string | null }
+/** temperature (optional, additive): sent only when set; the Worker passes it to Ollama options.temperature */
+export interface AdChatRequest { role: Role; model: string; messages: ChatMessage[]; maxTokens: number; signal?: AbortSignal; temperature?: number }
+/** model: the model tag the response names (when it names one); headers: non-secret usage/rate headers only */
+export interface AdChatResult { text: string; usage: Usage; finishReason: string | null; model?: string | null; headers?: Record<string, string> }
+/** response headers worth logging for a usage summary (never authorization or cookies) */
+export const USAGE_HEADER = /^(x-ratelimit-[a-z-]+|x-bh-[a-z-]+|ratelimit[a-z-]*|retry-after)$/i;
 export interface AdChatBackend { readonly id: string; complete(req: AdChatRequest): Promise<AdChatResult> }
 
 export class WorkerHttpError extends Error {
@@ -43,7 +47,7 @@ export class WorkerChatBackend implements AdChatBackend {
     const res = await f(this.cfg.baseUrl.replace(/\/$/, "") + "/v1/chat/completions", {
       method: "POST", signal: req.signal,
       headers: { "content-type": "application/json", [ROLE_HEADER]: req.role, ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ model: req.model, messages: req.messages, max_tokens: req.maxTokens, stream: false }),
+      body: JSON.stringify({ model: req.model, messages: req.messages, max_tokens: req.maxTokens, stream: false, ...(typeof req.temperature === "number" ? { temperature: req.temperature } : {}) }),
     });
     const text = await res.text();
     let j: unknown = null;
@@ -52,10 +56,14 @@ export class WorkerChatBackend implements AdChatBackend {
       const body = (j && typeof j === "object" && "error" in (j as object) ? (j as WorkerErrorBody) : null);
       throw new WorkerHttpError(res.status, body?.error?.code ?? null, (body?.error?.role as Role | undefined) ?? null, body);
     }
-    const r = j as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; usage?: { prompt_tokens?: number; completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } };
+    const headers: Record<string, string> = {};
+    res.headers?.forEach?.((v, k) => { if (USAGE_HEADER.test(k)) headers[k.toLowerCase()] = v; });
+    const r = j as { model?: string; choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; usage?: { prompt_tokens?: number; completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } };
     return {
       text: r?.choices?.[0]?.message?.content ?? "",
       finishReason: r?.choices?.[0]?.finish_reason ?? null,
+      model: typeof r?.model === "string" ? r.model : null,
+      headers,
       usage: { prompt_tokens: r?.usage?.prompt_tokens ?? null, completion_tokens: r?.usage?.completion_tokens ?? null, reasoning_tokens: r?.usage?.completion_tokens_details?.reasoning_tokens ?? null },
     };
   }

@@ -1,6 +1,6 @@
 # Actor/Director shared contracts
 
-**Version: contract-v1.2** (additive over contract-v1 and v1.1; see Changes) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
+**Version: contract-v1.3** (additive over contract-v1, v1.1 and v1.2; see Changes) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
 
 Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/ad-contracts/`, published copy at
 `/workspace/actor-director/contracts/`. Import in TS from `@brianharness/core/ad-contracts` (subpath export, added in E1; nothing is re-exported from the core index, so protocol-4 is untouched), or use the JSON Schemas.
@@ -47,6 +47,32 @@ Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/a
    tab; added to `SEALED_ONLY_TYPES` and `blinding.json`). Phone behaviour (IOS Dev I4): while the Director sheet
    covers the chat, gaze is not attributed to paragraphs and that time is excluded from per-paragraph reading
    features; a paragraph that was only ever covered is left out of the digest rather than labelled `skipped`.
+
+### contract-v1.3 (2026-11-04, additive; every contract-v1 / v1.1 / v1.2 line still validates)
+Researcher rulings of 5:33 PM PT.
+1. **`leak_judge` is sealed-only in EVERY session type**, tab_visible included (`blinding.json` `sealedEverywhereTypes`).
+   A tab_visible session now also writes a sealed companion log (`ad/sealed/<id>`, uploaded as `<id>.sealed`). One
+   projection (`projectForMain` in log.ts) writes every main log: in tab_visible it drops `leak_judge` and rewrites
+   `note_dropped.reason "leak_judge"` to the generic **`"withheld"`** (new enum value; `blinding.json`
+   `sealedEverywhereReasons`). The Director tab reads only the main-log lines and shows a generic "note dropped".
+2. Blinded guard: a `.sealed` upload is accepted when its own `session_start` and the base main log are both blinded
+   **or both tab_visible**. A tab_visible main log that contains a `leak_judge` line or a `note_dropped` reason
+   `leak_judge` is refused with the new guard code **`sealed_everywhere`**. (The Worker's guard needs the same change:
+   InfrastructureBot.)
+3. `leak_judge` gains optional `answer_first_violation: true | false | "uncertain" | null`: the judge's own
+   answer-first field (prompt `lj2-<sha8>`, R4c rules A1-A4 quoted verbatim). `"uncertain"` makes the verdict
+   `uncertain` (the note is dropped, fail safe); `pivot_first` forces `true`. `answered_first` stays (= its negation,
+   null when null or uncertain).
+4. New health codes **`net.worker_blocked`** (informational, written with `ok:true`: the gaze Web Worker's fetch block
+   stopped N attempts) and **`net.request_escaped`** (failure: a request got past that block to a non-bundle origin;
+   the pilot preflight FAILS and the Director is paused), under the new health check **`network.isolation`**. An
+   `ok:true` health line may now carry an informational code.
+5. `session_start.contract` accepts `"contract-v1.3"` (new logs write v1.3).
+6. Semantics (no field change): `GazeTracker.lookAt?` is unreachable in device builds. Device bundles are built with
+   `__BH_AD_SIM__ = false` and the call is stripped; at run time it is called only on a tracker whose status mode is
+   `synthetic`. Simulator builds set `AD_SIM_BUILD=1`.
+7. Semantics (no field change): `tab_occluded` time is also excluded from the expected-reading-time denominator and
+   from the baseline-wpm update, not only from paragraph attribution.
 
 ## Change policy
 
@@ -555,7 +581,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.2",
+  "contract": "contract-v1.3",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -597,7 +623,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.2",
+  "contract": "contract-v1.3",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -643,7 +669,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.2",
+  "contract": "contract-v1.3",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -961,7 +987,7 @@ Every other event type has an example in `examples/event-*.json`, and all of the
   "appVersion": "0.1.0",
   "platform": "ios",
   "build": "20261105.0900",
-  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.2\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
+  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.3\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
 }
 ```
 <!-- example: worker-role-cap-error -->

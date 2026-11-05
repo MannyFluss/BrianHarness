@@ -5,8 +5,14 @@
  * sealed:true and usage.prompt_tokens:null. Each log file has its own seq (0,1,2.. no gaps). Every main line is
  * re-checked with the shared blinded-guard rules before it is written (fail closed: a dirty line is not written
  * and the main log gets an upload.blinded_guard health line instead).
+ *
+ * v1.3 (Researcher ruling, 5:33 PM): leak_judge verdicts are sealed-only in EVERY session type through ONE code path.
+ * Every session writes the full log to ad/sealed; the main log (ad/visible for tab_visible, ad/blinded for blinded) is
+ * projectForMain(sessionType, body). For tab_visible that drops leak_judge and turns note_dropped reason "leak_judge"
+ * into the generic "withheld" (the tab shows only "note dropped"). `tabLines` = the main-log lines, which is all the
+ * Director tab may read; `lines` stay the full (sealed) lines for replay / research.
  */
-import { BH_AD_SCHEMA, blindedMainLineViolation, SEALED_ONLY_HEALTH_CODES, SEALED_ONLY_TYPES } from "../ad-contracts/index.js";
+import { BH_AD_SCHEMA, blindedMainLineViolation, SEALED_EVERYWHERE_REASONS, SEALED_EVERYWHERE_TYPES, SEALED_ONLY_HEALTH_CODES, SEALED_ONLY_TYPES, sealedEverywhereViolation } from "../ad-contracts/index.js";
 import type { BhAdEvent, BhAdEventBody, SessionType } from "../ad-contracts/index.js";
 import type { AdNamespace, AdStorage } from "./storage.js";
 
@@ -38,6 +44,27 @@ export function redactForMain(body: BhAdEventBody): BhAdEventBody | null {
   return body;
 }
 
+/** v1.3: the projection every non-sealed log gets in every session type: drop sealed-everywhere types, map sealed reasons */
+export function projectSealedEverywhere(body: BhAdEventBody): BhAdEventBody | null {
+  if (SEALED_EVERYWHERE_TYPES.includes(body.type)) return null;
+  const m = SEALED_EVERYWHERE_REASONS[body.type];
+  const reason = (body as { reason?: unknown }).reason;
+  if (m && typeof reason === "string" && reason in m) return { ...body, reason: m[reason] } as BhAdEventBody;
+  return body;
+}
+/** THE main-log projection: blinded -> redactForMain, tab_visible -> projectSealedEverywhere; null = sealed only */
+export function projectForMain(sessionType: SessionType, body: BhAdEventBody): BhAdEventBody | null {
+  const p = projectSealedEverywhere(body);
+  return p && sessionType === "blinded" ? redactForMain(p) : p;
+}
+/** what the Director tab may read from a list of full lines (the same projection; for callers that hold full lines) */
+export function tabSafeLines<T extends BhAdEvent>(lines: readonly T[]): T[] {
+  return lines.flatMap((l) => {
+    const p = projectSealedEverywhere(l as BhAdEventBody);
+    return p ? [p as unknown as T] : [];
+  });
+}
+
 class SeqLog {
   seq = 0;
   constructor(readonly storage: AdStorage, readonly ns: AdNamespace, readonly id: string) {
@@ -53,27 +80,30 @@ class SeqLog {
 
 export class AdSessionLog {
   private main: SeqLog;
-  private sealed: SeqLog | null;
+  private sealed: SeqLog;
+  /** the full lines (the sealed log): replay, research, tests; never handed to the Director tab */
   readonly lines: BhAdEvent[] = [];
+  /** the main-log lines (visible / blinded main): the only lines the Director tab reads */
+  readonly tabLines: BhAdEvent[] = [];
   /** main-log lines the guard refused to write (should stay 0; tests assert it) */
   guardDrops = 0;
   constructor(readonly storage: AdStorage, readonly sessionId: string, readonly sessionType: SessionType, readonly clock: AdClock) {
     this.main = new SeqLog(storage, sessionType === "blinded" ? "blinded" : "visible", sessionId);
-    this.sealed = sessionType === "blinded" ? new SeqLog(storage, "sealed", sessionId) : null;
+    this.sealed = new SeqLog(storage, "sealed", sessionId);
   }
   get mainNamespace(): AdNamespace { return this.main.ns; }
   /** write one event; returns the full (tab / sealed) line */
   emit(body: BhAdEventBody): BhAdEvent {
-    if (!this.sealed) { const ev = this.main.write(this.sessionId, this.clock, body); this.lines.push(ev); return ev; }
     const full = this.sealed.write(this.sessionId, this.clock, body);
     this.lines.push(full);
-    const red = redactForMain(body);
+    const red = projectForMain(this.sessionType, body);
     if (red) {
-      const code = blindedMainLineViolation({ schema: BH_AD_SCHEMA, sessionId: this.sessionId, seq: 0, ...red } as Record<string, unknown>);
+      const line = { schema: BH_AD_SCHEMA, sessionId: this.sessionId, seq: 0, ...red } as Record<string, unknown>;
+      const code = sealedEverywhereViolation(line) ? "sealed_everywhere" : this.sessionType === "blinded" ? blindedMainLineViolation(line) : null;
       if (code) {
         this.guardDrops++;
-        this.main.write(this.sessionId, this.clock, { type: "health", check: "upload", ok: false, code: "upload.blinded_guard", detail: code });
-      } else this.main.write(this.sessionId, this.clock, red);
+        this.tabLines.push(this.main.write(this.sessionId, this.clock, { type: "health", check: "upload", ok: false, code: "upload.blinded_guard", detail: code }));
+      } else this.tabLines.push(this.main.write(this.sessionId, this.clock, red));
     }
     return full;
   }

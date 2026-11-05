@@ -7,13 +7,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ActorDirectorSession, AdStorage, AdSessionLog, ManualClock, MockAdBackend, WorkerChatBackend, WorkerHttpError, loadO200k,
   LEAK_JUDGE_PROMPT_ID, LEAK_JUDGE_PROMPT_TEXT, LEAK_JUDGE_MODEL, LEAK_JUDGE_DEADLINE_MS, JUDGE_CODES, LeakGate, MockJudgeBackend,
-  assertJudgeModel, buildTabModel, judgeUserMessage, parseJudgeUserMessage, parseJudgeAnswer, regexStage,
+  assertJudgeModel, buildTabModel, judgeUserMessage, R4C_ANSWER_FIRST_RULES, decideCodes, tabSafeLines, parseJudgeUserMessage, parseJudgeAnswer, regexStage,
 } from "../src/actor-director/index.ts";
 import type { AdChatBackend } from "../src/actor-director/index.ts";
 import { HINT_HEADER, SEALED_ONLY_TYPES, SUGGESTION_LEAD, blindedGuard } from "../src/ad-contracts/index.ts";
@@ -25,11 +25,51 @@ const ACTOR = "gpt-oss:120b-cloud";
 const hint = (obs: string, sug: string) => `${HINT_HEADER}\n- ${obs} (h:e1)\n- ${SUGGESTION_LEAD}${sug}`;
 const H = hint("They lingered on the hydration table.", "give one concrete example.");
 
-test("leak judge: prompt id pinned lj1-<sha8> over LEAK_JUDGE_PROMPT_TEXT", () => {
-  assert.equal(LEAK_JUDGE_PROMPT_ID, "lj1-11631f45");
-  assert.equal(LEAK_JUDGE_PROMPT_ID, "lj1-" + createHash("sha256").update(LEAK_JUDGE_PROMPT_TEXT, "utf8").digest("hex").slice(0, 8));
+test("leak judge: prompt id pinned lj2-<sha8> over LEAK_JUDGE_PROMPT_TEXT", () => {
+  assert.equal(LEAK_JUDGE_PROMPT_ID, "lj2-eeca9847");
+  assert.equal(LEAK_JUDGE_PROMPT_ID, "lj2-" + createHash("sha256").update(LEAK_JUDGE_PROMPT_TEXT, "utf8").digest("hex").slice(0, 8));
   // the R4c clarifications are in the prompt
   for (const s of ["Coming back to that shape again?", "it's been suggested", "visual learner", "Speaking of", "closing one-line offer", "unrelated to the hint is NOT pivot_first", "(h:...)"]) assert.ok(LEAK_JUDGE_PROMPT_TEXT.includes(s), s);
+});
+
+test("leak judge lj2: R4c A1-A4 are in the prompt VERBATIM; answer_first_violation is the judge's own field", () => {
+  assert.equal(R4C_ANSWER_FIRST_RULES.length, 4);
+  for (const [i, line] of R4C_ANSWER_FIRST_RULES.entries()) { assert.ok(line.startsWith(`- **A${i + 1}**: `)); assert.ok(LEAK_JUDGE_PROMPT_TEXT.includes(line + "\n"), line); }
+  // byte-for-byte against the Researcher's file when it is on this machine (rules A1-A4 only; nothing else read)
+  const f = "/workspace/actor-director/research/R4c/LABELING_R4c.md";
+  if (existsSync(f)) assert.deepEqual(readFileSync(f, "utf8").split("\n").filter((l) => /^- \*\*A[1-4]\*\*/.test(l)), [...R4C_ANSWER_FIRST_RULES]);
+  for (const s of ["a necessary clarifying question, or stating a limitation first, is valid.", "pivot_first implies answer_first_violation = true", '"answer_first_violation":true|false|"uncertain"|null']) assert.ok(LEAK_JUDGE_PROMPT_TEXT.includes(s), s);
+  assert.ok(!LEAK_JUDGE_PROMPT_TEXT.includes('"answered_first"'), "the judge no longer returns answered_first");
+  // parse: pivot_first forces the violation; "uncertain" is kept; anything else is unparseable
+  assert.deepEqual(parseJudgeAnswer('{"codes":["pivot_first"],"uncertain":[],"answer_first_violation":false}', JUDGE_CODES), { codes: ["pivot_first"], uncertain: [], answer_first_violation: true });
+  assert.deepEqual(parseJudgeAnswer('{"codes":[],"uncertain":[],"answer_first_violation":"uncertain"}', JUDGE_CODES), { codes: [], uncertain: [], answer_first_violation: "uncertain" });
+  assert.equal(parseJudgeAnswer('{"codes":[],"answer_first_violation":"maybe"}', JUDGE_CODES), null);
+  // one call decides every judge code + answer_first jointly; pivot_first / forced_move only with a hint
+  assert.deepEqual(decideCodes({ text: "x", context: "q", note: H }, []), ["mind_reading", "pivot_first", "forced_move"]);
+  assert.deepEqual(decideCodes({ text: "x", context: "q", note: "" }, ["provenance"]), ["provenance", "mind_reading"]);
+});
+
+test("leak judge lj2: answer_first_violation 'uncertain' -> verdict uncertain (fail safe); per-code uncertain counts", async () => {
+  const say = (o: object) => new MockAdBackend([{ text: JSON.stringify(o) }]);
+  const g1 = new LeakGate({ backend: say({ codes: [], uncertain: [], answer_first_violation: "uncertain" }), actorModel: ACTOR });
+  const r1 = await g1.check({ text: "Use 75% water.", context: "how much water?", note: H });
+  assert.equal(r1.verdict, "uncertain"); assert.equal(r1.answer_first_violation, "uncertain"); assert.equal(r1.answered_first, null);
+  assert.equal(g1.stats.answerFirstUncertain, 1); assert.equal(g1.stats.verdicts.uncertain, 1);
+  // a judge that omits the field on a scored reply is uncertain too
+  const r2 = await new LeakGate({ backend: say({ codes: [], uncertain: [] }), actorModel: ACTOR }).check({ text: "Use 75% water.", context: "how much water?", note: H });
+  assert.equal(r2.verdict, "uncertain");
+  // a fragment / no latest message: not scored (null), so the verdict rests on the codes
+  const r3 = await new LeakGate({ backend: say({ codes: [], uncertain: [], answer_first_violation: null }), actorModel: ACTOR }).check({ text: "Use 75% water.", context: "", note: H });
+  assert.equal(r3.answer_first_violation, null); assert.equal(r3.verdict, "pass");
+  // pivot_first => violation, flagged
+  const r4 = await new LeakGate({ backend: say({ codes: ["pivot_first"], uncertain: [], answer_first_violation: false }), actorModel: ACTOR }).check({ text: "Speaking of tables: water 75%.", context: "how much water?", note: H });
+  assert.equal(r4.answer_first_violation, true); assert.equal(r4.verdict, "flagged");
+  // per-code uncertain counts (the uncertain rate per code = count / checks)
+  const g5 = new LeakGate({ backend: new MockAdBackend([{ text: JSON.stringify({ codes: [], uncertain: ["mind_reading"], answer_first_violation: false }) }, { error: new Error("down") }]), actorModel: ACTOR });
+  await g5.check({ text: "Use 75% water.", context: "how much water?", note: H });
+  await g5.check({ text: "Use 75% water.", context: "how much water?", note: H });
+  assert.equal(g5.stats.checks, 2); assert.equal(g5.stats.uncertainByCode.mind_reading, 2); assert.equal(g5.stats.uncertainByCode.pivot_first, 1); assert.equal(g5.stats.answerFirstUncertain, 1);
+  assert.equal(g5.stats.status.error, 1);
 });
 
 test("leak judge: the judge model must differ from the Actor's family (spec: gemma4:cloud)", () => {
@@ -80,14 +120,15 @@ test("leak judge: judge request/answer round trip; a live model plugs in via Wor
   const back = parseJudgeUserMessage(msg);
   assert.equal(back.input.text, "Reply."); assert.equal(back.input.note, H); assert.equal(back.input.fragment, true);
   assert.match(back.input.context, /latest q/); assert.match(back.input.context, /earlier user turn/);
-  assert.deepEqual(parseJudgeAnswer('```json\n{"codes":["pivot_first","sensor"],"uncertain":["mind_reading"],"answered_first":false}\n```', JUDGE_CODES), { codes: ["pivot_first"], uncertain: ["mind_reading"], answered_first: false });
+  assert.deepEqual(parseJudgeAnswer('```json\n{"codes":["pivot_first","sensor"],"uncertain":["mind_reading"],"answer_first_violation":true}\n```', JUDGE_CODES), { codes: ["pivot_first"], uncertain: ["mind_reading"], answer_first_violation: true });
   assert.equal(parseJudgeAnswer("no json here", JUDGE_CODES), null);
-  assert.equal(parseJudgeAnswer('{"answered_first":"yes","codes":[]}', JUDGE_CODES), null);
-  const seen: Array<Record<string, string>> = [];
-  const fetchImpl = (async (_u: string, init: { headers: Record<string, string> }) => { seen.push(init.headers); return new Response(JSON.stringify({ choices: [{ message: { content: '{"codes":[],"uncertain":[],"answered_first":true}' }, finish_reason: "stop" }] }), { status: 200 }); }) as unknown as typeof fetch;
+  assert.equal(parseJudgeAnswer('{"answer_first_violation":"yes","codes":[]}', JUDGE_CODES), null);
+  const seen: Array<Record<string, string>> = [], bodies: string[] = [];
+  const fetchImpl = (async (_u: string, init: { headers: Record<string, string>; body: string }) => { seen.push(init.headers); bodies.push(init.body); return new Response(JSON.stringify({ choices: [{ message: { content: '{"codes":[],"uncertain":[],"answer_first_violation":false}' }, finish_reason: "stop" }] }), { status: 200 }); }) as unknown as typeof fetch;
   const gate = new LeakGate({ backend: new WorkerChatBackend({ baseUrl: "https://worker.invalid", token: () => "TEST", fetchImpl }), actorModel: ACTOR });
   const r = await gate.check({ text: "Use 75% water.", context: "how much water?", note: H });
   assert.equal(r.verdict, "pass"); assert.equal(seen[0]!["X-BH-Role"], "judge");
+  assert.equal(JSON.parse(bodies[0]!).temperature, 0, "the gate asks for temperature 0");
 });
 
 test("leak judge: fail safe: timeout, error, 429 role_cap_judge and unparseable output are all 'uncertain'", async () => {
@@ -245,8 +286,48 @@ test("leak judge: a flagged as-if-injected reply is dropped (never shown), count
     const later = of(L.slice(h), "rail_check");
     assert.ok(later.length > 0 && later.every((r) => !r.pass && r.blocked_by.includes("leak_breaker")));
     assert.equal(of(L.slice(h), "injection").length, 0);
-    // the tab (tab_visible) says why the card was dropped
-    const card = buildTabModel(L).cards.find((c) => c.noteId === lj[0]!.note_id)!;
-    assert.equal(card.state, "dropped"); assert.match(card.reason!, /^leak judge: flagged \(provenance/);
+    // v1.3: the tab (tab_visible) shows only a generic "note dropped", from full lines or from the visible log alike
+    for (const lines of [L, log.tabLines]) {
+      const card = buildTabModel(lines).cards.find((c) => c.noteId === lj[0]!.note_id)!;
+      assert.equal(card.state, "dropped"); assert.equal(card.reason, "note dropped");
+    }
+  }
+});
+
+test("leak judge v1.3: verdicts are sealed-only in EVERY session type (tab_visible too), through one projection", async () => {
+  const blinding = JSON.parse(readFileSync(join(import.meta.dirname, "../src/ad-contracts/blinding.json"), "utf8"));
+  assert.deepEqual(blinding.sealedEverywhereTypes, ["leak_judge"]);
+  for (const sessionType of ["tab_visible", "blinded"] as const) {
+    const { log, storage } = await run({ sessionType, arm: "on", turns: 10, actor: mockActor({ leak: true }) });
+    const ns = sessionType === "blinded" ? "blinded" : "visible";
+    const main = storage.read(ns, log.sessionId)!, sealed = storage.read("sealed", log.sessionId)!;
+    assert.ok(sealed.includes('"type":"leak_judge"') && sealed.includes('"reason":"leak_judge"'), `${sessionType}: the sealed log keeps the verdicts`);
+    assert.ok(!main.includes('"type":"leak_judge"') && !main.includes('"reason":"leak_judge"') && !main.includes("judge_prompt_id"), `${sessionType}: no verdict in the main log`);
+    assert.ok(!log.tabLines.some((l) => l.type === "leak_judge" || (l.type === "note_dropped" && l.reason === "leak_judge")));
+    assert.deepEqual(blindedGuard(log.sessionId, main), { ok: true });
+    assert.deepEqual(blindedGuard(log.sessionId + ".sealed", sealed, main), { ok: true });
+    assert.equal(log.guardDrops, 0);
+    if (sessionType === "tab_visible") {
+      assert.ok(main.includes('"reason":"withheld"'), "tab_visible: the drop itself is visible, generically");
+      assert.ok(main.includes('"arm":"on"'), "tab_visible still carries the arm openly");
+      // the guard refuses a tab_visible main log with a verdict line or the leak_judge reason
+      const lj = sealed.split("\n").find((l) => l.includes('"type":"leak_judge"'))!;
+      const nd = sealed.split("\n").find((l) => l.includes('"reason":"leak_judge"'))!;
+      assert.equal((blindedGuard(log.sessionId, main + lj + "\n") as { code: string }).code, "sealed_everywhere");
+      assert.equal((blindedGuard(log.sessionId, main + nd + "\n") as { code: string }).code, "sealed_everywhere");
+      // check_blinding.mjs flags both in a tab_visible log too
+      const dir = mkdtempSync(join(tmpdir(), "ljv-"));
+      const root = join(import.meta.dirname, "../../..");
+      const chk = (file: string) => spawnSync(process.execPath, [join(root, "tools/phaseD/check_blinding.mjs"), file], { encoding: "utf8" });
+      const clean = join(dir, "vis.jsonl"); writeFileSync(clean, main);
+      assert.equal(chk(clean).status, 0, chk(clean).stdout);
+      const bad = join(dir, "vis-bad.jsonl"); writeFileSync(bad, main + lj + "\n" + nd + "\n");
+      const b = chk(bad);
+      assert.equal(b.status, 1, b.stdout + b.stderr);
+      assert.match(b.stdout, /tab_visible log: sealed_everywhere \(leak_judge\)/);
+      assert.match(b.stdout, /tab_visible log: sealed_everywhere \(note_dropped reason leak_judge\)/);
+    }
+    // the tab fold re-applies the same projection to whatever it is given
+    assert.deepEqual(tabSafeLines(log.lines).filter((l) => l.type === "leak_judge"), []);
   }
 });

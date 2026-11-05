@@ -8,7 +8,11 @@
  *   bottom live data: paragraph mini-map shaded by dwell + event ticker (the 10 Hz part comes from GazeSource.live())
  * Blinded sessions: buildTabModel refuses (throws BlindedTabError). The tab does not exist there; the app never
  * calls this for a blinded session and the desktop test proves no tab DOM / no tab-only field is rendered.
+ * v1.3: leak_judge verdicts never reach the tab. Callers pass AdSessionLog.tabLines; the fold re-applies the same
+ * projection (tabSafeLines) to whatever it is given, so a leak_judge line or reason is never rendered: a gate drop shows
+ * only the generic "note dropped".
  */
+import { tabSafeLines } from "./log.js";
 import type { AttentionEvent, BhAdEvent, DirectorOutput, EvidenceId, Hypothesis, LeakCode, NoteKind, RailCode, ReadingDigest, SuggestionMove } from "../ad-contracts/index.js";
 
 type Ev<T extends BhAdEvent["type"]> = Extract<BhAdEvent, { type: T }>;
@@ -102,7 +106,9 @@ export function shareWords(c: { director: number; total: number }): string {
   return c.director > 0 ? `Director ${n(c.director)} tok · ${pct(c.director / c.total)} of ${n(c.total)}` : `No Director hint · ${n(c.total)} tok`;
 }
 
-export function buildTabModel(lines: readonly BhAdEvent[]): TabModel {
+export const GENERIC_DROP = "note dropped";
+export function buildTabModel(input: readonly BhAdEvent[]): TabModel {
+  const lines = tabSafeLines(input);
   const ss = lines.find((l): l is Ev<"session_start"> => l.type === "session_start");
   if (!ss || ss.session_type === "blinded" || ss.tab !== "visible") throw new BlindedTabError();
   const m: TabModel = {
@@ -152,12 +158,7 @@ export function buildTabModel(lines: readonly BhAdEvent[]): TabModel {
       }
       case "note_dropped": {
         const c = byNote.get(l.note_id);
-        if (c) { c.state = "dropped"; c.reason = l.reason === "late" ? "late: answered after the 1.5 s hold" : l.reason === "session_end" ? "session ended" : l.reason === "leak_judge" ? (c.reason?.startsWith("leak judge") ? c.reason : "leak judge: dropped before display") : "superseded"; }
-        break;
-      }
-      case "leak_judge": {
-        const c = byNote.get(l.note_id);
-        if (c && l.dropped) c.reason = `leak judge: ${l.verdict}${l.codes.length ? " (" + l.codes.join(", ") + ")" : ""}${l.status !== "ok" ? " [" + l.status + "]" : ""}, dropped before display`;
+        if (c) { c.state = "dropped"; c.reason = l.reason === "late" ? "late: answered after the 1.5 s hold" : l.reason === "session_end" ? "session ended" : l.reason === "superseded" ? "superseded" : GENERIC_DROP; }
         break;
       }
       case "actor_turn": {
