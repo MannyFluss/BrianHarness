@@ -1,0 +1,37 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:11:06.010Z",
+  "mono": 66010,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 21,
+  "type": "pointer_l1",
+  "t0": 61010,
+  "t1": 66010,
+  "events": [
+    {
+      "id": "p4",
+      "kind": "pointer_hover",
+      "aoi": "a3.c1",
+      "msg": "a3",
+      "t0": 62100,
+      "t1": 62100
+    },
+    {
+      "id": "p5",
+      "kind": "pointer_dwell",
+      "aoi": "a3.c1",
+      "msg": "a3",
+      "t0": 62100,
+      "t1": 62980,
+      "dwell_ms": 880
+    },
+    {
+      "id": "p6",
+      "kind": "pointer_select",
+      "aoi": "a3.p2.s1",
+      "msg": "a3",
+      "t0": 64200,
+      "t1": 64200
+    }
+  ]
+}

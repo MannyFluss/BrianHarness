@@ -11,7 +11,7 @@ export type Role = (typeof ROLES)[number];
 /** per-device per-UTC-day caps (ROLE_CAP_*), counted inside DEVICE_DAILY_CAP (200), not on top of it */
 export const ROLE_CAPS = { actor: 200, director: 100, judge: 100 } as const satisfies Record<Role, number>;
 
-/** POST /v1/ad-sessions body. The server checks only this envelope, that each jsonl line is a JSON object, and its secret scan. */
+/** POST /v1/ad-sessions body. The server checks this envelope, that each jsonl line is a JSON object, its secret scan and (Worker cd26798) the blinded guard (422 blinded_guard). */
 export interface AdUploadEnvelope {
   schema: "bh-ad/1";
   /** 1-128 chars [A-Za-z0-9._:-], starting with a letter or digit; 409 session_exists on a repeat */
@@ -30,6 +30,8 @@ export const AD_UPLOAD_MAX_BYTES = 1048576;
 export const AD_SESSION_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$";
 /** sealed companion log of a blinded session: uploaded as its own envelope with this sessionId suffix */
 export const SEALED_SESSION_SUFFIX = ".sealed" as const;
+/** v1.5: a base session id is at most 121 chars, so `<id>.sealed` (+7) fits the 128-char id limit */
+export const AD_BASE_SESSION_ID_MAX = 121;
 
 export interface AdUploadOk { id: string; kind: "ad_session"; schema: "bh-ad/1"; received_at: string; bytes: number; lines: number; sha256: string }
 
@@ -42,6 +44,7 @@ export const WORKER_ERROR_CODES = [
   "upload_rejected", // 422 secret scan
   "session_exists", // 409
   "upload_cap_device", "upload_cap_global", // 429
+  "blinded_guard", // 422 {reason, line, permanent:true}: the server-side blinded guard (Worker cd26798); reason per BLINDED_GUARD_CODES + sealed_base_other_device, guard_config; nothing stored
 ] as const;
 export type WorkerErrorCode = (typeof WORKER_ERROR_CODES)[number];
 /** error body: { error: { message, type, code, ...extra } }; 429s also send a retry-after header (seconds) */

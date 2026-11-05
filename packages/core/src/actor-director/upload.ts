@@ -42,3 +42,19 @@ export function buildAdUpload(
   }
   return { ok: true, envelope, bytes };
 }
+
+/**
+ * v1.5: a session's uploads IN ORDER: the main log (<id>) first, then its <id>.sealed companion. The server guard
+ * checks a .sealed upload against the stored base, so the main log must be uploaded (201) before the sealed one is
+ * sent. Fail closed: if the main log doesn't build, the sealed one is not built either. Senders POST in this order
+ * and stop at the first failure.
+ */
+export function buildAdUploads(
+  storage: AdStorage, sessionId: string, meta: { appVersion: string; platform: string; build?: string | number | null }, clock: AdClock,
+): Array<{ ns: AdNamespace; result: AdUploadBuild }> {
+  const mainNs: AdNamespace = storage.read("blinded", sessionId) !== null ? "blinded" : "visible";
+  const main = buildAdUpload(storage, mainNs, sessionId, meta, clock);
+  const out: Array<{ ns: AdNamespace; result: AdUploadBuild }> = [{ ns: mainNs, result: main }];
+  if (main.ok && storage.read("sealed", sessionId) !== null) out.push({ ns: "sealed", result: buildAdUpload(storage, "sealed", sessionId, meta, clock) });
+  return out;
+}

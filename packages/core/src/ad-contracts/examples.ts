@@ -55,7 +55,7 @@ export const directorOutputNoNote = {
 export const actorText = renderActorText(directorOutputNote.note);
 
 const device = { deviceModel: "iPhone18,1", platform: "ios", orientation: "portrait", widthPt: 402, heightPt: 874 } as const;
-const common = { profile: "actor-director", contract: "contract-v1.4", userId: "manny", actor_prompt_id: "ap1-3c9e1b07", director_prompt_id: "dir1-b1d2fd77", pipeline_version: "gp1.0.0", tokenizer: "o200k_base", models: { actor: "gpt-oss:20b-cloud", director: "gpt-oss:120b-cloud" }, consent: { camera: true, rawGaze: false }, gaze: { tracker: "arkit", permission: "granted" }, device, director_enabled: true } as const;
+const common = { profile: "actor-director", contract: "contract-v1.5", userId: "manny", actor_prompt_id: "ap1-3c9e1b07", director_prompt_id: "dir1-b1d2fd77", pipeline_version: "gp1.0.0", tokenizer: "o200k_base", models: { actor: "gpt-oss:20b-cloud", director: "gpt-oss:120b-cloud" }, actor_model: "gpt-oss:20b-cloud", director_model: "gpt-oss:120b-cloud", input_mode: "gaze", consent: { camera: true, rawGaze: false }, gaze: { tracker: "arkit", permission: "granted" }, device, director_enabled: true } as const;
 const blind = { index: 3, total: 10, scheduleHash: "9f2c4e1a7b3d5c6e8f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e" };
 const usage = { prompt_tokens: 1788, completion_tokens: 212, reasoning_tokens: 64 };
 
@@ -95,6 +95,21 @@ export const events = {
   health: { ...env(5, 1200), type: "health", check: "budget", ok: false, code: "budget.director_cap", detail: "Director paused: daily cap reached; chat continues without notes", http_status: 429, worker_code: "role_cap_director", role: "director" },
   gaze_raw: { ...env(6, 1300), type: "gaze_raw", samples: [gazeSample] },
   session_end: { ...env(401, 1200100), type: "session_end", turns: 21, reason: "user" },
+  /** v1.5: Mac, Pointer mode (first Mac pilot), tab visible dogfood; no camera; dwell 500 ms, gaps <= 100 ms merged */
+  session_start_pointer: { ...env(0, 0), type: "session_start", ...common, input_mode: "pointer", pointer_config: { id: "pc1-d500-g100", dwell_ms: 500, merge_gap_ms: 100 },
+    consent: { camera: false, rawGaze: false }, gaze: { tracker: "none", permission: "prompt" }, device: { deviceModel: "MacBookAir10,1", platform: "mac", orientation: "landscape_right", widthPt: 1440, heightPt: 900 },
+    session_type: "tab_visible", tab: "visible", arm: "on", p_inject: 0.5 },
+  /** v1.5: paragraphs are text (no interactive flag); a selectable span and a button are interactive */
+  aoi_layout_pointer: { ...env(20, 61010), type: "aoi_layout", turn: 3, msg: "a3", orientation: "landscape_right", boxes: [{ aoi: "a3.p1", words: 41, x: 320, y: 410, w: 680, h: 96 }, { aoi: "a3.p2.s1", words: 4, x: 352, y: 530, w: 190, h: 22, interactive: true }, { aoi: "a3.c1", words: 2, x: 320, y: 590, w: 120, h: 32, interactive: true }] },
+  /** v1.5: interactive-AOI pointer events; ids p<k> are evidence ids */
+  pointer_l1: { ...env(21, 66010), type: "pointer_l1", t0: 61010, t1: 66010, events: [{ id: "p4", kind: "pointer_hover", aoi: "a3.c1", msg: "a3", t0: 62100, t1: 62100 }, { id: "p5", kind: "pointer_dwell", aoi: "a3.c1", msg: "a3", t0: 62100, t1: 62980, dwell_ms: 880 }, { id: "p6", kind: "pointer_select", aoi: "a3.p2.s1", msg: "a3", t0: 64200, t1: 64200 }] },
+  /** v1.5: a Pointer-mode digest: no reading labels, no e-events; quality names the source via input_mode */
+  attention_digest_pointer: { ...env(22, 66020), type: "attention_digest", turn: 3, msg: "a3",
+    digest: { msg: "a3", windowMs: 5000, quality: 1, qualityLabel: "good", paras: [], lookBacks: [], offscreenMs: 0, composerPauses: 0, events: [], input_mode: "pointer",
+      pointer: [{ id: "p5", kind: "pointer_dwell", aoi: "a3.c1", excerpt: "Show the math", dwell_ms: 880 }, { id: "p6", kind: "pointer_select", aoi: "a3.p2.s1", excerpt: "autolyse first" }] },
+    events: [] },
+  /** v1.5: Manny switched the Director model mid-session; takes effect from turn 5's request (same session) */
+  model_change: { ...env(40, 140000), type: "model_change", at: 5, role: "director", from: "gpt-oss:120b-cloud", to: "gpt-oss:20b-cloud" },
 } satisfies Record<string, BhAdEvent>;
 
 const exampleLog = [events.session_start_tab_visible, events.health, events.session_end].map((e) => JSON.stringify(e)).join("\n") + "\n";

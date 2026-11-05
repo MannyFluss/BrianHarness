@@ -1,0 +1,47 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:10:00.000Z",
+  "mono": 0,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 0,
+  "type": "session_start",
+  "profile": "actor-director",
+  "contract": "contract-v1.5",
+  "userId": "manny",
+  "actor_prompt_id": "ap1-3c9e1b07",
+  "director_prompt_id": "dir1-b1d2fd77",
+  "pipeline_version": "gp1.0.0",
+  "tokenizer": "o200k_base",
+  "models": {
+    "actor": "gpt-oss:20b-cloud",
+    "director": "gpt-oss:120b-cloud"
+  },
+  "actor_model": "gpt-oss:20b-cloud",
+  "director_model": "gpt-oss:120b-cloud",
+  "input_mode": "pointer",
+  "consent": {
+    "camera": false,
+    "rawGaze": false
+  },
+  "gaze": {
+    "tracker": "none",
+    "permission": "prompt"
+  },
+  "device": {
+    "deviceModel": "MacBookAir10,1",
+    "platform": "mac",
+    "orientation": "landscape_right",
+    "widthPt": 1440,
+    "heightPt": 900
+  },
+  "director_enabled": true,
+  "pointer_config": {
+    "id": "pc1-d500-g100",
+    "dwell_ms": 500,
+    "merge_gap_ms": 100
+  },
+  "session_type": "tab_visible",
+  "tab": "visible",
+  "arm": "on",
+  "p_inject": 0.5
+}

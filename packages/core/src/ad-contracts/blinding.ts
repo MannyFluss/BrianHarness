@@ -5,6 +5,7 @@
  */
 import BLINDING from "./blinding.json" with { type: "json" };
 import type { BhAdEventType } from "./events.js";
+import { DEFAULT_POINTER_CONFIG, INPUT_MODES, LEGACY_INPUT_MODE, MODE_FORBIDDEN_TYPES, pointerEventViolation, type InputMode, type PointerEvent } from "./input-mode.js";
 
 /** regex fragments of the arm-key list (protocol 4's ARM_KEYS, verbatim) */
 export const ARM_KEY_PATTERNS: readonly string[] = BLINDING.armKeyPatterns;
@@ -29,6 +30,14 @@ export const BLINDED_GUARD_CODES = [
   "arm_key", // any key matching the shared arm-key list, at any depth, in a blinded main log line
   "sealed_base_not_blinded", // a ".sealed" upload whose base session (or its own session_start) is not blinded (v1.3: or tab_visible with a matching base)
   "sealed_everywhere", // (v1.3) a sealedEverywhereTypes line, or a sealed-only reason value, in a non-sealed (visible or blinded main) log
+  "unknown_event_type", // (v1.5) a type not in blinding.json eventTypes (any upload; never dropped silently)
+  "gaze_raw_forbidden", // (v1.5) a gaze_raw line (any upload: raw gaze never goes through the Worker)
+  "sim_marker", // (v1.5) a sim-only marker (bh-ad-sim-look/1, bh-ad-sim-walk/1, ...) anywhere in a line (any upload: eval vs sim is not marked in an upload)
+  "session_id_too_long", // (v1.5) a base session id over 121 chars (<id>.sealed must fit 128)
+  "input_mode_mismatch", // (v1.5) a line the session's input_mode may not write (gaze lines in pointer/none, pointer_l1 in gaze/none, a digest with the wrong sources), or an unknown input_mode
+  "pointer_not_interactive", // (v1.5) a pointer event on an AOI not marked interactive in that message's aoi_layout
+  "pointer_text_presence", // (v1.5) pointer hover / dwell on a paragraph, or any pointer event on the composer (reading proxies)
+  "pointer_invalid", // (v1.5) a pointer event of the wrong shape (kind, p<k> id, dwell_ms only on dwell) or a dwell under pointer_config.dwell_ms
 ] as const;
 export type BlindedGuardCode = (typeof BLINDED_GUARD_CODES)[number];
 export type GuardResult = { ok: true } | { ok: false; code: BlindedGuardCode; line: number };
@@ -36,11 +45,28 @@ export type GuardResult = { ok: true } | { ok: false; code: BlindedGuardCode; li
 const TAB_ONLY: Record<string, readonly string[]> = BLINDING.tabOnlyFields;
 const SEALED_TYPES = new Set<string>(BLINDING.sealedOnlyTypes as BhAdEventType[]);
 export const SEALED_SESSION_SUFFIX_SHARED: string = BLINDING.sealedSessionSuffix;
+/** v1.5: the contract version the allowlist belongs to (equals CONTRACT_VERSION; a test keeps them equal) */
+export const BLINDING_CONTRACT: string = BLINDING.contract;
+/** v1.5: every bh-ad/1 v1.x event type; an upload line of any other type is rejected unknown_event_type */
+export const EVENT_TYPES: readonly string[] = BLINDING.eventTypes;
+export const UPLOAD_FORBIDDEN_TYPES: readonly string[] = BLINDING.uploadForbiddenTypes;
+export const SIM_MARKER_RE = new RegExp(BLINDING.simMarkerPattern);
+export const MAX_BASE_SESSION_ID_LENGTH: number = BLINDING.maxBaseSessionIdLength;
+const EVENT_TYPE_SET = new Set(EVENT_TYPES);
+/** v1.5: rules for ONE line of ANY upload (main, blinded or sealed); null = clean */
+export function uploadLineViolation(e: Line, raw: string): BlindedGuardCode | null {
+  const type = String(e.type);
+  if (UPLOAD_FORBIDDEN_TYPES.includes(type)) return "gaze_raw_forbidden";
+  if (!EVENT_TYPE_SET.has(type)) return "unknown_event_type";
+  if (SIM_MARKER_RE.test(raw)) return "sim_marker";
+  return null;
+}
 
 type Line = Record<string, unknown>;
 const isObj = (v: unknown): v is Line => !!v && typeof v === "object" && !Array.isArray(v);
+const rawLines = (jsonl: string): string[] => jsonl.split("\n").filter((l) => l.trim());
 const parse = (jsonl: string): Array<Line | null> =>
-  jsonl.split("\n").filter((l) => l.trim()).map((l) => { try { const v = JSON.parse(l); return isObj(v) ? v : null; } catch { return null; } });
+  rawLines(jsonl).map((l) => { try { const v = JSON.parse(l); return isObj(v) ? v : null; } catch { return null; } });
 
 /** the first arm key found at any depth (path), or null */
 export function findArmKey(v: unknown, re = armKeyRegExp(), path = ""): string | null {
@@ -77,6 +103,46 @@ export function blindedMainLineViolation(e: Line, re = armKeyRegExp()): BlindedG
   return null;
 }
 
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+/**
+ * v1.5: the input-mode fence over one log (main or sealed; lines[0] is session_start). Mode = session_start.input_mode
+ * (absent = "gaze", contract-v1 .. v1.4). Pointer events must target an AOI marked interactive in the latest aoi_layout of
+ * their message logged before them. Returns the first violation, or null.
+ */
+export function inputModeViolation(lines: readonly Line[]): { code: BlindedGuardCode; line: number } | null {
+  const start = lines[0];
+  if (!start) return null;
+  const mode = (start.input_mode ?? LEGACY_INPUT_MODE) as InputMode;
+  if (!(INPUT_MODES as readonly string[]).includes(mode)) return { code: "input_mode_mismatch", line: 1 };
+  const pc = isObj(start.pointer_config) && typeof start.pointer_config.dwell_ms === "number" ? { dwell_ms: start.pointer_config.dwell_ms } : DEFAULT_POINTER_CONFIG;
+  const forbidden = MODE_FORBIDDEN_TYPES[mode];
+  const interactive = new Map<string, Set<string>>();
+  for (let i = 1; i < lines.length; i++) {
+    const e = lines[i]!, type = String(e.type), line = i + 1;
+    if (type === "session_start") return { code: "input_mode_mismatch", line }; // one session, one mode
+    if (forbidden.includes(type)) return { code: "input_mode_mismatch", line };
+    if (type === "aoi_layout" && typeof e.msg === "string") {
+      interactive.set(e.msg, new Set(arr(e.boxes).filter((b): b is Line => isObj(b) && b.interactive === true).map((b) => String(b.aoi))));
+    }
+    if (type === "attention_digest" && isObj(e.digest)) {
+      const g = e.digest;
+      if (g.input_mode !== undefined && g.input_mode !== mode) return { code: "input_mode_mismatch", line };
+      const gazeish = arr(g.paras).length > 0 || arr(g.lookBacks).length > 0 || Number(g.offscreenMs ?? 0) > 0 || Number(g.composerPauses ?? 0) > 0 || arr(g.events).length > 0 || arr(e.events).length > 0;
+      if (mode !== "gaze" && gazeish) return { code: "input_mode_mismatch", line };
+      if (mode !== "pointer" && arr(g.pointer).length > 0) return { code: "input_mode_mismatch", line };
+    }
+    if (type === "pointer_l1") {
+      for (const p of arr(e.events)) {
+        if (!isObj(p)) return { code: "pointer_invalid", line };
+        const v = pointerEventViolation(p as unknown as PointerEvent, interactive.get(String(p.msg)) ?? new Set(), pc);
+        if (v === "pointer_shape" || v === "pointer_dwell_short") return { code: "pointer_invalid", line };
+        if (v) return { code: v, line };
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * The blinded guard over one upload (envelope.sessionId + jsonl). For a ".sealed" upload pass the base session's
  * main log (or null when unknown: rejected, fail closed). tab_visible main uploads pass (they carry arm openly).
@@ -85,13 +151,19 @@ export function blindedGuard(sessionId: string, jsonl: string, baseMainJsonl?: s
   const lines = parse(jsonl);
   const sealed = sessionId.endsWith(SEALED_SESSION_SUFFIX_SHARED);
   const base = sealed ? sessionId.slice(0, -SEALED_SESSION_SUFFIX_SHARED.length) : sessionId;
+  if (base.length > MAX_BASE_SESSION_ID_LENGTH) return { ok: false, code: "session_id_too_long", line: 1 };
+  const raws = rawLines(jsonl);
   for (let i = 0; i < lines.length; i++) {
     const e = lines[i];
     if (!e || e.schema !== "bh-ad/1") return { ok: false, code: "not_bh_ad", line: i + 1 };
     if (e.sessionId !== base) return { ok: false, code: "session_id_mismatch", line: i + 1 };
+    const v = uploadLineViolation(e, raws[i]!);
+    if (v) return { ok: false, code: v, line: i + 1 };
   }
   const start = lines[0];
   if (!start || start.type !== "session_start") return { ok: false, code: "no_session_start", line: 1 };
+  const mv = inputModeViolation(lines as Line[]);
+  if (mv) return { ok: false, ...mv };
   if (sealed) {
     // v1.3: a tab_visible session has a sealed companion too (leak_judge is sealed-only everywhere); the base must match
     if (start.session_type !== "blinded" && start.session_type !== "tab_visible") return { ok: false, code: "sealed_base_not_blinded", line: 1 };

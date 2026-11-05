@@ -105,7 +105,7 @@ const pluginSchema = {
 const P = (d) => ({ $ref: BASE + "gaze-plugin.schema.json#/definitions/" + d });
 
 // ---------- note ----------
-const EVID = "^(?:e[0-9]+|u[0-9]+|a[0-9]+(?:\\.p[0-9]+(?:\\.s[0-9]+)?)?)$";
+const EVID = "^(?:e[0-9]+|p[0-9]+|u[0-9]+|a[0-9]+(?:\\.p[0-9]+(?:\\.s[0-9]+)?)?)$"; // v1.5: p<k> pointer evidence
 const evidenceId = str(2, 24, { pattern: EVID });
 const MOVES = ["go_deeper", "broaden", "return_to", "clarify", "simplify", "give_example", "check_in", "slow_down", "other"];
 const suggestion = obj({ move: en(...MOVES), target: str(1, 160), text: str(1, 280) }, ["target"]);
@@ -135,7 +135,7 @@ const N = (d) => ({ $ref: BASE + "note.schema.json#/definitions/" + d });
 
 // ---------- worker ----------
 const ROLES = ["actor", "director", "judge"];
-const WCODES = ["invalid_role", "role_cap_actor", "role_cap_director", "role_cap_judge", "daily_cap_device", "daily_cap_global", "ad_log_too_large", "invalid_json", "invalid_ad_upload", "invalid_jsonl", "upload_rejected", "session_exists", "upload_cap_device", "upload_cap_global"];
+const WCODES = ["invalid_role", "role_cap_actor", "role_cap_director", "role_cap_judge", "daily_cap_device", "daily_cap_global", "ad_log_too_large", "invalid_json", "invalid_ad_upload", "invalid_jsonl", "upload_rejected", "session_exists", "upload_cap_device", "upload_cap_global", "blinded_guard"];
 const workerSchema = {
   $schema: "http://json-schema.org/draft-07/schema#",
   $id: BASE + "worker.schema.json",
@@ -173,22 +173,34 @@ const fixation = obj({ id: str(1, 16), t0: num(0), t1: num(0), x: num(-COORD, CO
 const saccade = obj({ t0: num(0), t1: num(0), from: str(1, 16), to: str(1, 16), dir: en("fwd", "back", "jump"), ampDeg: num(0) });
 const gap = obj({ t0: num(0), t1: num(0), kind: en("blink", "offscreen", "noface", "lowconf") });
 const aoi = str(1, 32);
-const aoiBox = obj({ aoi, words: int(0), x: num(-COORD, COORD), y: num(-COORD, COORD * 100), w: num(0, COORD), h: num(0, COORD * 100) });
+const aoiBox = obj({ aoi, words: int(0), x: num(-COORD, COORD), y: num(-COORD, COORD * 100), w: num(0, COORD), h: num(0, COORD * 100),
+  interactive: { type: "boolean", description: "v1.5: a control that may be a pointer target; absent = text (never a hover/dwell target)" } }, ["interactive"]);
 const aoiDwell = obj({ aoi, words: int(0), visibleMs: num(0), gazeMs: num(0), msPerWordZ: nul({ type: "number" }), fixations: int(0), reentries: int(0), regressionsIn: int(0), firstFixLatencyMs: nul(num(0)), coverage: num(0, 1), conf: num(0, 1) });
 const excerpt = str(0, 80);
 const attEvent = obj({ id: str(2, 12, { pattern: "^e[0-9]+$" }), kind: en("deep_read", "reread", "skip", "look_back", "fast_scan", "offscreen", "composer_hesitation", "eeg_spike"), aoi, excerpt, t0: num(0), t1: num(0), z: nul({ type: "number" }), conf: num(0, 1), features: numMap });
+// v1.5: input modes and pointer evidence (input-mode.ts)
+const INPUT_MODES = ["pointer", "gaze", "none"];
+const POINTER_KINDS = ["pointer_click", "pointer_select", "pointer_hover", "pointer_dwell"];
+const pointerId = str(2, 12, { pattern: "^p[0-9]+$" });
+/** dwell_ms only (and always) on pointer_dwell */
+const dwellRule = { if: { properties: { kind: { const: "pointer_dwell" } } }, then: { required: ["dwell_ms"] }, else: { not: { required: ["dwell_ms"] } } };
+const pointerEvent = { ...obj({ id: pointerId, kind: en(...POINTER_KINDS), aoi, msg: msgId, t0: num(0), t1: num(0), dwell_ms: num(0) }, ["dwell_ms"]), ...dwellRule };
+const pointerDigestItem = { ...obj({ id: pointerId, kind: en(...POINTER_KINDS), aoi, excerpt, dwell_ms: num(0) }, ["dwell_ms"]), ...dwellRule };
+const pointerConfig = obj({ id: str(1, 32, { pattern: "^pc1-d[0-9]+-g[0-9]+$" }), dwell_ms: num(1, 60000), merge_gap_ms: num(0, 5000) });
 const digest = obj({
   msg: msgId, windowMs: num(0), quality: num(0, 1), qualityLabel: en("good", "fair", "poor"),
   paras: arr({ ...obj({ aoi, excerpt, label: en("deep", "read", "skim", "skipped"), ratio: num(0), ev: arr(str(1, 12), 0, 12) }, ["ev"]) }),
   lookBacks: arr(obj({ aoi, excerpt, ms: num(0), ev: str(1, 12) })), offscreenMs: num(0), composerPauses: int(0), events: arr(str(1, 12), 0, 12),
-});
+  input_mode: { ...en(...INPUT_MODES), description: "v1.5: the session's input mode (the digest's sources); absent = gaze" },
+  pointer: { ...arr(pointerDigestItem, 0, 24), description: "v1.5, mode pointer only: interactive-AOI pointer evidence" },
+}, ["input_mode", "pointer"]);
 const footprint = obj({
   actor_turns: int(0), notes_injected: int(0), notes_shadowed: int(0), notes_blocked: int(0), session_share: share01, session_dynamic_share: share01,
   recent: arr(obj({ note_id: str(2, 12), turn, kind: N("NoteKind"), move: nul(N("SuggestionMove")), decision: en("inject", "shadow", "blocked"), followed: nul({ type: "boolean" }), next_dwell_ratio: nul(num(0)) }), 0, 3),
 });
 const sessionStart = {
   ...ev("session_start", {
-    profile: { const: "actor-director" }, contract: en("contract-v1", "contract-v1.1", "contract-v1.2", "contract-v1.3", "contract-v1.4"), userId: str(1, 128),
+    profile: { const: "actor-director" }, contract: en("contract-v1", "contract-v1.1", "contract-v1.2", "contract-v1.3", "contract-v1.4", "contract-v1.5"), userId: str(1, 128),
     session_type: { ...en("blinded", "tab_visible"), description: "SESSION TYPE. Fixed at session start by the schedule. blinded => tab hidden, main log redacted (see TAB-ONLY fields)" },
     tab: { ...en("visible", "hidden"), description: "must agree with session_type: blinded=hidden, tab_visible=visible" },
     arm: { ...en("on", "shadow", "off"), description: "TAB-ONLY: tab_visible sessions and the sealed log of a blinded session; NEVER in a blinded main log" },
@@ -198,12 +210,22 @@ const sessionStart = {
     director_format_id: { ...str(1, 32, { pattern: "^fmt[0-9]+-[0-9a-f]{8}$" }), description: "v1.1: id of the output-format slot (DIRECTOR_OUTPUT_FORMAT_TEXT)" },
     director_examples_id: { ...str(1, 32, { pattern: "^dex[0-9]+-[0-9a-f]{8}$" }), description: "v1.1: id of the in-context examples slot" },
     director_assembled_sha8: { ...str(8, 8, { pattern: "^[0-9a-f]{8}$" }), description: "v1.1: sha256[:8] of the final assembled Director system message" },
-    pipeline_version: str(1, 32), tokenizer: { const: "o200k_base" }, models: obj({ actor: str(1, 128), director: str(1, 128) }),
+    pipeline_version: str(1, 32), tokenizer: { const: "o200k_base" }, models: { ...obj({ actor: str(1, 128), director: str(1, 128) }), description: "models at session start; v1.5: equal to actor_model / director_model" },
+    actor_model: { ...str(1, 128), description: "v1.5: full Actor model tag at session start (canonical); changes are model_change lines" },
+    director_model: { ...str(1, 128), description: "v1.5: full Director model tag at session start (canonical); changes are model_change lines" },
+    input_mode: { ...en(...INPUT_MODES), description: "v1.5: fixed for the session (a change = a new session); absent in v1-v1.4 = gaze" },
+    pointer_config: { ...pointerConfig, description: "v1.5, input_mode pointer only: dwell threshold and gap merge in force" },
     consent: obj({ camera: { type: "boolean" }, rawGaze: { type: "boolean" } }),
     gaze: obj({ tracker: en(...GAZE_SRC, "none"), permission: P("CameraPermission") }),
     device: obj({ deviceModel: str(1, 64), platform: en("ios", "mac", "web"), orientation: P("Orientation"), widthPt: num(1, COORD), heightPt: num(1, COORD) }),
     director_enabled: { type: "boolean" },
-  }, ["arm", "p_inject", "sealed", "blind", "director_format_id", "director_examples_id", "director_assembled_sha8"]),
+  }, ["arm", "p_inject", "sealed", "blind", "director_format_id", "director_examples_id", "director_assembled_sha8", "actor_model", "director_model", "input_mode", "pointer_config"]),
+  allOf: [
+    // v1.5 logs always name the input mode and both models
+    { if: { properties: { contract: { const: "contract-v1.5" } } }, then: { required: ["input_mode", "actor_model", "director_model"] } },
+    // pointer_config exactly when input_mode is pointer
+    { if: { required: ["input_mode"], properties: { input_mode: { const: "pointer" } } }, then: { required: ["pointer_config"] }, else: { not: { required: ["pointer_config"] } } },
+  ],
   oneOf: [
     // blinded main log: hidden tab, sealed, schedule position, NO arm
     { properties: { session_type: { const: "blinded" }, tab: { const: "hidden" } }, required: ["sealed", "blind"], not: { anyOf: [{ required: ["arm"] }, { required: ["p_inject"] }] } },
@@ -230,6 +252,8 @@ const events = [
   ev("gaze_quality", { turn, calib: obj({ errDeg: nul(num(0)), errParas: nul(num(0)), ageS: nul(num(0)), orientation: P("Orientation") }), quality: share01, faceFrac: share01, hz: nul(G("GazeHz")) }),
   ev("aoi_layout", { turn, msg: msgId, orientation: P("Orientation"), boxes: arr(aoiBox, 0, 400) }),
   ev("scroll", { samples: arr(obj({ t: num(0), top: num(-COORD, COORD * 100) }), 1, 600) }),
+  ev("pointer_l1", { t0: num(0), t1: num(0), events: arr(pointerEvent, 0, 20) }),
+  ev("model_change", { at: turn, role: en("actor", "director"), from: str(1, 128), to: str(1, 128) }),
   ev("gaze_l1", { t0: num(0), t1: num(0), fixations: arr(fixation, 0, 20), saccades: arr({ ...saccade, properties: { ...saccade.properties, dir: en("back", "jump") } }, 0, 10), gaps: arr(gap, 0, 10) }),
   ev("gaze_raw", { samples: arr(G("GazeSample"), 1, 64) }),
   ev("tab_occluded", { turn, msg: msgId, t0: num(0), t1: num(0), ms: num(0) }),

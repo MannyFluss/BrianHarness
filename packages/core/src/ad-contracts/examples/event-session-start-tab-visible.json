@@ -6,7 +6,7 @@
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.4",
+  "contract": "contract-v1.5",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -16,6 +16,9 @@
     "actor": "gpt-oss:20b-cloud",
     "director": "gpt-oss:120b-cloud"
   },
+  "actor_model": "gpt-oss:20b-cloud",
+  "director_model": "gpt-oss:120b-cloud",
+  "input_mode": "gaze",
   "consent": {
     "camera": true,
     "rawGaze": false

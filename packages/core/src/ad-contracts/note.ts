@@ -5,8 +5,9 @@
 export const SUGGESTION_MOVES = ["go_deeper", "broaden", "return_to", "clarify", "simplify", "give_example", "check_in", "slow_down", "other"] as const;
 export type SuggestionMove = (typeof SUGGESTION_MOVES)[number];
 
-/** "e31" L3 event, "u12" user message, "a7" Actor message, "a7.p2" paragraph, "a7.p2.s1" span */
-export const EVIDENCE_ID_PATTERN = "^(?:e[0-9]+|u[0-9]+|a[0-9]+(?:\\.p[0-9]+(?:\\.s[0-9]+)?)?)$";
+/** "e31" L3 gaze event, "p4" pointer event (v1.5), "u12" user message, "a7" Actor message, "a7.p2" paragraph, "a7.p2.s1" span.
+ *  The prefix alone names the source (no evidence_source field); which prefixes a session may cite depends on input_mode */
+export const EVIDENCE_ID_PATTERN = "^(?:e[0-9]+|p[0-9]+|u[0-9]+|a[0-9]+(?:\\.p[0-9]+(?:\\.s[0-9]+)?)?)$";
 export type EvidenceId = string;
 
 export interface DirectorSuggestion {

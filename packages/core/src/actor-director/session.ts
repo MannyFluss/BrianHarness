@@ -21,7 +21,8 @@
  * sealed-only, and counts toward the leak breaker (2 = health director.leak_breaker, every later note blocked).
  * Without a gate (leakGate: null, E3 behaviour): 1 safety leak after an injected note = flag, 2 = breaker.
  */
-import { DIRECTOR_HOLD_MS, SAFETY_LEAKS, noteKind } from "../ad-contracts/index.js";
+import { DEFAULT_POINTER_CONFIG, DIRECTOR_HOLD_MS, SAFETY_LEAKS, noteKind } from "../ad-contracts/index.js";
+import type { InputMode, PointerConfig } from "../ad-contracts/index.js";
 import type { Arm, AttentionEvent, BhAdEventBody, DirectorFootprint, DirectorNote, DirectorOutput, HealthCode, RailCode, ReadingDigest, SessionType, Usage } from "../ad-contracts/index.js";
 import { OPENER_CUE } from "../backends.js";
 import { makeRng, type Rng } from "../rng.js";
@@ -61,6 +62,9 @@ export interface AdSessionOptions {
   seed?: number;
   sleep?: (ms: number) => Promise<void>;
   models?: { actor: string; director: string };
+  /** contract-v1.5: Director input mode, fixed for the session (default "gaze"); pointer_config logged in pointer mode */
+  inputMode?: InputMode;
+  pointerConfig?: PointerConfig;
   /** the pre-display leak gate; default LeakGate over MockJudgeBackend (judge route). null = no gate (E3 behaviour) */
   leakGate?: LeakGate | null;
   /** judge backend for the default gate (e.g. WorkerChatBackend: X-BH-Role judge); default MockJudgeBackend */
@@ -117,6 +121,8 @@ export class ActorDirectorSession {
   private pInject: number;
   readonly gate: LeakGate | null;
   readonly models: { actor: string; director: string };
+  /** contract-v1.5: fixed for the session (a change = a new session) */
+  readonly inputMode: InputMode;
 
   constructor(private o: AdSessionOptions) {
     this.tracker = new ContextShareTracker(o.counter);
@@ -126,6 +132,7 @@ export class ActorDirectorSession {
     this.holdMs = Math.min(o.holdMs ?? DIRECTOR_HOLD_MS, DIRECTOR_HOLD_MS);
     this.pInject = o.pInject ?? (o.arm === "on" ? 0.5 : 0);
     this.models = o.models ?? { actor: ACTOR_MODEL, director: DIRECTOR_MODEL };
+    this.inputMode = o.inputMode ?? "gaze";
     this.gate = o.leakGate === null ? null : o.leakGate ?? new LeakGate({
       backend: o.judgeBackend ?? new MockJudgeBackend(), actorModel: this.models.actor,
       deadlineMs: Math.min(o.judgeDeadlineMs ?? LEAK_JUDGE_DEADLINE_MS, LEAK_JUDGE_DEADLINE_MS),
@@ -140,11 +147,12 @@ export class ActorDirectorSession {
   start(): void {
     const tabVisible = this.o.sessionType === "tab_visible";
     this.emit({
-      type: "session_start", profile: "actor-director", contract: "contract-v1.4", userId: this.o.userId, session_type: this.o.sessionType,
+      type: "session_start", profile: "actor-director", contract: "contract-v1.5", userId: this.o.userId, session_type: this.o.sessionType,
       tab: tabVisible ? "visible" : "hidden", arm: this.o.arm, p_inject: this.pInject, ...(tabVisible ? {} : { sealed: true as const, ...(this.o.blind ? { blind: this.o.blind } : {}) }),
       actor_prompt_id: ACTOR_PROMPT_ID, director_prompt_id: this.o.directorPrompt?.id ?? DIRECTOR_PROMPT_ID, director_format_id: DIRECTOR_FORMAT_SLOT.id,
       director_examples_id: DIRECTOR_EXAMPLES_SLOT.id, director_assembled_sha8: this.o.directorPrompt ? sha8(this.o.directorPrompt.assemble(true)) : DIRECTOR_ASSEMBLED_SHA8, pipeline_version: PIPELINE_VERSION,
-      tokenizer: "o200k_base", models: this.models, consent: this.o.consent,
+      tokenizer: "o200k_base", models: this.models, actor_model: this.models.actor, director_model: this.models.director,
+      input_mode: this.inputMode, ...(this.inputMode === "pointer" ? { pointer_config: this.o.pointerConfig ?? DEFAULT_POINTER_CONFIG } : {}), consent: this.o.consent,
       gaze: this.o.gaze ?? { tracker: "none", permission: "prompt" },
       device: this.o.device ?? { deviceModel: "sim", platform: "web", orientation: "portrait", widthPt: 390, heightPt: 844 },
       director_enabled: this.enabled(),
@@ -189,7 +197,7 @@ export class ActorDirectorSession {
     const out = p.settled?.output ?? null;
     const rails = out?.note ? runRails(out, {
       input: p.input, previousActorTexts: this.notes.filter((n) => n.decision !== "blocked" && n.actor_text).slice(-2).map((n) => n.actor_text!),
-      directorEnabled: this.enabled(), cameraConsent: this.o.consent.camera, invalidEventIds: p.invalid, leakBreakerTripped: this.breakerTripped,
+      directorEnabled: this.enabled(), cameraConsent: this.o.consent.camera, invalidEventIds: p.invalid, leakBreakerTripped: this.breakerTripped, inputMode: this.inputMode,
     }) : null;
     return { turn: p.turn, settled: !!p.settled, output: out, rails: rails ? { pass: rails.pass, blocked_by: rails.blocked_by, actor_text: rails.actor_text } : null };
   }
@@ -268,7 +276,7 @@ export class ActorDirectorSession {
     if (!r.output?.note) return null;
     const rails = runRails(r.output, {
       input: p.input, previousActorTexts: this.notes.filter((n) => n.decision !== "blocked" && n.actor_text).slice(-2).map((n) => n.actor_text!),
-      directorEnabled: this.enabled(), cameraConsent: this.o.consent.camera, invalidEventIds: p.invalid, leakBreakerTripped: this.breakerTripped,
+      directorEnabled: this.enabled(), cameraConsent: this.o.consent.camera, invalidEventIds: p.invalid, leakBreakerTripped: this.breakerTripped, inputMode: this.inputMode,
     });
     const note = r.output.note;
     this.emit({ type: "rail_check", turn: p.turn, note_id: note.id, pass: rails.pass, blocked_by: rails.blocked_by, ...(rails.hits.length ? { hits: rails.hits.slice(0, 12) } : {}) });

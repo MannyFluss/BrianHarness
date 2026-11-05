@@ -23,6 +23,8 @@ import type { GazeHz, GazeSample, GazeSrc } from "./gaze.js";
 import type { Role, WorkerErrorCode } from "./worker.js";
 import type { HealthCheck, HealthCode } from "./health.js";
 import type { DirectorOutput, EvidenceId, LeakCode, NoteKind, RailCode, SuggestionMove } from "./note.js";
+import type { InputMode, PointerConfig, PointerDigestItem, PointerEvent } from "./input-mode.js";
+import type { ModelRole } from "./models.js";
 
 export type SessionType = "blinded" | "tab_visible";
 export type Arm = "on" | "shadow" | "off";
@@ -45,7 +47,8 @@ export interface Usage { prompt_tokens: number | null; completion_tokens: number
 export interface Fixation { id: string; t0: number; t1: number; x: number; y: number; dispPx: number; n: number }
 export interface Saccade { t0: number; t1: number; from: string; to: string; dir: "fwd" | "back" | "jump"; ampDeg: number }
 export interface GapEvent { t0: number; t1: number; kind: "blink" | "offscreen" | "noface" | "lowconf" }
-export interface AoiBox { aoi: string; words: number; x: number; y: number; w: number; h: number }
+/** v1.5: interactive true = a control (button, selectable span a7.p2.s1, ...) that may be a pointer target; absent = text */
+export interface AoiBox { aoi: string; words: number; x: number; y: number; w: number; h: number; interactive?: boolean }
 export interface AoiDwell {
   aoi: string; words: number; visibleMs: number; gazeMs: number; msPerWordZ: number | null; fixations: number;
   reentries: number; regressionsIn: number; firstFixLatencyMs: number | null; coverage: number; conf: number;
@@ -60,6 +63,11 @@ export interface ReadingDigest {
   paras: Array<{ aoi: string; excerpt: string; label: "deep" | "read" | "skim" | "skipped"; ratio: number; ev?: string[] }>;
   lookBacks: Array<{ aoi: string; excerpt: string; ms: number; ev: string }>;
   offscreenMs: number; composerPauses: number; events: string[];
+  /** v1.5: the session's input mode (sources the digest may use); absent = "gaze". In "pointer" and "none" paras, lookBacks
+   *  and events are empty and offscreenMs / composerPauses are 0 (no reading labels without gaze) */
+  input_mode?: InputMode;
+  /** v1.5, mode "pointer" only: interactive-AOI pointer evidence for this window (<= 24), newest last */
+  pointer?: PointerDigestItem[];
 }
 
 /** what the Director is told about itself on every call */
@@ -80,7 +88,7 @@ export type BhAdEventBody =
   | {
       type: "session_start";
       profile: "actor-director";
-      contract: "contract-v1" | "contract-v1.1" | "contract-v1.2" | "contract-v1.3" | "contract-v1.4";
+      contract: "contract-v1" | "contract-v1.1" | "contract-v1.2" | "contract-v1.3" | "contract-v1.4" | "contract-v1.5";
       userId: string;
       session_type: SessionType;
       tab: "visible" | "hidden";
@@ -98,7 +106,15 @@ export type BhAdEventBody =
       director_format_id?: string; director_examples_id?: string; director_assembled_sha8?: string;
       pipeline_version: string;
       tokenizer: "o200k_base";
+      /** the models at session start (contract-v1). v1.5: must equal actor_model / director_model */
       models: { actor: string; director: string };
+      /** v1.5 (required in v1.5 logs): full model tags at session start, e.g. "gpt-oss:20b-cloud"; canonical for analysis.
+       *  Later changes are model_change lines (no new session) */
+      actor_model?: string; director_model?: string;
+      /** v1.5 (required in v1.5 logs): fixed for the session; absent in v1-v1.4 = "gaze". A change = a new session */
+      input_mode?: InputMode;
+      /** v1.5: mode "pointer" only (required there): dwell threshold + gap merge in force */
+      pointer_config?: PointerConfig;
       consent: { camera: boolean; rawGaze: boolean };
       gaze: { tracker: GazeSrc | "none"; permission: CameraPermission };
       device: Pick<ScreenInfo, "deviceModel" | "platform" | "orientation" | "widthPt" | "heightPt">;
@@ -110,6 +126,11 @@ export type BhAdEventBody =
   /** one batch per <= 5 s window [t0,t1]; at most 20 fixations (about 4 Hz; over that, adjacent fixations on the same
    *  AOI are merged first). Saccades: only "back" and "jump" (<= 10), forward saccades are implied by consecutive
    *  fixations. Gaps <= 10 (blink / offscreen / noface / lowconf). Coordinates rounded to 0.1, times to 1 ms. */
+  /** v1.5, mode "pointer" only: one batch per <= 5 s window, <= 20 interactive-AOI pointer events (ids p<k>) */
+  | { type: "pointer_l1"; t0: number; t1: number; events: PointerEvent[] }
+  /** v1.5: the person changed the Actor or Director model mid-session (no new session). at = the first turn whose
+   *  request uses `to`. Main log (not sealed-only) in every session type; never Actor-visible */
+  | { type: "model_change"; at: number; role: ModelRole; from: string; to: string }
   | { type: "gaze_l1"; t0: number; t1: number; fixations: Fixation[]; saccades: Array<Saccade & { dir: "back" | "jump" }>; gaps: GapEvent[] }
   /** raw L0 samples: ONLY when session_start.consent.rawGaze is true (default false, local research sessions);
    *  a log with any gaze_raw line is local-only and is never uploaded (it cannot fit the 1 MiB budget) */

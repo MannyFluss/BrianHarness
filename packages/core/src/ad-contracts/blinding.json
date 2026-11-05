@@ -1,5 +1,6 @@
 {
-  "$comment": "contract-v1.1 (v1.2 adds the leak_judge and tab_occluded sealed-only types; v1.3 adds sealedEverywhereTypes / sealedEverywhereReasons and the tab_visible sealed companion): the ONE shared blinding list. Read by ad-contracts (events.ts / blinding.ts: the client-side blinded guard) and by tools/phaseD/check_blinding.mjs, so they cannot drift. armKeyPatterns are regex fragments joined as ^(?:a|b|...)$ with flag i (exactly protocol 4's ARM_KEYS).",
+  "$comment": "contract-v1.1 (v1.2 adds the leak_judge and tab_occluded sealed-only types; v1.3 adds sealedEverywhereTypes / sealedEverywhereReasons and the tab_visible sealed companion): the ONE shared blinding list. Read by ad-contracts (events.ts / blinding.ts: the client-side blinded guard) and by tools/phaseD/check_blinding.mjs, so they cannot drift. armKeyPatterns are regex fragments joined as ^(?:a|b|...)$ with flag i (exactly protocol 4's ARM_KEYS). contract-v1.5 adds contract (the version this list belongs to), eventTypes (the allowlist of every bh-ad/1 v1.x event type; anything else is rejected unknown_event_type), uploadForbiddenTypes (gaze_raw: rejected gaze_raw_forbidden on every upload), simMarkerPattern (the sim-only build markers, see README: rejected sim_marker on every upload) and maxBaseSessionIdLength (121, so <id>.sealed fits 128). v2 types (survey, pilot_*) are added when v2 lands. contract-v1.5 also adds the pointer_l1 and model_change types (Mac pointer mode and model picker); the input-mode fence (input-mode.ts) is code, not data.",
+  "contract": "contract-v1.5",
   "armKeyPatterns": [
     "adaptation",
     "study[_-]?mode",
@@ -43,5 +44,35 @@
     "note_dropped": {
       "leak_judge": "withheld"
     }
-  }
+  },
+  "eventTypes": [
+    "actor_turn",
+    "aoi_dwell",
+    "aoi_layout",
+    "attention_digest",
+    "context_share",
+    "director_call",
+    "gaze_l1",
+    "gaze_quality",
+    "gaze_raw",
+    "health",
+    "injection",
+    "leak_judge",
+    "model_change",
+    "note_dropped",
+    "note_outcome",
+    "pointer_l1",
+    "rail_check",
+    "scroll",
+    "session_end",
+    "session_share",
+    "session_start",
+    "tab_occluded",
+    "user_turn"
+  ],
+  "uploadForbiddenTypes": [
+    "gaze_raw"
+  ],
+  "simMarkerPattern": "bh-ad-sim-[a-z0-9-]+/[0-9]+",
+  "maxBaseSessionIdLength": 121
 }

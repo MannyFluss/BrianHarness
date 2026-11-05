@@ -1,0 +1,38 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:11:06.020Z",
+  "mono": 66020,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 22,
+  "type": "attention_digest",
+  "turn": 3,
+  "msg": "a3",
+  "digest": {
+    "msg": "a3",
+    "windowMs": 5000,
+    "quality": 1,
+    "qualityLabel": "good",
+    "paras": [],
+    "lookBacks": [],
+    "offscreenMs": 0,
+    "composerPauses": 0,
+    "events": [],
+    "input_mode": "pointer",
+    "pointer": [
+      {
+        "id": "p5",
+        "kind": "pointer_dwell",
+        "aoi": "a3.c1",
+        "excerpt": "Show the math",
+        "dwell_ms": 880
+      },
+      {
+        "id": "p6",
+        "kind": "pointer_select",
+        "aoi": "a3.p2.s1",
+        "excerpt": "autolyse first"
+      }
+    ]
+  },
+  "events": []
+}

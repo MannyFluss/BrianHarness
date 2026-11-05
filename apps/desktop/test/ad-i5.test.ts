@@ -106,7 +106,7 @@ test("I5.4 blinded LiveBoot passes blind {index,total,scheduleHash}: logged in s
   const c = await LiveAdController.open({ sessionType: "blinded", arm: "on", blind, sessionId: "i5b", userId: "u", actor: simActor(FAKE), director: simDirector(), counter, kv, screen: IPHONE, calibration: rec30, consent: { camera: true, rawGaze: false } });
   c.dispose();
   const ss = linesOf(c).find((l) => l.type === "session_start") as Extract<BhAdEvent, { type: "session_start" }>;
-  assert.deepEqual(ss.blind, blind); assert.equal(ss.sealed, true); assert.equal(ss.contract, "contract-v1.4");
+  assert.deepEqual(ss.blind, blind); assert.equal(ss.sealed, true); assert.equal(ss.contract, "contract-v1.5");
   const storage = (c as unknown as { log: { storage: { read(ns: string, id: string): string | null }; sessionId: string } }).log;
   const main = storage.storage.read("blinded", storage.sessionId)!;
   assert.match(main, /"blind":\{"index":3,"total":12,"scheduleHash":"9f2c/);

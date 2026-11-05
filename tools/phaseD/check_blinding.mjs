@@ -83,6 +83,13 @@ for (const f of files) {
   const lines = f.endsWith(".json") ? [JSON.parse(readFileSync(f, "utf8"))] : readFileSync(f, "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
   if (lines[0]?.schema === "bh-ad/1") {
     const st = lines[0];
+    // contract-v1.5: every bh-ad/1 log (sealed included): allowlisted types only, no gaze_raw, no sim-only markers
+    const types = new Set(BLINDING.eventTypes), simRe = new RegExp(BLINDING.simMarkerPattern);
+    lines.forEach((e, i) => {
+      const type = String(e.type);
+      const why = (BLINDING.uploadForbiddenTypes ?? []).includes(type) ? "gaze_raw_forbidden" : !types.has(type) ? `unknown_event_type ${type}` : simRe.test(JSON.stringify(e)) ? "sim_marker" : null;
+      if (why) { leaks++; console.log(`LEAK ${f}:${i + 1}: bh-ad/1 log: ${why}`); }
+    });
     if (f.endsWith(BLINDING.sealedSessionSuffix + ".jsonl")) { adSealed++; continue; }
     if (st.type === "session_start" && st.session_type === "tab_visible") {
       adVisible++;

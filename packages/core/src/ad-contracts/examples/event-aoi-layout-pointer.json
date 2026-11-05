@@ -1,0 +1,39 @@
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:11:01.010Z",
+  "mono": 61010,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 20,
+  "type": "aoi_layout",
+  "turn": 3,
+  "msg": "a3",
+  "orientation": "landscape_right",
+  "boxes": [
+    {
+      "aoi": "a3.p1",
+      "words": 41,
+      "x": 320,
+      "y": 410,
+      "w": 680,
+      "h": 96
+    },
+    {
+      "aoi": "a3.p2.s1",
+      "words": 4,
+      "x": 352,
+      "y": 530,
+      "w": 190,
+      "h": 22,
+      "interactive": true
+    },
+    {
+      "aoi": "a3.c1",
+      "words": 2,
+      "x": 320,
+      "y": 590,
+      "w": 120,
+      "h": 32,
+      "interactive": true
+    }
+  ]
+}

@@ -6,3 +6,5 @@ export * from "./note.js";
 export * from "./events.js";
 export * from "./worker.js";
 export * from "./blinding.js";
+export * from "./input-mode.js";
+export * from "./models.js";

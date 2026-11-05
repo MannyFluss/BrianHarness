@@ -2,12 +2,13 @@
  * E3: the safety / validity rails on one Director output (rail_check.blocked_by, codes in RAIL_CODES order).
  * Deterministic; none is a value judgment. The note is blocked if any rail fires.
  */
-import { MAX_ACTOR_TEXT_WORDS, RAIL_CODES, actorTextWords, renderActorText } from "../ad-contracts/index.js";
-import type { DirectorNote, RailCode } from "../ad-contracts/index.js";
+import { LEGACY_INPUT_MODE, MAX_ACTOR_TEXT_WORDS, RAIL_CODES, actorTextWords, evidenceOutsideMode, renderActorText } from "../ad-contracts/index.js";
+import type { DirectorNote, InputMode, RailCode } from "../ad-contracts/index.js";
 import { lintNote } from "./lint.js";
 import { validateDirectorOutput } from "./validate.js";
 
-const EVIDENCE_IN_TEXT = /(?<![\w.])(?:e[0-9]+|u[0-9]+|a[0-9]+(?:\.p[0-9]+(?:\.s[0-9]+)?)?)(?![\w.])/g;
+// contract-v1.5: p<k> pointer evidence too (a paragraph id a7.p2 is not a pointer id: ".p2" is never matched on its own)
+const EVIDENCE_IN_TEXT = /(?<![\w.])(?:e[0-9]+|p[0-9]+|u[0-9]+|a[0-9]+(?:\.p[0-9]+(?:\.s[0-9]+)?)?)(?![\w.])/g;
 export const evidenceIdsIn = (input: string): Set<string> => new Set(input.match(EVIDENCE_IN_TEXT) ?? []);
 
 export interface RailContext {
@@ -20,6 +21,8 @@ export interface RailContext {
   /** gaze event ids from a window below quality 0.6 / face 70 %, or with a z before the 20-paragraph baseline */
   invalidEventIds?: ReadonlySet<string>;
   leakBreakerTripped: boolean;
+  /** v1.5: the session's input mode (default "gaze"): e<k> only in gaze, p<k> only in pointer, neither in none */
+  inputMode?: InputMode;
 }
 export interface RailResult { pass: boolean; blocked_by: RailCode[]; hits: string[]; actor_text: string | null; note: DirectorNote | null }
 
@@ -36,7 +39,8 @@ export function runRails(output: unknown, ctx: RailContext): RailResult {
     if (Array.isArray(note.evidence) && note.evidence.length === 0) codes.add("evidence_missing");
     if (ev.length) {
       const ids = evidenceIdsIn(ctx.input);
-      const unknown = ev.filter((x) => !ids.has(x));
+      const outside = new Set(evidenceOutsideMode(ctx.inputMode ?? LEGACY_INPUT_MODE, ev));
+      const unknown = ev.filter((x) => !ids.has(x) || outside.has(x));
       if (unknown.length) { codes.add("evidence_unknown"); hits.push("evidence_unknown: " + unknown.join(",")); }
       const gaze = ev.filter((x) => /^e[0-9]+$/.test(x));
       if (gaze.length && !ctx.cameraConsent) { codes.add("consent"); hits.push("consent: cites " + gaze.join(",")); }

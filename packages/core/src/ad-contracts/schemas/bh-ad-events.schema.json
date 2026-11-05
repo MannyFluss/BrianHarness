@@ -65,7 +65,8 @@
             "contract-v1.1",
             "contract-v1.2",
             "contract-v1.3",
-            "contract-v1.4"
+            "contract-v1.4",
+            "contract-v1.5"
           ]
         },
         "userId": {
@@ -191,7 +192,57 @@
               "minLength": 1,
               "maxLength": 128
             }
-          }
+          },
+          "description": "models at session start; v1.5: equal to actor_model / director_model"
+        },
+        "actor_model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "v1.5: full Actor model tag at session start (canonical); changes are model_change lines"
+        },
+        "director_model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "v1.5: full Director model tag at session start (canonical); changes are model_change lines"
+        },
+        "input_mode": {
+          "type": "string",
+          "enum": [
+            "pointer",
+            "gaze",
+            "none"
+          ],
+          "description": "v1.5: fixed for the session (a change = a new session); absent in v1-v1.4 = gaze"
+        },
+        "pointer_config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "dwell_ms",
+            "merge_gap_ms"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^pc1-d[0-9]+-g[0-9]+$"
+            },
+            "dwell_ms": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 60000
+            },
+            "merge_gap_ms": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5000
+            }
+          },
+          "description": "v1.5, input_mode pointer only: dwell threshold and gap merge in force"
         },
         "consent": {
           "type": "object",
@@ -275,6 +326,48 @@
           "type": "boolean"
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "contract": {
+                "const": "contract-v1.5"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "input_mode",
+              "actor_model",
+              "director_model"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "input_mode"
+            ],
+            "properties": {
+              "input_mode": {
+                "const": "pointer"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "pointer_config"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "pointer_config"
+              ]
+            }
+          }
+        }
+      ],
       "oneOf": [
         {
           "properties": {
@@ -564,6 +657,10 @@
                 "type": "number",
                 "minimum": 0,
                 "maximum": 10000000
+              },
+              "interactive": {
+                "type": "boolean",
+                "description": "v1.5: a control that may be a pointer target; absent = text (never a hover/dwell target)"
               }
             }
           },
@@ -634,6 +731,198 @@
           },
           "minItems": 1,
           "maxItems": 600
+        }
+      }
+    },
+    "ev_pointer_l1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "t0",
+        "t1",
+        "events"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "pointer_l1"
+        },
+        "t0": {
+          "type": "number",
+          "minimum": 0
+        },
+        "t1": {
+          "type": "number",
+          "minimum": 0
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "aoi",
+              "msg",
+              "t0",
+              "t1"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 12,
+                "pattern": "^p[0-9]+$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "pointer_click",
+                  "pointer_select",
+                  "pointer_hover",
+                  "pointer_dwell"
+                ]
+              },
+              "aoi": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "msg": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 12,
+                "pattern": "^a[0-9]+$"
+              },
+              "t0": {
+                "type": "number",
+                "minimum": 0
+              },
+              "t1": {
+                "type": "number",
+                "minimum": 0
+              },
+              "dwell_ms": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "pointer_dwell"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "dwell_ms"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "dwell_ms"
+                ]
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 20
+        }
+      }
+    },
+    "ev_model_change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "at",
+        "role",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "model_change"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "actor",
+            "director"
+          ]
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
         }
       }
     },
@@ -1266,6 +1555,81 @@
               },
               "minItems": 0,
               "maxItems": 12
+            },
+            "input_mode": {
+              "type": "string",
+              "enum": [
+                "pointer",
+                "gaze",
+                "none"
+              ],
+              "description": "v1.5: the session's input mode (the digest's sources); absent = gaze"
+            },
+            "pointer": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "kind",
+                  "aoi",
+                  "excerpt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 12,
+                    "pattern": "^p[0-9]+$"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "pointer_click",
+                      "pointer_select",
+                      "pointer_hover",
+                      "pointer_dwell"
+                    ]
+                  },
+                  "aoi": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 32
+                  },
+                  "excerpt": {
+                    "type": "string",
+                    "minLength": 0,
+                    "maxLength": 80
+                  },
+                  "dwell_ms": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "const": "pointer_dwell"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "dwell_ms"
+                  ]
+                },
+                "else": {
+                  "not": {
+                    "required": [
+                      "dwell_ms"
+                    ]
+                  }
+                }
+              },
+              "minItems": 0,
+              "maxItems": 24,
+              "description": "v1.5, mode pointer only: interactive-AOI pointer evidence"
             }
           }
         },
@@ -3235,6 +3599,81 @@
           },
           "minItems": 0,
           "maxItems": 12
+        },
+        "input_mode": {
+          "type": "string",
+          "enum": [
+            "pointer",
+            "gaze",
+            "none"
+          ],
+          "description": "v1.5: the session's input mode (the digest's sources); absent = gaze"
+        },
+        "pointer": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind",
+              "aoi",
+              "excerpt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 12,
+                "pattern": "^p[0-9]+$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "pointer_click",
+                  "pointer_select",
+                  "pointer_hover",
+                  "pointer_dwell"
+                ]
+              },
+              "aoi": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "excerpt": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 80
+              },
+              "dwell_ms": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "pointer_dwell"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "dwell_ms"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "dwell_ms"
+                ]
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 24,
+          "description": "v1.5, mode pointer only: interactive-AOI pointer evidence"
         }
       }
     },
@@ -3438,6 +3877,8 @@
         "gaze_quality",
         "aoi_layout",
         "scroll",
+        "pointer_l1",
+        "model_change",
         "gaze_l1",
         "gaze_raw",
         "tab_occluded",
@@ -3505,6 +3946,30 @@
       },
       "then": {
         "$ref": "#/definitions/ev_scroll"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "pointer_l1"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_pointer_l1"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "model_change"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_model_change"
       }
     },
     {

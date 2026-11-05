@@ -1,6 +1,6 @@
 # Actor/Director shared contracts
 
-**Version: contract-v1.4** (additive over contract-v1 to v1.3 except the optional sim-only lookAt signature; see Changes) · v1.4.1 clarification (docs only) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
+**Version: contract-v1.5** (NOT frozen: upload allowlist + Mac input modes / pointer evidence / model picker; see Changes) · v1.4 frozen 2026-11-04 · v1.4.1 clarification (docs only) · **Frozen: 2026-11-04** (through v1.4) · schema tag `bh-ad/1` · owner: Harness Engineer
 
 Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/ad-contracts/`, published copy at
 `/workspace/actor-director/contracts/`. Import in TS from `@brianharness/core/ad-contracts` (subpath export, added in E1; nothing is re-exported from the core index, so protocol-4 is untouched), or use the JSON Schemas.
@@ -94,6 +94,68 @@ IOS Dev I5 notes (native 9fc02ce).
 Native impact (IOS Dev): `@objc func lookAt(_ call: CAPPluginCall)` reads `call.getDouble("x")`/`"y"` (the I5 plugin
 already does); optionally push `status` with `orientation` on a UIKit interface-orientation change.
 
+### contract-v1.5 (2026-11-04; OK'd by the Researcher and the Director; tightens what an upload may carry)
+
+- `blinding.json` gains `contract` (`"contract-v1.5"`, equal to CONTRACT_VERSION; a test keeps them equal),
+  `eventTypes` (the allowlist: all 21 bh-ad/1 v1.x event types), `uploadForbiddenTypes` (`gaze_raw`),
+  `simMarkerPattern` (`bh-ad-sim-[a-z0-9-]+/[0-9]+`) and `maxBaseSessionIdLength` (121).
+- New guard codes on EVERY upload (main, blinded or `.sealed`), client and server: `unknown_event_type` (a type
+  outside `eventTypes`; never dropped silently), `gaze_raw_forbidden`, `sim_marker` (a sim-only marker such as
+  `bh-ad-sim-look/1` / `bh-ad-sim-walk/1` anywhere in a line) and `session_id_too_long` (a base id over 121 chars).
+  An upload doesn't say whether it is an eval or a sim session, so sim markers are rejected on every upload.
+  `gaze.tracker: "synthetic"` is still accepted; it isn't a marker.
+- Base session ids are at most 121 chars (`AD_BASE_SESSION_ID_MAX`), so `<id>.sealed` fits the 128-char id limit.
+- Upload order: `buildAdUploads()` returns the main log first and the `.sealed` companion second (only if the main
+  log built). The server checks a `.sealed` upload against the stored base, so send them in that order and stop at
+  the first failure.
+- `WORKER_ERROR_CODES` gains `blinded_guard` (422). §5 lists the server guard's reasons and the `sealed` read-key scope.
+- v2 types (`survey`, `pilot_target`, `pilot_page`, `pilot_run`) join `eventTypes` when contract-v2 lands.
+
+#### contract-v1.5, Mac release additions (2026-11-05; Manny via DirectorBot, Researcher rulings; still NOT frozen)
+v1.5 was never frozen or shipped, so these ride in v1.5 rather than a v1.6. MacBook-first; first Mac pilot = Pointer
+only. Every v1-v1.4 line still validates; a `contract-v1.5` session_start must carry the new required fields.
+1. **`session_start.input_mode`** `"pointer" | "gaze" | "none"` (`INPUT_MODES`, input-mode.ts), required in v1.5 logs,
+   fixed for the session: changing it ends the session and starts a new one. Absent (v1-v1.4) = `"gaze"`.
+2. **`p<k>` pointer evidence.** `EVIDENCE_ID_PATTERN` (note.ts / note.schema.json) accepts `p<k>`. The prefix alone
+   names the source (`e<k>` gaze, `p<k>` pointer; no `evidence_source` field). Mode `gaze` cites `e<k>` (no `p<k>`),
+   mode `pointer` cites `p<k>` (no `e<k>`), mode `none` neither: a note citing an id its mode can't have fails the
+   evidence rail as `evidence_unknown` (`evidenceOutsideMode`, rails.ts `RailContext.inputMode`).
+3. **New event `pointer_l1`** `{t0, t1, events: PointerEvent[] <= 20}` (one batch per <= 5 s, like `gaze_l1`).
+   `PointerEvent {id "p<k>", kind, aoi, msg, t0, t1, dwell_ms?}`; kinds `pointer_click | pointer_select |
+   pointer_hover | pointer_dwell` (`POINTER_KINDS`); `dwell_ms` only (and always) on `pointer_dwell`.
+   **Interactive AOIs only:** `AoiBox.interactive` (new, optional) marks a control or selectable span in
+   `aoi_layout`; a pointer event's AOI must be interactive in the latest `aoi_layout` of its message. Never evidence
+   (not emitted; the guard rejects them): hover/dwell on a paragraph (`a7.p2`) or other text, anything on the
+   `composer`, and gaze-style reading labels from the pointer alone.
+4. **Dwell:** default **500 ms** continuous on the same interactive AOI, gaps <= **100 ms** merged
+   (`DEFAULT_POINTER_CONFIG`). `session_start.pointer_config {id "pc1-d500-g100", dwell_ms, merge_gap_ms}` is
+   required in mode `pointer` and absent otherwise, so analysis can re-tune.
+5. **`attention_digest.digest`** gains optional `input_mode` (the digest's sources) and `pointer: [{id, kind, aoi,
+   excerpt, dwell_ms?}]` (mode `pointer` only, <= 24). In modes `pointer` and `none` the gaze parts are empty (`paras`,
+   `lookBacks`, `events`, the line's `events`; `offscreenMs` and `composerPauses` 0). Mode `none` has no pointer either.
+   `quality` / `qualityLabel` keep their meaning for gaze; in `pointer` / `none` they describe the digest's own source
+   (pointer events are exact: `1` / `good` unless the app lost pointer tracking).
+6. **Models.** `session_start` gains `actor_model` and `director_model` (full tags, e.g. `gpt-oss:20b-cloud`), required
+   in v1.5 logs and **canonical for analysis**. The contract-v1 nested `models {actor, director}` stays required and
+   must hold the same two tags (`sessionModelsViolation`): older readers keep working and nothing silently diverges.
+   **New event `model_change`** `{at, role: actor|director, from, to}` (`at` = the first turn whose request uses `to`;
+   the time is the envelope's `t`/`mono`): a mid-session change, NOT a new session. Main log in every session type
+   (model names are not arm information); never in Actor-visible context. Eval stratifies or adjusts on
+   actor_model / director_model when they vary.
+7. **Cloud only** (models.ts): UI defaults `DEFAULT_ACTOR_MODEL` `gpt-oss:20b-cloud`, `DEFAULT_DIRECTOR_MODEL`
+   `gpt-oss:120b-cloud` (suggestions, not locks); any Worker-allowlisted cloud tag is fine. `modelRefusal()` refuses a
+   tag that is not `<name>:cloud` / `<name>:<x>-cloud` (`CLOUD_MODEL_TAG_PATTERN`, same rule as `isCloudModelTag`) or
+   not on the Worker allowlist; `localEndpointReason()` (copied from the judge runner) refuses localhost / `.local` /
+   private / link-local / port 11434 / local-Ollama endpoints. No fallback. The leak judge stays `LEAK_JUDGE_MODEL`
+   `gemma4:cloud`, pinned by `judge_prompt_id`, and is not in the session picker.
+8. **`blinding.json` `eventTypes`** gains `pointer_l1` and `model_change` (23 types). New client guard codes on every
+   upload: `input_mode_mismatch`, `pointer_not_interactive`, `pointer_text_presence`, `pointer_invalid`
+   (`inputModeViolation`, blinding.ts). The Worker's vendored `blinding.json` needs a re-sync (InfrastructureBot)
+   before it accepts the two new types; the input-mode fence is client-side until the Worker mirrors it.
+9. Not changed: `DIRECTOR_OUTPUT_FORMAT_TEXT` (its id grammar line still lists e/u/a forms; adding `p<k>` there
+   changes `director_format_id` and is left to the Director prompt update for the Mac pointer path), the leak-judge
+   prompt and model, the actor_text byte rule.
+
 ### contract-v1.4.1 clarification (2026-11-04; docs only, no type/schema/enum change, `contract` stays `"contract-v1.4"`)
 IOS Dev I5b notes (native 2d66504).
 1. **`Orientation` landscape names follow native `UIInterfaceOrientation`.** In iOS WKWebView `screen.orientation`
@@ -140,6 +202,8 @@ test builds a worst case at the caps below (20 minutes, every gaze_l1 batch full
 - Fixations are logged at no more than about 4 Hz: `gaze_l1` batches cover ≤ 5 s with ≤ 20 fixations, ≤ 10 back/jump
   saccades (forward saccades are implied by consecutive fixations) and ≤ 10 gaps. Above 20 fixations, adjacent
   fixations on the same AOI are merged first.
+- v1.5 Pointer mode: `pointer_l1` batches cover ≤ 5 s with ≤ 20 events; a 20-minute Pointer session at that cap
+  (plus 20 full turns and a model_change per turn) is about 809 KB (77%), tested in `ad-v15-pointer.test.ts`.
 - Raw `GazeSample`s are **off by default**. `gaze_raw` lines exist only when `session_start.consent.rawGaze` is true
   (local research sessions), and such a log is local-only and never uploaded.
 - If a log would still exceed the limit, the client drops the oldest `gaze_l1` lines first. L2 and above, the chat
@@ -574,7 +638,8 @@ Every line has `{schema "bh-ad/1", type, t ISO, mono ms (GazeSample clock), sess
 `aT` is the Actor message of turn T, and `uT` is the user message answering it. Director-side events carry the turn
 of the Actor request they affect. Types: `session_start, gaze_quality, aoi_layout, scroll, gaze_l1, gaze_raw (off by
 default), tab_occluded (v1.2), aoi_dwell, attention_digest, user_turn, director_call (with the director footprint), rail_check, injection,
-note_dropped, leak_judge (v1.2), context_share, actor_turn, note_outcome, session_share, health, session_end`.
+note_dropped, leak_judge (v1.2), context_share, actor_turn, note_outcome, session_share, health, session_end,
+pointer_l1 (v1.5), model_change (v1.5)`.
 
 **Context share** (`context_share` per Actor request, `session_share` at the end) uses o200k_base token counts of
 each segment's content: `system` S, `history` H, `history_echo` E, `user` U, `director` D (the hint block including
@@ -618,7 +683,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.4",
+  "contract": "contract-v1.5",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -628,6 +693,9 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
     "actor": "gpt-oss:20b-cloud",
     "director": "gpt-oss:120b-cloud"
   },
+  "actor_model": "gpt-oss:20b-cloud",
+  "director_model": "gpt-oss:120b-cloud",
+  "input_mode": "gaze",
   "consent": {
     "camera": true,
     "rawGaze": false
@@ -660,7 +728,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.4",
+  "contract": "contract-v1.5",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -670,6 +738,9 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
     "actor": "gpt-oss:20b-cloud",
     "director": "gpt-oss:120b-cloud"
   },
+  "actor_model": "gpt-oss:20b-cloud",
+  "director_model": "gpt-oss:120b-cloud",
+  "input_mode": "gaze",
   "consent": {
     "camera": true,
     "rawGaze": false
@@ -706,7 +777,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.4",
+  "contract": "contract-v1.5",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -716,6 +787,9 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
     "actor": "gpt-oss:20b-cloud",
     "director": "gpt-oss:120b-cloud"
   },
+  "actor_model": "gpt-oss:20b-cloud",
+  "director_model": "gpt-oss:120b-cloud",
+  "input_mode": "gaze",
   "consent": {
     "camera": true,
     "rawGaze": false
@@ -1004,6 +1078,216 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
 
 Every other event type has an example in `examples/event-*.json`, and all of them are validated by the test.
 
+### Input modes, pointer evidence and model changes (contract-v1.5, Mac)
+
+`session_start.input_mode` is fixed per session (`pointer` | `gaze` | `none`; a change = a new session). The first Mac
+pilot is Pointer only. A Pointer session logs its dwell settings and has no camera:
+
+<!-- example: event-session-start-pointer -->
+```json
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:10:00.000Z",
+  "mono": 0,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 0,
+  "type": "session_start",
+  "profile": "actor-director",
+  "contract": "contract-v1.5",
+  "userId": "manny",
+  "actor_prompt_id": "ap1-3c9e1b07",
+  "director_prompt_id": "dir1-b1d2fd77",
+  "pipeline_version": "gp1.0.0",
+  "tokenizer": "o200k_base",
+  "models": {
+    "actor": "gpt-oss:20b-cloud",
+    "director": "gpt-oss:120b-cloud"
+  },
+  "actor_model": "gpt-oss:20b-cloud",
+  "director_model": "gpt-oss:120b-cloud",
+  "input_mode": "pointer",
+  "consent": {
+    "camera": false,
+    "rawGaze": false
+  },
+  "gaze": {
+    "tracker": "none",
+    "permission": "prompt"
+  },
+  "device": {
+    "deviceModel": "MacBookAir10,1",
+    "platform": "mac",
+    "orientation": "landscape_right",
+    "widthPt": 1440,
+    "heightPt": 900
+  },
+  "director_enabled": true,
+  "pointer_config": {
+    "id": "pc1-d500-g100",
+    "dwell_ms": 500,
+    "merge_gap_ms": 100
+  },
+  "session_type": "tab_visible",
+  "tab": "visible",
+  "arm": "on",
+  "p_inject": 0.5
+}
+```
+
+Paragraphs are text; only boxes with `interactive: true` (buttons, selectable spans) can be pointer targets:
+
+<!-- example: event-aoi-layout-pointer -->
+```json
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:11:01.010Z",
+  "mono": 61010,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 20,
+  "type": "aoi_layout",
+  "turn": 3,
+  "msg": "a3",
+  "orientation": "landscape_right",
+  "boxes": [
+    {
+      "aoi": "a3.p1",
+      "words": 41,
+      "x": 320,
+      "y": 410,
+      "w": 680,
+      "h": 96
+    },
+    {
+      "aoi": "a3.p2.s1",
+      "words": 4,
+      "x": 352,
+      "y": 530,
+      "w": 190,
+      "h": 22,
+      "interactive": true
+    },
+    {
+      "aoi": "a3.c1",
+      "words": 2,
+      "x": 320,
+      "y": 590,
+      "w": 120,
+      "h": 32,
+      "interactive": true
+    }
+  ]
+}
+```
+
+<!-- example: event-pointer-l1 -->
+```json
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:11:06.010Z",
+  "mono": 66010,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 21,
+  "type": "pointer_l1",
+  "t0": 61010,
+  "t1": 66010,
+  "events": [
+    {
+      "id": "p4",
+      "kind": "pointer_hover",
+      "aoi": "a3.c1",
+      "msg": "a3",
+      "t0": 62100,
+      "t1": 62100
+    },
+    {
+      "id": "p5",
+      "kind": "pointer_dwell",
+      "aoi": "a3.c1",
+      "msg": "a3",
+      "t0": 62100,
+      "t1": 62980,
+      "dwell_ms": 880
+    },
+    {
+      "id": "p6",
+      "kind": "pointer_select",
+      "aoi": "a3.p2.s1",
+      "msg": "a3",
+      "t0": 64200,
+      "t1": 64200
+    }
+  ]
+}
+```
+
+The Director sees pointer evidence in the digest; there are no reading labels without gaze:
+
+<!-- example: event-attention-digest-pointer -->
+```json
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:11:06.020Z",
+  "mono": 66020,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 22,
+  "type": "attention_digest",
+  "turn": 3,
+  "msg": "a3",
+  "digest": {
+    "msg": "a3",
+    "windowMs": 5000,
+    "quality": 1,
+    "qualityLabel": "good",
+    "paras": [],
+    "lookBacks": [],
+    "offscreenMs": 0,
+    "composerPauses": 0,
+    "events": [],
+    "input_mode": "pointer",
+    "pointer": [
+      {
+        "id": "p5",
+        "kind": "pointer_dwell",
+        "aoi": "a3.c1",
+        "excerpt": "Show the math",
+        "dwell_ms": 880
+      },
+      {
+        "id": "p6",
+        "kind": "pointer_select",
+        "aoi": "a3.p2.s1",
+        "excerpt": "autolyse first"
+      }
+    ]
+  },
+  "events": []
+}
+```
+
+| mode | evidence ids | digest | log may not contain |
+|---|---|---|---|
+| `gaze` | `e<k>`, chat ids | today's gaze digest | `pointer_l1`, `digest.pointer` |
+| `pointer` | `p<k>`, chat ids | `pointer` items; `paras`, `lookBacks`, `events` empty | `gaze_l1`, `gaze_raw`, `aoi_dwell`, `e<k>` events |
+| `none` | chat ids only | empty | all of the above |
+
+A model change mid-session (no new session):
+
+<!-- example: event-model-change -->
+```json
+{
+  "schema": "bh-ad/1",
+  "t": "2026-11-04T23:12:20.000Z",
+  "mono": 140000,
+  "sessionId": "ad-2026-11-04-7f3a",
+  "seq": 40,
+  "type": "model_change",
+  "at": 5,
+  "role": "director",
+  "from": "gpt-oss:120b-cloud",
+  "to": "gpt-oss:20b-cloud"
+}
+```
+
 ## 5. Worker contract (adopted from InfrastructureBot's Worker branch `actor-director` @ 9bc90f1, not deployed)
 
 - Every chat request sends **`X-BH-Role: actor | director | judge`**. A missing header counts as actor, and anything
@@ -1011,10 +1295,20 @@ Every other event type has an example in `examples/event-*.json`, and all of the
   device cap. A cap hit returns **429 `role_cap_<role>`** with `{limit, used, reset_at, role, scope:"role"}` and a
   `retry-after` header.
 - `POST /v1/ad-sessions` takes the envelope `{schema "bh-ad/1", sessionId, appVersion, platform, build?, jsonl}`. The
-  server checks only the envelope, that each line is a JSON object, and the secret scan. It stores the log opaquely
+  server checks the envelope, that each line is a JSON object, the secret scan and (Worker `actor-director` @
+  `cd26798`, not deployed) the **blinded guard**. The guard reads the vendored `blinding.json`
+  (`scripts/sync-contracts.mjs`; a drift test fails on any difference, and a malformed list fails every upload with
+  `guard_config`). A refusal is **422 `blinded_guard`** with `{reason, line, permanent:true}` and nothing is stored.
+  `reason` is one of `not_bh_ad`, `no_session_start`, `session_id_mismatch`, `arm_field`, `tab_only_field`,
+  `sealed_type`, `prompt_tokens`, `sealed_health`, `arm_key`, `sealed_base_not_blinded`, `sealed_everywhere`, the
+  v1.5 `unknown_event_type`, `gaze_raw_forbidden`, `sim_marker` and `session_id_too_long`, or the server-only
+  `sealed_base_other_device` (a `.sealed` upload from a device other than its base's) and `guard_config`. The server
+  checks a `.sealed` upload against the stored base, so the main log goes first. `.sealed` logs are readable only with
+  a `sealed`-scope read key (`admin.mjs issue-read <name> sealed`); normal `read` keys never see them, and sealed keys
+  see only sealed logs. Otherwise the server stores the log opaquely
   and answers 201 `{id, kind "ad_session", schema, received_at, bytes, lines, sha256}`. Errors: 413
   `ad_log_too_large`, 400 `invalid_json | invalid_ad_upload | invalid_jsonl`, 422 `upload_rejected`, 409
-  `session_exists`, 429 `upload_cap_device | upload_cap_global`.
+  `session_exists`, 422 `blinded_guard`, 429 `upload_cap_device | upload_cap_global`.
 
 <!-- example: upload-envelope -->
 ```json
@@ -1024,7 +1318,7 @@ Every other event type has an example in `examples/event-*.json`, and all of the
   "appVersion": "0.1.0",
   "platform": "ios",
   "build": "20261105.0900",
-  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.4\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
+  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.5\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"actor_model\":\"gpt-oss:20b-cloud\",\"director_model\":\"gpt-oss:120b-cloud\",\"input_mode\":\"gaze\",\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
 }
 ```
 <!-- example: worker-role-cap-error -->
@@ -1144,19 +1438,28 @@ reject. A `<id>.sealed` upload is accepted only when its own session_start and t
 The sealed log needs a read key the app never holds and is unsealed only at dataset level: analyst unsealing happens only after the R5 stopping rule is met and the analysis code is
 hash-frozen; per session only the participant-side survey and blind guess come first, the app never reveals the arm,
 and interim reports never read sealed logs (ruling 3).
+contract-v1.5, every upload (main, blinded or `.sealed`): reject a line whose type isn't in `eventTypes`
+(`unknown_event_type`), any `gaze_raw` line (`gaze_raw_forbidden`), any line containing a `simMarkerPattern` match
+(`sim_marker`), and a base session id over 121 chars (`session_id_too_long`).
+contract-v1.5 input-mode fence (client guard, every upload): a line the session's `input_mode` may not write, a second
+`session_start`, or a digest with the wrong sources (`input_mode_mismatch`); a pointer event on an AOI not marked
+interactive in its message's latest `aoi_layout` (`pointer_not_interactive`); hover/dwell on a paragraph or anything
+on the composer (`pointer_text_presence`); a malformed pointer event or a dwell under `pointer_config.dwell_ms`
+(`pointer_invalid`).
 check_blinding.mjs applies the same per-line rules to every bh-ad/1 blinded main log in a folder (sealed files are
 counted, not checked; tab_visible logs carry the arm by design).
 
 ## Requests to InfrastructureBot (no divergence; the contract adopts 9bc90f1 as-is)
 
-1. Accept the `<sessionId>.sealed` companion upload as a normal `ad_session` (it already passes `ID_RE`). Optionally,
+1. Accept the `<sessionId>.sealed` companion upload as a normal `ad_session`. It passes `ID_RE` only when the base id
+   is at most 121 chars; the client guard enforces that (`session_id_too_long`). Optionally,
    restrict reading it to a separate key.
-2. Implement the server side of the blinded guard (approved by the Researcher): same rules, read from `blinding.json`, fail closed, and reject a `.sealed` upload whose base session isn't blinded. Proposed error: 422 with a code per `BLINDED_GUARD_CODES` (naming is yours).
+2. (Done in `cd26798`; v1.5 needs a re-sync of `blinding.json` (now 23 `eventTypes`, incl. `pointer_l1` and `model_change`) and the four new reasons; the four input-mode reasons are optional server-side.) Implement the server side of the blinded guard (approved by the Researcher): same rules, read from `blinding.json`, fail closed, and reject a `.sealed` upload whose base session isn't blinded. Proposed error: 422 with a code per `BLINDED_GUARD_CODES` (naming is yours).
 
 ## contract-v2 backlog (not implemented; collected for v2)
 
 From R5 (`research/R5/`: PREREG_EVAL_DRAFT.md §10, SURVEY_EVENT_PROPOSAL.md, PILOT_ACCURACY.md):
-1. A `survey` event with `blind_guess`; `probe_trigger` and `note_id` are sealed-only (TAB_ONLY_FIELDS.survey).
+1. A `survey` event with `blind_guess` (added to `blinding.json` `eventTypes` with v2); `probe_trigger` and `note_id` are sealed-only (TAB_ONLY_FIELDS.survey).
 2. Pilot events: `pilot_target`, `pilot_page`, `pilot_run`.
 3. `director_would_be` tokens for held-back (shadow / blocked) notes, for the would-be share.
 4. `session_start` pins: the format id and assembled prompt sha8 (v1.1 has them as optional `director_format_id` /

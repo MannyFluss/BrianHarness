@@ -27,7 +27,8 @@
         "upload_rejected",
         "session_exists",
         "upload_cap_device",
-        "upload_cap_global"
+        "upload_cap_global",
+        "blinded_guard"
       ]
     },
     "AdUploadEnvelope": {
