@@ -6,6 +6,7 @@ import { LocalStorageKV, MemoryKV } from "@brianharness/core/browser";
 import { AdApp, type AdLayout } from "./AdApp";
 import { CalibrationFlow, type CalibrationOutcome, type CalibrationStage } from "./Calibration";
 import { MacBoot, macBridge } from "./mac/MacBoot";
+import { browserOrientationEnv, watchOrientation } from "./orientation";
 import { LiveAdController, blindedView, calibrationSummary, staticController, visibleView, type AdChatMsg, type PendingNote } from "./controller";
 
 /** demo snapshot (scripts/ad-demo.mts). Blinded snapshots carry chat only: there are no lines to leak. */
@@ -38,8 +39,42 @@ export const DEFAULT_DEMO_BASE = "./ad-demo/";
 export function demoUrl(name: string, base: string = DEFAULT_DEMO_BASE, docBase: string = typeof document !== "undefined" ? document.baseURI : "http://localhost/"): string {
   return new URL(name, new URL(base.endsWith("/") ? base : base + "/", docBase)).href;
 }
-function screenOrientation(): EventTarget | null { return typeof screen !== "undefined" && "orientation" in screen ? (screen.orientation as unknown as EventTarget) : null; }
 export interface MountOptions { demoBase?: string }
+
+/** I5: the demo reader's head distance: the calibration's distCm (iPhone ~30 cm); 42 cm only when uncalibrated */
+export const DEMO_DIST_CM = 42;
+export const demoDistCm = (rec: CalibrationRecord | null | undefined): number => (rec && typeof rec.distCm === "number" && rec.distCm > 0 ? rec.distCm : DEMO_DIST_CM);
+/**
+ * the live demo's onReadingLayout: a simulated reader over the real paragraph boxes at the CURRENT calibration's
+ * distance (so the synthetic head never reads as "distance changed" and prompts a false recalibration). The hold
+ * samples between replies use the same distance.
+ */
+export function liveDemoGaze(tracker: SyntheticGazeTracker, calibration: () => CalibrationRecord | null, hold: () => { x: number; y: number }, now: () => number = () => performance.now()) {
+  return (_msg: string, boxes: Array<{ x: number; y: number; w: number; h: number; words: number }>) => {
+    const distCm = demoDistCm(calibration());
+    tracker.setDistCm(distCm);
+    tracker.play(demoReadingPath([...boxes].sort((a, b) => a.y - b.y), { distCm }), now(), { hold: hold() });
+  };
+}
+
+/** the native shell's launch hints (IOS Dev: -BHADSession blinded -> __BH_AD__.session; the blind schedule position) */
+export interface AdLaunchHints { session?: string; blind?: { index: number; total: number; scheduleHash: string } }
+const HASH = /^[0-9a-f]{64}$/;
+/**
+ * I5: a blinded session's position in the sealed schedule, {index, total, scheduleHash} (contract: session_start.blind,
+ * blinded only; index 1-based <= total, scheduleHash sha256 hex). From the native hints (__BH_AD__.blind) or the
+ * query (?blind=<index>/<total>&scheduleHash=<sha256>). Invalid or absent -> undefined (logged without it, never guessed).
+ */
+export function blindFrom(q: URLSearchParams, hints: AdLaunchHints | null | undefined = (globalThis as { __BH_AD__?: AdLaunchHints }).__BH_AD__): { index: number; total: number; scheduleHash: string } | undefined {
+  const fromQ = q.get("blind")?.match(/^(\d+)\/(\d+)$/);
+  const b = hints?.blind ?? (fromQ ? { index: Number(fromQ[1]), total: Number(fromQ[2]), scheduleHash: q.get("scheduleHash") ?? "" } : undefined);
+  if (!b) return undefined;
+  const ok = Number.isInteger(b.index) && Number.isInteger(b.total) && b.index >= 1 && b.total >= 1 && b.index <= b.total && HASH.test(String(b.scheduleHash).toLowerCase());
+  return ok ? { index: b.index, total: b.total, scheduleHash: String(b.scheduleHash).toLowerCase() } : undefined;
+}
+export function sessionTypeFrom(q: URLSearchParams, hints: AdLaunchHints | null | undefined = (globalThis as { __BH_AD__?: AdLaunchHints }).__BH_AD__): SessionType {
+  return (q.get("type") ?? hints?.session) === "blinded" ? "blinded" : "tab_visible";
+}
 
 export async function mountAd(q: URLSearchParams, opts: MountOptions = {}): Promise<React.ReactElement> {
   const demoBase = opts.demoBase ?? q.get("demoBase") ?? DEFAULT_DEMO_BASE;
@@ -84,17 +119,24 @@ function LiveBoot({ q, screen, layout, reduce, replaysUrl }: { q: URLSearchParam
     setB({ kv, calStore, replays, tracker, counter: await loadO200kBrowser() });
   })(); }, [screen, replaysUrl]);
   const start = useCallback(async (boot: Boot, rec: CalibrationRecord | null) => {
-    const sessionType: SessionType = q.get("type") === "blinded" ? "blinded" : "tab_visible";
+    const sessionType = sessionTypeFrom(q);
     const arm: Arm = "on";
+    // I5: a blinded session logs its schedule position (session_start.blind; the arm is never logged in blinded)
+    const blind = sessionType === "blinded" ? blindFrom(q) : undefined;
+    if (sessionType === "blinded" && !blind) console.warn("[ad] blinded session without a valid blind {index,total,scheduleHash}: logged without it");
+    let ctl: LiveAdController | null = null;
+    boot.tracker.setDistCm(demoDistCm(rec));
     const c = await LiveAdController.open({ sessionType, arm, sessionId: `web-${Date.now()}`, userId: "local", actor: simActor(boot.replays), director: simDirector(), counter: boot.counter, kv: boot.kv, tracker: boot.tracker, screen, calibration: rec, calStore: boot.calStore,
-      // demo gaze from the REAL paragraph boxes (I4): each new reply's layout gets a simulated reader; ?gaze=r2 keeps the raw R2 loop
-      ...(q.get("gaze") === "r2" ? {} : { onReadingLayout: (_msg: string, boxes: Array<{ x: number; y: number; w: number; h: number; words: number }>) => boot.tracker.play(demoReadingPath([...boxes].sort((a, b) => a.y - b.y)), performance.now(), { hold: { x: innerWidth / 2, y: innerHeight - 40 } }) }), consent: { camera: true, rawGaze: false } });
-    // rotation / resize: new screen info, the stored calibration for the new orientation, aoi_layout re-logged
-    const onResize = () => { void c.orientationChanged(webScreen()); };
+      ...(blind ? { blind } : {}),
+      // demo gaze from the REAL paragraph boxes (I4) at the calibration's distance (I5); ?gaze=r2 keeps the raw R2 loop
+      ...(q.get("gaze") === "r2" ? {} : { onReadingLayout: liveDemoGaze(boot.tracker, () => ctl?.calibrationRecord ?? rec, () => ({ x: innerWidth / 2, y: innerHeight - 40 })) }), consent: { camera: true, rawGaze: false } });
+    ctl = c;
+    // rotation / resize (I5: WKWebView fires no resize on landscape_left <-> landscape_right): every source, deduped
     teardown.current?.();
-    addEventListener("resize", onResize);
-    screenOrientation()?.addEventListener("change", onResize);
-    teardown.current = () => { removeEventListener("resize", onResize); screenOrientation()?.removeEventListener("change", onResize); c.dispose(); };
+    const env = browserOrientationEnv();
+    const w = env ? watchOrientation({ env, initial: screen, read: (wd, h, t) => webScreen(wd, h, t), onChange: (s) => { void c.orientationChanged(s).then(() => boot.tracker.setDistCm(demoDistCm(c.calibrationRecord))); } }) : null;
+    const sub = await boot.tracker.addListener("status", (st) => { if (st.orientation) w?.native(st.orientation); });
+    teardown.current = () => { w?.stop(); void sub.remove(); c.dispose(); };
     setEl(<AdApp store={c} {...(layout ? { layout } : {})} {...(reduce !== undefined ? { reduceMotion: reduce } : {})} onCalibrate={() => setCalibrating(true)} />);
   }, [q, screen, layout, reduce]);
   useEffect(() => {

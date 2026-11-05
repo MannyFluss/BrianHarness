@@ -179,6 +179,8 @@ export class LiveAdController implements AdStore {
   dispose() { if (this.poll) clearInterval(this.poll); this.o.preflight?.stop(); }
   /** E7: the preflight's status line ("code: plain words"), "" when every check passes */
   get healthLine(): string { return this.o.preflight?.lastReport?.statusLine ?? ""; }
+  /** the calibration in use now (swapped on rotation) */
+  get calibrationRecord(): CalibrationRecord | null { return this.o.calibration; }
   /** v1.3: the code that FAILS the pilot preflight (net.request_escaped), or null */
   get pilotFail(): string | null { return this.o.preflight?.lastReport?.pilotFail ?? null; }
 
