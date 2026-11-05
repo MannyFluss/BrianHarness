@@ -151,7 +151,8 @@ export class CalibrationRun {
   private toCss(s: { x: number; y: number }) { return { x: s.x - this.o.screen.webview.x, y: s.y - this.o.screen.webview.y }; }
 
   finish(now: { t: number; at: number }, native?: { model: number[] | null }): { record: CalibrationRecord; ok: boolean; words: string; recommend: "use" | "recalibrate_or_onscreen"; code: HealthCode | null } {
-    const fitBy = this.o.fit ?? "core";
+    // a tracker that returned a native model (the Mac ridge) fitted itself, whatever the run was constructed with
+    const fitBy = native?.model ? "native" : (this.o.fit ?? "core");
     const pairs = this.targets.fit.map((tg) => {
       const ss = this.samplesIn(tg.id);
       return ss.length ? { raw: this.toCss({ x: median(ss.map((s) => s.x!)), y: median(ss.map((s) => s.y!)) }), target: tg } : null;
@@ -163,7 +164,8 @@ export class CalibrationRun {
     const distCm = dists.length ? median(dists) : null;
     const layout = layoutFromScreen(this.o.screen);
     const ppd = layoutPpd(layout, distCm);
-    const map = (s: RawSample) => { const p = this.toCss({ x: s.x!, y: s.y! }); return affine ? applyAffine(affine, p.x, p.y) : p; };
+    // cal:true samples (native fit, synthetic) are already web CSS px, like calibrateBatch passes them through
+    const map = (s: RawSample) => { if ((s as { cal?: boolean }).cal) return { x: s.x!, y: s.y! }; const p = this.toCss({ x: s.x!, y: s.y! }); return affine ? applyAffine(affine, p.x, p.y) : p; };
     const validation = this.targets.validate.map((tg) => ({ target: tg, samples: this.samplesIn(tg.id).map(map) }));
     const cc = calibCheck(validation, ppd, this.o.paraHeightPx, { yaw: 0, distCm: distCm ?? 0, orientation: this.orientation, t: now.t }, { yaw: 0, distCm: distCm ?? 0, orientation: this.orientation, t: now.t });
     const errPx = cc.errDeg === null ? null : cc.errDeg * ppd;

@@ -244,6 +244,8 @@ export class LiveAdController implements AdStore {
     if (this.log && this.o.sessionType === "tab_visible") this.session.logGaze({ type: "tab_occluded", turn: this.turn, msg: `a${this.turn}`, t0, t1: t, ms: Math.round(t - t0) });
   }
   get occluded(): boolean { return this.occStart !== null; }
+  /** every distinct non-ok health code this session logged (E7 H1 report) */
+  healthSeen(): string[] { return [...new Set(this.log.lines.flatMap((l) => (l.type === "health" && !l.ok && l.code ? [l.code] : [])))]; }
   /**
    * rotation / resize (IOS Dev I4): take the new screen info, swap to the stored calibration for the new orientation
    * (restoring a native-fit model into the tracker), or run uncalibrated (on-screen time only) and log

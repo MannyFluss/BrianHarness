@@ -7,6 +7,8 @@
  *  - dev: <any base>/ad-demo/* serves the sim snapshots from $AD_DEMO_DIR (default /workspace/ad-scratch/demo)
  *  - build with AD_DEMO_BUNDLE=1: copies $AD_DEMO_DIR/*.json into dist-ad/ad-demo/ so a bundle served from any
  *    folder (the iOS bundle at ad-ios/) loads the demo from "./ad-demo/" with no dev server (IOS Dev I4)
+ *  - E7 Mac: dev serves <any base>/gaze/* from resources/gaze (scripts/ad-gaze-assets.mjs); builds never embed
+ *    it (the Director Mac shell serves Resources/gaze as bh-app://app/gaze/); the gaze worker is an ES module
  */
 import { defineConfig, mergeConfig, type Plugin, type UserConfig } from "vite";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
@@ -18,6 +20,7 @@ const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 const RANKS = here("../../packages/core/vendor/o200k_base.tiktoken.gz");
 const ASSET = "ad/o200k_base.tiktoken.gz";
 const DEMO = process.env.AD_DEMO_DIR ?? "/workspace/ad-scratch/demo";
+const GAZE = here("./resources/gaze");
 
 function adAssets(): Plugin {
   return {
@@ -27,6 +30,12 @@ function adAssets(): Plugin {
       server.middlewares.use((req, res, next) => {
         const url = (req.url ?? "").split("?")[0]!;
         if (url.endsWith(`/${ASSET}`)) { res.setHeader("content-type", "application/gzip"); res.end(readFileSync(RANKS)); return; }
+        const g = url.indexOf("/gaze/");
+        if (g >= 0) {
+          const f = normalize(join(GAZE, url.slice(g + "/gaze/".length)));
+          if (f.startsWith(GAZE) && existsSync(f)) { res.setHeader("content-type", f.endsWith(".wasm") ? "application/wasm" : f.endsWith(".js") ? "text/javascript" : "application/octet-stream"); res.end(readFileSync(f)); return; }
+          res.statusCode = 404; res.end(); return;
+        }
         const at = url.indexOf("/ad-demo/");
         if (at >= 0) {
           const f = normalize(join(DEMO, url.slice(at + "/ad-demo/".length)));
@@ -52,5 +61,6 @@ export default defineConfig((env) => {
     root: here("."),
     build: { outDir: here("./dist-ad"), rollupOptions: { input: { ad: here("./ad.html") } } },
     server: { port: 5175 },
+    worker: { format: "es" },
   } satisfies UserConfig);
 });

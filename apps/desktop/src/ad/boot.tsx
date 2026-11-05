@@ -5,6 +5,7 @@ import type { Arm, BhAdEvent, ScreenInfo, SessionType } from "@brianharness/core
 import { LocalStorageKV, MemoryKV } from "@brianharness/core/browser";
 import { AdApp, type AdLayout } from "./AdApp";
 import { CalibrationFlow, type CalibrationOutcome, type CalibrationStage } from "./Calibration";
+import { MacBoot, macBridge } from "./mac/MacBoot";
 import { LiveAdController, blindedView, calibrationSummary, staticController, visibleView, type AdChatMsg, type PendingNote } from "./controller";
 
 /** demo snapshot (scripts/ad-demo.mts). Blinded snapshots carry chat only: there are no lines to leak. */
@@ -60,6 +61,7 @@ export async function mountAd(q: URLSearchParams, opts: MountOptions = {}): Prom
     const view = visibleView(d.lines, d.chat, { calibration: calibrationSummary(d.calibration), pending: d.pending });
     return <AdApp store={staticController(view, d.live)} {...(layout ? { layout } : {})} {...(tabOpen !== undefined ? { tabOpen } : {})} {...(reduce !== undefined ? { reduceMotion: reduce } : {})} holdInjection={q.get("inject") === "1" ? d.injected : null} selectedCard={q.get("sel") === "1" ? d.selected : null} now={() => d.nowMono} />;
   }
+  if (q.get("tracker") === "mediapipe" || macBridge()) return <MacBoot q={q} replaysUrl={url("replays.json")} {...(layout ? { layout } : {})} {...(reduce !== undefined ? { reduce } : {})} />;
   return <LiveBoot q={q} screen={screen} replaysUrl={url("replays.json")} {...(layout ? { layout } : {})} {...(reduce !== undefined ? { reduce } : {})} />;
 }
 

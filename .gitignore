@@ -9,3 +9,4 @@ __pycache__/
 *.pyc
 tools/llm-extractor-eval/out-dry/
 dist-ad/
+apps/desktop/resources/gaze/
