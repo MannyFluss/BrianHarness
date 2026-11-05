@@ -28,7 +28,8 @@ export function splitParagraphs(text: string): Array<{ p: number | null; text: s
   return out;
 }
 export const wordCount = (s: string) => (s.match(/\S+/g) ?? []).length;
-export const aoiId = (msg: string, p: number) => `${msg}#p${p}`;
+/** DOM paragraph index (data-p, 0-based) -> the AOI / evidence id the digest and the Director use ("a7.p1", 1-based) */
+export const aoiId = (msg: string, p: number) => `${msg}.p${p + 1}`;
 
 interface Track { box: ParaBox; visible: Array<[number, number]>; open: number | null; complete_t?: number; first: number }
 export class ParagraphVisibility {
@@ -75,7 +76,7 @@ export class ParagraphVisibility {
       const v: Array<[number, number]> = [...tr.visible];
       if (tr.open !== null) v.push([tr.open, until]);
       const b = tr.box;
-      return { id, msg: b.msg, order: b.p, x: b.x, y: b.y, w: b.w, h: b.h, words: b.words ?? wordCount(b.text ?? ""),
+      return { id, msg: b.msg, order: b.p + 1, x: b.x, y: b.y, w: b.w, h: b.h, words: b.words ?? wordCount(b.text ?? ""),
         ...(b.text !== undefined ? { text: b.text } : {}), ...(b.line_h !== undefined ? { line_h: b.line_h } : {}),
         ...(tr.complete_t !== undefined ? { complete_t: tr.complete_t } : {}), visible: v };
     });

@@ -131,11 +131,11 @@ export class CalibrationRun {
   readonly targets: { fit: CalibrationTarget[]; validate: CalibrationTarget[] };
   private samples: RawSample[] = [];
   private windows = new Map<string, Win>();
-  constructor(readonly o: { screen: ScreenInfo; orientation?: Orientation; fit?: "core" | "native"; paraHeightPx: number; timing?: Partial<typeof CAL_TIMING> }) {
+  constructor(readonly o: { screen: ScreenInfo; orientation?: Orientation; fit?: "core" | "native"; paraHeightPx: number; timing?: Partial<Record<keyof typeof CAL_TIMING, number>> }) {
     this.device = calDeviceOf(o.screen);
     this.targets = calibrationTargets(this.device, { w: o.screen.webview.width, h: o.screen.webview.height });
   }
-  get timing() { return { ...CAL_TIMING, ...(this.o.timing ?? {}) }; }
+  get timing(): Record<keyof typeof CAL_TIMING, number> { return { ...CAL_TIMING, ...(this.o.timing ?? {}) }; }
   get orientation(): Orientation { return this.o.orientation ?? this.o.screen.orientation; }
   /** every dot in order: fit dots, then validation dots */
   get sequence(): CalibrationTarget[] { return [...this.targets.fit, ...this.targets.validate]; }

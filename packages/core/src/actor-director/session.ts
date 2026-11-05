@@ -16,7 +16,7 @@
  * 2 = health director.leak_breaker and every later note is blocked (rail leak_breaker).
  */
 import { DIRECTOR_HOLD_MS, SAFETY_LEAKS, noteKind } from "../ad-contracts/index.js";
-import type { Arm, AttentionEvent, BhAdEventBody, DirectorFootprint, DirectorNote, HealthCode, ReadingDigest, SessionType, Usage } from "../ad-contracts/index.js";
+import type { Arm, AttentionEvent, BhAdEventBody, DirectorFootprint, DirectorNote, DirectorOutput, HealthCode, RailCode, ReadingDigest, SessionType, Usage } from "../ad-contracts/index.js";
 import { OPENER_CUE } from "../backends.js";
 import { makeRng, type Rng } from "../rng.js";
 import { sha256HexSync } from "../study.js";
@@ -147,6 +147,22 @@ export class ActorDirectorSession {
       session_share: round4(this.tracker.sessionShare), session_dynamic_share: round4(this.tracker.sessionDynamicShare),
       recent: this.notes.slice(-3).map((n) => ({ note_id: n.note_id, turn: n.turn, kind: noteKind(n.note), move: n.note.suggestion?.move ?? null, decision: n.decision, followed: n.followed, next_dwell_ratio: n.next_dwell_ratio })),
     };
+  }
+
+  /**
+   * E6 (tab_visible only): the Director call in flight for the next Actor request, for the tab's "considered" card
+   * and the injection animation (a rail-passing note waits at the composer until Send). Logs nothing; the decision
+   * (rails at decision time, inject vs shadow) is still made and logged by send(). Always null in blinded sessions.
+   */
+  peekPending(): { turn: number; settled: boolean; output: DirectorOutput | null; rails: { pass: boolean; blocked_by: RailCode[]; actor_text: string | null } | null } | null {
+    const p = this.pending;
+    if (!p || this.o.sessionType !== "tab_visible") return null;
+    const out = p.settled?.output ?? null;
+    const rails = out?.note ? runRails(out, {
+      input: p.input, previousActorTexts: this.notes.filter((n) => n.decision !== "blocked" && n.actor_text).slice(-2).map((n) => n.actor_text!),
+      directorEnabled: this.enabled(), cameraConsent: this.o.consent.camera, invalidEventIds: p.invalid, leakBreakerTripped: this.breakerTripped,
+    }) : null;
+    return { turn: p.turn, settled: !!p.settled, output: out, rails: rails ? { pass: rails.pass, blocked_by: rails.blocked_by, actor_text: rails.actor_text } : null };
   }
 
   /** start the Director call for the next Actor request (turn + 1). No-op before the opener, when disabled or capped. */
