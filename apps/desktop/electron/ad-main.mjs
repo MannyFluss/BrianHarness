@@ -130,6 +130,8 @@ function report() {
   if (r.status?.permission && r.status.permission !== "granted") failures.push({ what: "camera permission", cause: `gaze.camera_denied (permission ${r.status.permission}): System Settings > Privacy & Security > Camera > ${APP_NAME}` });
   if (r.status?.state === "error") failures.push({ what: "tracker error", cause: r.status.code ?? "unknown" });
   if (!stats.modelSha256) failures.push({ what: "model not loaded", cause: (gazeBundle.some((b) => b.status === 404) ? "gaze.model_missing: bundle file missing (Resources/gaze)" : (stats.errors ?? [])[0] ?? "gaze.model_missing: see errors") });
+  if (!fps) failures.push({ what: "no fps measured", cause: r.status?.code ?? (stats.frames ? "too few fps windows (run longer than 20 s)" : "no camera frames processed") });
+  if (stats.frames > 0 && (stats.faces ?? 0) / stats.frames < 0.5) failures.push({ what: `face found in ${stats.faces}/${stats.frames} frames`, cause: "gaze.low_quality: nobody in front of the camera, face out of frame, or too dark" });
   if (fps && fps.median < 25) failures.push({ what: `fps median ${fps.median} < 25`, cause: `inference ${Math.round(stats.inferMsMean ?? 0)} ms/frame on ${stats.delegate ?? "?"}; faces ${stats.faces}/${stats.frames}` });
   if (log.network.length) failures.push({ what: `${log.network.length} network request(s) attempted (all cancelled)`, cause: [...new Set(log.network.map((n) => n.url))].slice(0, 5).join(", ") });
   return {
@@ -180,7 +182,7 @@ app.whenReady().then(() => {
   app.on("session-created", guardNetwork);
   createWindow();
   if (H1) {
-    // with --h1-calibrate the clock starts once calibration is done (the renderer reports calibrated:true) or after 120 s
+    // with --h1-calibrate the clock starts once calibration is done (the renderer reports calibrated:true) or after 180 s
     const metrics = setInterval(sampleMetrics, 2000);
     const startAt = Date.now();
     const finish = () => {

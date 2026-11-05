@@ -10,3 +10,4 @@ __pycache__/
 tools/llm-extractor-eval/out-dry/
 dist-ad/
 apps/desktop/resources/gaze/
+apps/desktop/release-ad/

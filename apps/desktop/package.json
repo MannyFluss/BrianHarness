@@ -12,6 +12,7 @@
     "start": "electron .",
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && EEG_DEV_URL=http://localhost:5173 electron .\"",
     "dist:mac": "npm run build && electron-builder --config electron-builder.cjs --mac --arm64",
+    "dist:ad-mac": "node scripts/ad-gaze-assets.mjs --check && AD_DEMO_BUNDLE=1 vite build --config vite.ad.config.ts && electron-builder --config electron-builder.ad.cjs --mac zip --arm64",
     "build:web": "vite build --mode web && node scripts/check-web-bundle.mjs",
     "dev:web": "vite --mode web",
     "preview:web": "vite preview --mode web --host 0.0.0.0",
