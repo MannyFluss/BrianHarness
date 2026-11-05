@@ -4,10 +4,12 @@
  *  - ad.html (apps/desktop root) as the only input -> dist-ad/
  *  - the vendored o200k_base rank file served/emitted as ad/o200k_base.tiktoken.gz (lazy-loaded by
  *    loadO200kBrowser; Capacitor ships it inside the app bundle, no runtime network fetch)
- *  - dev only: /ad-demo/* serves the sim snapshots from $AD_DEMO_DIR (default /workspace/ad-scratch/demo)
+ *  - dev: <any base>/ad-demo/* serves the sim snapshots from $AD_DEMO_DIR (default /workspace/ad-scratch/demo)
+ *  - build with AD_DEMO_BUNDLE=1: copies $AD_DEMO_DIR/*.json into dist-ad/ad-demo/ so a bundle served from any
+ *    folder (the iOS bundle at ad-ios/) loads the demo from "./ad-demo/" with no dev server (IOS Dev I4)
  */
 import { defineConfig, mergeConfig, type Plugin, type UserConfig } from "vite";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, normalize } from "node:path";
 import base from "./vite.config.ts";
@@ -25,15 +27,21 @@ function adAssets(): Plugin {
       server.middlewares.use((req, res, next) => {
         const url = (req.url ?? "").split("?")[0]!;
         if (url.endsWith(`/${ASSET}`)) { res.setHeader("content-type", "application/gzip"); res.end(readFileSync(RANKS)); return; }
-        if (url.startsWith("/ad-demo/")) {
-          const f = normalize(join(DEMO, url.slice("/ad-demo/".length)));
+        const at = url.indexOf("/ad-demo/");
+        if (at >= 0) {
+          const f = normalize(join(DEMO, url.slice(at + "/ad-demo/".length)));
           if (f.startsWith(DEMO) && existsSync(f)) { res.setHeader("content-type", "application/json"); res.end(readFileSync(f)); return; }
           res.statusCode = 404; res.end(); return;
         }
         next();
       });
     },
-    generateBundle() { this.emitFile({ type: "asset", fileName: ASSET, source: readFileSync(RANKS) }); },
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: ASSET, source: readFileSync(RANKS) });
+      if (process.env.AD_DEMO_BUNDLE === "1" && existsSync(DEMO)) {
+        for (const f of readdirSync(DEMO).filter((n) => n.endsWith(".json"))) this.emitFile({ type: "asset", fileName: `ad-demo/${f}`, source: readFileSync(join(DEMO, f)) });
+      }
+    },
   };
 }
 

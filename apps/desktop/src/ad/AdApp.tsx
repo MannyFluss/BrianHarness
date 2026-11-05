@@ -59,8 +59,12 @@ export function AdApp(props: AdAppProps) {
     const id = setInterval(() => {
       const root = chatRef.current; if (!root) return;
       const sheet = document.querySelector('[data-ad-tab="sheet"][data-ad-tab-open="true"]')?.getBoundingClientRect();
-      const boxes = collectParaBoxes(root).filter((b) => !sheet || b.x + b.w <= sheet.left);
-      store.paragraphs!(boxes, performance.now(), view.chat.some((m) => m.streaming));
+      const all = collectParaBoxes(root);
+      const boxes = all.filter((b) => !sheet || b.x + b.w <= sheet.left);
+      const t = performance.now();
+      // phone: the sheet covers the chat -> no paragraph is attributable; the controller logs tab_occluded (I4)
+      store.occlusion?.(!!sheet && all.length > 0 && boxes.length === 0, t);
+      store.paragraphs!(boxes, t, view.chat.some((m) => m.streaming));
     }, 250);
     return () => clearInterval(id);
   }, [store, view.chat]);

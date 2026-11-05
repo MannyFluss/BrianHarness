@@ -154,6 +154,9 @@ export class ActorDirectorSession {
 
   async opener(): Promise<string> { return this.actorTurn(null, null); }
 
+  /** the app's gaze-side lines (layout after a rotation / resize, calibration health); nothing else goes through here */
+  logGaze(b: Extract<BhAdEventBody, { type: "aoi_layout" | "health" | "tab_occluded" }>): void { this.emit(b); }
+
   /** the reading window of the latest Actor message closed (E5 provides the digest + events) */
   observeReading(r: { digest: ReadingDigest; events: AttentionEvent[]; faceFrac?: number | null; baselineParagraphs?: number; ledger?: string[] }): void {
     this.digest = r.digest; this.events = r.events; this.faceFrac = r.faceFrac ?? null;

@@ -5,7 +5,7 @@
  * iPad Pro 11 (iPad13,4) landscape is the primary orientation. The result's distance feeds GazeSource's px/deg.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CalibrationRun, accuracyWords, calDeviceOf, primaryOrientation, isLandscape, type CalibrationRecord, type CalibrationStore } from "@brianharness/core/actor-director/browser";
+import { CalibrationRun, accuracyWords, calDeviceOf, primaryOrientation, isLandscape, simLookAt, type CalibrationRecord, type CalibrationStore } from "@brianharness/core/actor-director/browser";
 import type { CalibrationTarget, GazeTracker, Orientation, ScreenInfo } from "@brianharness/core/ad-contracts";
 import { cn } from "../lib";
 
@@ -97,7 +97,8 @@ export function CalibrationFlow({ screen, tracker, store, orientation, paraHeigh
     setErr(null); setStage("dots");
     abort.current = new AbortController();
     try {
-      const look = simulateLook && "lookAt" in tracker ? (x: number, y: number) => (tracker as unknown as { lookAt(x: number, y: number): void }).lookAt(x, y) : undefined;
+      // simLookAt detects with typeof, not `"lookAt" in tracker` (fails on the Capacitor proxy; IOS Dev I4)
+      const look = simulateLook ? simLookAt(tracker) : undefined;
       const r = await runCalibration({ tracker, screen, orientation: o, paraHeightPx, signal: abort.current.signal, onDot: (t, i, n) => setDot({ t, i, n }), ...(look ? { lookAt: look } : {}), ...(timing ? { timing } : {}) });
       setOut(r); setStage("result");
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setStage("intro"); }

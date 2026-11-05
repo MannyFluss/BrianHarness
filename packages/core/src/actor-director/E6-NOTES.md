@@ -55,3 +55,32 @@ Import from `@brianharness/core/actor-director/browser` and `apps/desktop/src/ad
 - The live mode's demo data (`/ad-demo/*`) is dev-server only. On device the gaze comes from the plugin.
 - With the mock Actor, `followed` stays false: the mock doesn't paraphrase the hint closely enough for the follow
   metric.
+
+## E7 addendum: IOS Dev I4 feedback (native c687996)
+
+- **Simulator device model.** The simulator reports `iPad13,5` as a stand-in for `iPad13,4` (the study iPad). Calibration
+  records are keyed per `deviceModel` + orientation, so a record saved in the simulator is never loaded on the device:
+  the device uses its own `iPad13,4` key and asks for its own calibration. This is expected, not a bug.
+- **lookAt (contract v1.2, additive optional).** `GazeTracker.lookAt?(x, y)` is a simulator-only aid. On the device it
+  is absent or a no-op. Detect it with `typeof tracker.lookAt === "function"` (`simLookAt()` in core), never
+  `"lookAt" in tracker`, because the Capacitor plugin proxy has no `has` trap. Errors and rejections are swallowed.
+- **Tracker label.** `session_start.gaze.tracker` comes from the tracker's start mode (`getStatus()`): synthetic gives
+  "synthetic", camera gives arkit/mediapipe, no tracker gives "none". It no longer reads "synthetic" whenever a tracker exists.
+- **Demo URLs.** Demo snapshots and replays resolve against `document.baseURI` with the default `./ad-demo/`, so the
+  iOS bundle at `ad-ios/` works without a dev server. Override with `mountAd(q, { demoBase })` or `?demoBase=`. To bundle the JSON:
+  `AD_DEMO_BUNDLE=1 AD_DEMO_DIR=/workspace/ad-scratch/demo npx vite build --config vite.ad.config.ts` copies it to `dist-ad/ad-demo/`.
+- **Rotation.** `LiveAdController.orientationChanged(screen, boxes?)` is wired to `resize` and `screen.orientation` change.
+  It updates the screen info, loads the stored calibration for the new orientation (`restoreCalibration` for a native fit),
+  and re-logs `aoi_layout`. If nothing is stored, the session runs uncalibrated (on-screen time only) and logs a health
+  line with check `calibration.valid` and code `gaze.calibration_stale`. No new health code was added.
+  `aoi_layout` is now also logged once per reply, when the reply is first fully laid out.
+- **Demo gaze from the real layout.** R2 replay points were generated for the R2 layout, so they never landed on the
+  app's paragraph boxes (every paragraph read as skipped). The live demo now generates gaze from each reply's real
+  `aoi_layout` boxes with `demoReadingPath` and `SyntheticGazeTracker.play`. Each paragraph is read line by line at 238 wpm,
+  with styles cycling deep, skim, skip, read. Afterwards the gaze rests on the composer. `?gaze=r2` keeps the raw R2 loop.
+- **Phone: Director sheet over the chat.** While the sheet covers the chat, gaze is not attributed to paragraphs. The live
+  target is null, and the tab says "chat covered by this tab (not counted)". The covered span is logged as a v1.2
+  `tab_occluded` event, which is sealed-only: it appears only in tab_visible sessions and never in a blinded main log.
+  In a reading window with occlusion, a paragraph with no uncovered gaze is left out of that turn's digest and
+  baseline. It may have been read under the sheet, so it is never labelled "skipped". Covered time is excluded from dwell.
+  An occlusion still open at the window's close is logged up to the close and continues into the next window.

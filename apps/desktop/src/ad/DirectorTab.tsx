@@ -131,7 +131,7 @@ export function PendingCardView({ p }: { p: PendingNote }) {
 }
 
 /** bottom layer: renders at 10 Hz from store.live() */
-export function LiveLayer({ tab, pullLive, camera, onPause, calibration }: { tab: TabModel; pullLive: () => LiveGaze | null; camera: VisibleView["camera"]; onPause?: () => void; calibration: VisibleView["calibration"] }) {
+export function LiveLayer({ tab, pullLive, camera, onPause, calibration, occluded = false }: { tab: TabModel; pullLive: () => LiveGaze | null; camera: VisibleView["camera"]; onPause?: () => void; calibration: VisibleView["calibration"]; occluded?: boolean }) {
   const [live, setLive] = useState<LiveGaze | null>(() => pullLive());
   useEffect(() => { const id = setInterval(() => setLive(pullLive()), 100); return () => clearInterval(id); }, [pullLive]);
   const b = tab.bottom;
@@ -150,7 +150,7 @@ export function LiveLayer({ tab, pullLive, camera, onPause, calibration }: { tab
         {!b.paras.length && <p className="text-muted-foreground">No reading data yet.</p>}
       </div>
       <div className="flex justify-between text-muted-foreground" data-ad-live>
-        <span>Looking at: <span className="text-foreground">{live?.target ?? (live?.point ? "outside the chat" : "–")}</span></span>
+        <span>Looking at: <span className="text-foreground">{occluded ? "chat covered by this tab (not counted)" : live?.target ?? (live?.point ? "outside the chat" : "–")}</span></span>
         <span>Tracking {live ? `${pct(live.quality)}${live.faceFrac < 0.7 ? " · face lost" : ""}` : "–"}</span>
       </div>
       {b.ticker.length > 0 && <ul className="flex flex-col gap-0.5" data-ad-ticker>{b.ticker.map((e) => <li key={e.id}><span className="text-muted-foreground">{e.id}</span> {e.words}</li>)}</ul>}
@@ -182,7 +182,7 @@ export function DirectorTab({ view, pullLive, variant, open, onClose, selected, 
           {tab.cards.map((c) => <NoteCardView key={c.key} card={c} selected={selected === c.key} onSelect={(x) => onSelect(selected === x.key ? null : x)} pulse={false} now={now} />)}
         </div>
       </Section>
-      <LiveLayer tab={tab} pullLive={pullLive} camera={view.camera} onPause={onPause} calibration={view.calibration} />
+      <LiveLayer tab={tab} pullLive={pullLive} camera={view.camera} onPause={onPause} calibration={view.calibration} occluded={!!view.occluded} />
     </div>
   ), [tab, view.pending, view.camera, view.calibration, breakdown, selected, now, pullLive, onPause, onSelect]);
   if (variant === "sheet") {
