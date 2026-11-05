@@ -40,6 +40,13 @@ Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/a
 3. `session_start.contract` accepts `"contract-v1.2"` too (new logs write v1.2).
 4. Semantics (no field change): a flagged or uncertain gate verdict counts toward the leak breaker in every arm; a
    dropped note gets no `note_outcome` and reads `blocked` in the Director footprint.
+5. Gaze plugin API (IOS Dev I4 feedback): optional `GazeTracker.lookAt?(x, y)`, simulator/synthetic only, absent or a
+   no-op on device. Detect with `typeof tracker.lookAt === "function"`. No schema or event change; native trackers
+   need no change.
+6. New event `tab_occluded {turn, msg, t0, t1, ms}` (tab_visible; **sealed-only** in a blinded session, which has no
+   tab; added to `SEALED_ONLY_TYPES` and `blinding.json`). Phone behaviour (IOS Dev I4): while the Director sheet
+   covers the chat, gaze is not attributed to paragraphs and that time is excluded from per-paragraph reading
+   features; a paragraph that was only ever covered is left out of the digest rather than labelled `skipped`.
 
 ## Change policy
 
@@ -135,7 +142,10 @@ One gaze estimate from an on-device tracker (ARKit on iOS, MediaPipe on the Mac,
 MediaPipe tracker (Electron Web Worker). The methods are `getStatus`, `requestPermission`, `getScreenInfo`,
 `start({mode: camera|synthetic, synthetic?, webNow, maxHz?})`, `stop`, `pause`/`resume` (the tab's one-tap pause),
 `calibrate({phase: begin|target|end|cancel})`, `restoreCalibration`, `syncClock`, and the events `gaze` (a batch of
-samples about every 100 ms) and `status`.
+samples about every 100 ms) and `status`. v1.2: optional `lookAt?(x, y)` is a **simulator-only aid** (the synthetic
+tracker's simulated gaze point, called by the calibration screens). Device trackers omit it or make it a no-op;
+detect it with `typeof tracker.lookAt === "function"` (not `"lookAt" in tracker`: the Capacitor proxy answers `in`
+for any name).
 - Permission states: `prompt | granted | denied | restricted`. An unsupported device has `supported:false` with
   `gaze.arkit_unsupported` or `gaze.model_missing`.
 - Tracker states: `idle | starting | running | calibrating | paused | stopped | error`. Pause reasons:
@@ -500,7 +510,7 @@ retries once with the errors. A second failure means no note (`director.schema_i
 Every line has `{schema "bh-ad/1", type, t ISO, mono ms (GazeSample clock), sessionId, seq}`. Turn 0 is the opener.
 `aT` is the Actor message of turn T, and `uT` is the user message answering it. Director-side events carry the turn
 of the Actor request they affect. Types: `session_start, gaze_quality, aoi_layout, scroll, gaze_l1, gaze_raw (off by
-default), aoi_dwell, attention_digest, user_turn, director_call (with the director footprint), rail_check, injection,
+default), tab_occluded (v1.2), aoi_dwell, attention_digest, user_turn, director_call (with the director footprint), rail_check, injection,
 note_dropped, leak_judge (v1.2), context_share, actor_turn, note_outcome, session_share, health, session_end`.
 
 **Context share** (`context_share` per Actor request, `session_share` at the end) uses o200k_base token counts of
@@ -525,7 +535,7 @@ http_status 429, worker_code "role_cap_<role>", role}` (`WORKER_CAP_TO_HEALTH`).
 | `session_start.sealed`, `blind {index,total,scheduleHash}` | absent | present |
 | `actor_turn.note_id`, `actor_request_sha256` | present | **TAB-ONLY**: sealed log only; main has `sealed:true` |
 | `actor_turn.usage.prompt_tokens` | number or null | **null** in the main log |
-| `director_call, rail_check, injection, note_dropped, leak_judge, context_share, note_outcome, session_share` | written | **sealed log only** |
+| `director_call, rail_check, injection, note_dropped, leak_judge, tab_occluded, context_share, note_outcome, session_share` | written | **sealed log only** |
 | `health` with `director.leak_breaker` | written | sealed log only |
 
 The Director runs and the 1.5 s hold applies in every arm of a blinded session, so timing and request counts match.
@@ -1064,7 +1074,7 @@ Every other event type has an example in `examples/event-*.json`, and all of the
 
 For an upload whose `session_start.session_type` is `blinded` and whose sessionId doesn't end in `.sealed`, reject if
 any line has: `session_start.arm` or `p_inject`; `actor_turn.note_id` or `actor_request_sha256`; a non-null
-`actor_turn.usage.prompt_tokens`; a line of type `director_call | rail_check | injection | note_dropped | context_share |
+`actor_turn.usage.prompt_tokens`; a line of type `director_call | rail_check | injection | note_dropped | leak_judge | tab_occluded | context_share |
 note_outcome | session_share`; `health.code` `director.leak_breaker`; or any key matching the shared arm-key list at any
 depth. Fail closed: every line must be a bh-ad/1 object of this session and the first line its session_start, else
 reject. A `<id>.sealed` upload is accepted only when its own session_start and the base `<id>` main log are blinded.

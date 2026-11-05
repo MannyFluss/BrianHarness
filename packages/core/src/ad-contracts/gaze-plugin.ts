@@ -128,6 +128,13 @@ export interface GazeTracker {
   syncClock(opts: { webNow: number }): Promise<{ driftMs: number }>;
   addListener(event: "gaze", cb: (e: GazeBatchEvent) => void): Promise<{ remove(): Promise<void> }>;
   addListener(event: "status", cb: (e: GazeStatusEvent) => void): Promise<{ remove(): Promise<void> }>;
+  /**
+   * v1.2, optional, SIMULATOR / SYNTHETIC ONLY: sets the simulated gaze point (screen pt) the synthetic tracker
+   * reports next (the calibration screens call it when they show a dot). Absent on device trackers (ARKit, MediaPipe)
+   * or a no-op there. Detect it with `typeof tracker.lookAt === "function"`, never `"lookAt" in tracker` (a Capacitor
+   * plugin proxy answers `in` for every name).
+   */
+  lookAt?(x: number, y: number): void | Promise<void>;
 }
 
 /** gaze replay file: synthetic mode, the replay CLI and the R2 generator */

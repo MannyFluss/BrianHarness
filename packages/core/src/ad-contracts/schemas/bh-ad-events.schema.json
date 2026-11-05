@@ -869,6 +869,73 @@
         }
       }
     },
+    "ev_tab_occluded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "t",
+        "mono",
+        "sessionId",
+        "seq",
+        "type",
+        "turn",
+        "msg",
+        "t0",
+        "t1",
+        "ms"
+      ],
+      "properties": {
+        "schema": {
+          "const": "bh-ad/1"
+        },
+        "t": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,6})?Z$"
+        },
+        "mono": {
+          "type": "number",
+          "minimum": 0
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "type": {
+          "const": "tab_occluded"
+        },
+        "turn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "msg": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 12,
+          "pattern": "^a[0-9]+$"
+        },
+        "t0": {
+          "type": "number",
+          "minimum": 0
+        },
+        "t1": {
+          "type": "number",
+          "minimum": 0
+        },
+        "ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
     "ev_aoi_dwell": {
       "type": "object",
       "additionalProperties": false,
@@ -3346,6 +3413,7 @@
         "scroll",
         "gaze_l1",
         "gaze_raw",
+        "tab_occluded",
         "aoi_dwell",
         "attention_digest",
         "user_turn",
@@ -3434,6 +3502,18 @@
       },
       "then": {
         "$ref": "#/definitions/ev_gaze_raw"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "tab_occluded"
+          }
+        }
+      },
+      "then": {
+        "$ref": "#/definitions/ev_tab_occluded"
       }
     },
     {

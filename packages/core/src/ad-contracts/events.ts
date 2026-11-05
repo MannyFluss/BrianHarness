@@ -115,6 +115,13 @@ export type BhAdEventBody =
    *  a log with any gaze_raw line is local-only and is never uploaded (it cannot fit the 1 MiB budget) */
   | { type: "gaze_raw"; samples: GazeSample[] }
   | { type: "aoi_dwell"; turn: number; msg: string; dwell: AoiDwell[] }
+  /**
+   * v1.2, tab_visible only (sealed-only in a blinded session, where there is no tab): the Director tab covered the
+   * chat (the phone sheet) from t0 to t1 (mono ms) during a(turn)'s reading window. Gaze in that span is not
+   * attributed to paragraphs, and the span is excluded from per-paragraph reading features: a paragraph that was
+   * only ever covered is left out of the digest (never labelled "skipped").
+   */
+  | { type: "tab_occluded"; turn: number; msg: string; t0: number; t1: number; ms: number }
   | { type: "attention_digest"; turn: number; msg: string; digest: ReadingDigest; events: AttentionEvent[] }
   | { type: "user_turn"; turn: number; msg: string; text: string; sentAt: number; hold_ms: number }
   | {
@@ -175,7 +182,7 @@ export type BhAdEvent = Envelope & BhAdEventBody;
 export type BhAdEventType = BhAdEventBody["type"];
 
 /** event types that exist only in the sealed log of a blinded session */
-export const SEALED_ONLY_TYPES: readonly BhAdEventType[] = ["director_call", "rail_check", "injection", "note_dropped", "leak_judge", "context_share", "note_outcome", "session_share"];
+export const SEALED_ONLY_TYPES: readonly BhAdEventType[] = ["director_call", "rail_check", "injection", "note_dropped", "leak_judge", "tab_occluded", "context_share", "note_outcome", "session_share"];
 /** gaze_l1 rate limit: batches cover <= 5 s; <= 20 fixations, <= 10 back/jump saccades, <= 10 gaps per batch */
 export const GAZE_L1_MAX_FIXATIONS = 20;
 export const GAZE_L1_MAX_SACCADES = 10;

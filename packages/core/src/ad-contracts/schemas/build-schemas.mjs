@@ -229,6 +229,7 @@ const events = [
   ev("scroll", { samples: arr(obj({ t: num(0), top: num(-COORD, COORD * 100) }), 1, 600) }),
   ev("gaze_l1", { t0: num(0), t1: num(0), fixations: arr(fixation, 0, 20), saccades: arr({ ...saccade, properties: { ...saccade.properties, dir: en("back", "jump") } }, 0, 10), gaps: arr(gap, 0, 10) }),
   ev("gaze_raw", { samples: arr(G("GazeSample"), 1, 64) }),
+  ev("tab_occluded", { turn, msg: msgId, t0: num(0), t1: num(0), ms: num(0) }),
   ev("aoi_dwell", { turn, msg: msgId, dwell: arr(aoiDwell, 0, 400) }),
   ev("attention_digest", { turn, msg: msgId, digest, events: arr(attEvent, 0, 64) }),
   ev("user_turn", { turn, msg: str(2, 12, { pattern: "^u[0-9]+$" }), text: { type: "string" }, sentAt: num(0), hold_ms: num(0, 1500) }),

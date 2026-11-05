@@ -64,6 +64,8 @@ export const events = {
   session_start_blinded_main: { ...env(0, 0), type: "session_start", ...common, session_type: "blinded", tab: "hidden", sealed: true, blind },
   session_start_blinded_sealed: { ...env(0, 0), type: "session_start", ...common, session_type: "blinded", tab: "hidden", sealed: true, blind, arm: "off", p_inject: 0 },
   gaze_quality: { ...env(101, 412000), type: "gaze_quality", turn: 12, calib: { errDeg: 3.4, errParas: 0.6, ageS: 410, orientation: "portrait" }, quality: 0.82, faceFrac: 0.97, hz: 30 },
+  /** v1.2: the phone's Director sheet covered the chat for 4.2 s of a11's reading window */
+  tab_occluded: { ...env(103, 418300), type: "tab_occluded", turn: 11, msg: "a11", t0: 414100, t1: 418300, ms: 4200 },
   aoi_layout: { ...env(102, 412010), type: "aoi_layout", turn: 11, msg: "a11", orientation: "portrait", boxes: [{ aoi: "a11.p1", words: 38, x: 16, y: 5120, w: 370, h: 132 }, { aoi: "a11.p2", words: 52, x: 16, y: 5268, w: 370, h: 176 }] },
   scroll: { ...env(103, 412020), type: "scroll", samples: [{ t: 411100, top: 4980 }, { t: 411600, top: 5040 }] },
   gaze_l1: { ...env(104, 412030), type: "gaze_l1", t0: 407030, t1: 412030, fixations: [{ id: "f881", t0: 410020, t1: 410310, x: 120.5, y: 210.2, dispPx: 14.1, n: 9 }], saccades: [{ t0: 410310, t1: 410345, from: "f881", to: "f882", dir: "back", ampDeg: 2.6 }], gaps: [{ t0: 410400, t1: 410520, kind: "blink" }] },
