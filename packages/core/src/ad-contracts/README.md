@@ -1025,6 +1025,13 @@ From R5 (`research/R5/`: PREREG_EVAL_DRAFT.md §10, SURVEY_EVENT_PROPOSAL.md, PI
    sealed logs).
 7. `check_blinding` exempts `survey.blind_guess` (its value is an arm word) and masks arm words in survey free text.
 
+From E6 (Director tab v1; rulings 2026-11-04 4:00 PM PT):
+1. `signals.ts`: add `"gaze"` to `SignalSource.kind` (protocol-4 file; needs an approved change). Until then the
+   ad module uses `AdSignalSource` / `asSignalSource(GazeSource)` (structural adapter).
+2. Keystroke timing on `user_turn` (R1 item 2): the web composer records key TIMES only (`KeystrokeTimes`, never the
+   key) and keeps them local; v1 logs nothing from them and only uses the first key time to close the reading window.
+3. `composer_hesitation` events fed from those intervals (v1 never emits them from the web app).
+
 From R1 (`research/R1/FEATURES.md`, "What R1 needs that contract-v1 lacks"):
 1. Drift anchors: an event for taps / known-gaze moments `{t, x, y}` (composer-tap drift correction).
 2. Keystroke timing: first-key time and pause count (or inter-key intervals, never key identity) on `user_turn`.
