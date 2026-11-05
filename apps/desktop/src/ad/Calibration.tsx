@@ -103,7 +103,7 @@ export function CalibrationFlow({ screen, tracker, store, orientation, paraHeigh
     try {
       // contract-v1.3: the JS synthetic tracker anywhere; a native plugin's lookAt ONLY in a simulator build
       // (__BH_AD_SIM__ is false in a device build, so this branch and sim-look.ts are stripped; tools/ad/check_device_build.mjs)
-      const look = !simulateLook ? undefined : (typeof __BH_AD_SIM__ !== "undefined" && __BH_AD_SIM__) ? nativeSimLookAt(tracker) : simLookAt(tracker);
+      const look = !simulateLook ? undefined : (typeof __BH_AD_SIM__ !== "undefined" && __BH_AD_SIM__) ? await nativeSimLookAt(tracker) : simLookAt(tracker);
       const r = await runCalibration({ tracker, screen, orientation: o, paraHeightPx, signal: abort.current.signal, onDot: (t, i, n) => setDot({ t, i, n }), ...(look ? { simLook: look } : {}), ...(timing ? { timing } : {}) });
       setOut(r); setStage("result");
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setStage("intro"); }

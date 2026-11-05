@@ -194,6 +194,6 @@ test("package export @brianharness/core/ad-contracts and ./actor-director", () =
 
 test("built dist: import('@brianharness/core/ad-contracts') resolves (pretest build)", async () => {
   const m = await import("@brianharness/core/ad-contracts");
-  assert.equal(m.CONTRACT_VERSION, "contract-v1.3");
+  assert.equal(m.CONTRACT_VERSION, "contract-v1.4");
   assert.equal(typeof m.blindedGuard, "function");
 });

@@ -67,7 +67,8 @@ const status = obj({
   state: en("idle", "starting", "running", "calibrating", "paused", "stopped", "error"),
   pauseReason: nul(en("background", "user", "interrupted", "permission_revoked")),
   tracker: nul(en("arkit", "mediapipe")), mode: nul(en("camera", "synthetic")), hz: nul(G("GazeHz")), code: nul(healthCode),
-});
+  orientation, // v1.4, optional: native-pushed interface orientation
+}, ["orientation"]);
 const synthetic = { ...obj({ file: str(1, 512, { pattern: "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/-]+\\.json$" }), samples: arr(G("GazeSample"), 1), loop: { type: "boolean" }, speed: num(0.1, 16) }, ["file", "samples", "loop", "speed"]),
   oneOf: [{ required: ["file"] }, { required: ["samples"] }] };
 const startOptions = { ...obj({ mode: en("camera", "synthetic"), synthetic, webNow: num(0), maxHz: G("GazeHz") }, ["synthetic", "maxHz"]),
@@ -96,6 +97,8 @@ const pluginSchema = {
     CalibrateOptions: calibrateOptions, CalibrateResult: calibrateResult,
     RestoreCalibrationOptions: obj({ orientation, model: arr({ type: "number" }, 1, 4096) }), OkResult: obj({ ok: { type: "boolean" } }),
     SyncClockOptions: obj({ webNow: num(0) }), SyncClockResult: obj({ driftMs: { type: "number" } }),
+    /** v1.4: lookAt({x, y}) (simulator / synthetic only) */
+    LookAtOptions: obj({ x: num(-COORD, COORD), y: num(-COORD, COORD) }),
     GazeBatchEvent: batch, GazeStatusEvent: { $ref: "#/definitions/GazeStatus" }, GazeReplayFile: replayFile,
   },
 };
@@ -185,7 +188,7 @@ const footprint = obj({
 });
 const sessionStart = {
   ...ev("session_start", {
-    profile: { const: "actor-director" }, contract: en("contract-v1", "contract-v1.1", "contract-v1.2", "contract-v1.3"), userId: str(1, 128),
+    profile: { const: "actor-director" }, contract: en("contract-v1", "contract-v1.1", "contract-v1.2", "contract-v1.3", "contract-v1.4"), userId: str(1, 128),
     session_type: { ...en("blinded", "tab_visible"), description: "SESSION TYPE. Fixed at session start by the schedule. blinded => tab hidden, main log redacted (see TAB-ONLY fields)" },
     tab: { ...en("visible", "hidden"), description: "must agree with session_type: blinded=hidden, tab_visible=visible" },
     arm: { ...en("on", "shadow", "off"), description: "TAB-ONLY: tab_visible sessions and the sealed log of a blinded session; NEVER in a blinded main log" },

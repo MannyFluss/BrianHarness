@@ -48,6 +48,12 @@ export interface GazeStatus {
   hz: GazeHz | null;
   /** most recent health code raised by the tracker itself, null when healthy */
   code: HealthCode | null;
+  /**
+   * v1.4, optional: the interface orientation as native sees it. A tracker MAY push a `status` event when it changes
+   * (WKWebView fires no resize on a landscape_left <-> landscape_right rotation); the web layer treats it as one more
+   * orientation source (deduped with screen.orientation / matchMedia / the 1 s poll).
+   */
+  orientation?: Orientation;
 }
 
 export interface SyntheticSource {
@@ -129,13 +135,18 @@ export interface GazeTracker {
   addListener(event: "gaze", cb: (e: GazeBatchEvent) => void): Promise<{ remove(): Promise<void> }>;
   addListener(event: "status", cb: (e: GazeStatusEvent) => void): Promise<{ remove(): Promise<void> }>;
   /**
-   * v1.2, optional, SIMULATOR / SYNTHETIC ONLY: sets the simulated gaze point (screen pt) the synthetic tracker
-   * reports next (the calibration screens call it when they show a dot). Absent on device trackers (ARKit, MediaPipe)
-   * or a no-op there. Detect it with `typeof tracker.lookAt === "function"`, never `"lookAt" in tracker` (a Capacitor
-   * plugin proxy has no `has` trap, so `in` is false even when the native method exists).
+   * v1.4 (was v1.2 `lookAt(x, y)`), optional, SIMULATOR / SYNTHETIC ONLY: sets the simulated gaze point (screen pt)
+   * the synthetic tracker reports next (the calibration screens call it when they show a dot). ONE options object
+   * `{x, y}`, because a Capacitor plugin call takes a single options object. Support is an explicit capability:
+   * call it only when `(await getStatus()).mode === "synthetic"`. Never detect it with `typeof` (a Capacitor proxy
+   * returns a function for every property) or `in` (the proxy has no `has` trap). Unreachable in device web builds
+   * (stripped unless AD_SIM_BUILD=1; tools/ad/check_device_build.mjs).
    */
-  lookAt?(x: number, y: number): void | Promise<void>;
+  lookAt?(opts: LookAtOptions): void | Promise<void>;
 }
+
+/** v1.4: GazeTracker.lookAt options (simulator / synthetic only), screen points */
+export interface LookAtOptions { x: number; y: number }
 
 /** gaze replay file: synthetic mode, the replay CLI and the R2 generator */
 export interface GazeReplayFile {

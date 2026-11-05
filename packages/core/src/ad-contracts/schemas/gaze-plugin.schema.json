@@ -323,6 +323,15 @@
               "type": "null"
             }
           ]
+        },
+        "orientation": {
+          "type": "string",
+          "enum": [
+            "portrait",
+            "portrait_upside_down",
+            "landscape_left",
+            "landscape_right"
+          ]
         }
       }
     },
@@ -768,6 +777,26 @@
       "properties": {
         "driftMs": {
           "type": "number"
+        }
+      }
+    },
+    "LookAtOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -100000,
+          "maximum": 100000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -100000,
+          "maximum": 100000
         }
       }
     },

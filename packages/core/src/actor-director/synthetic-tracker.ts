@@ -76,8 +76,10 @@ export class SyntheticGazeTracker implements GazeTracker {
   setDistortion(A: [number, number, number, number, number, number]) { this.o = { ...this.o, distortion: A }; }
   /** synthetic only: where the simulated person looks during calibration (screen points) */
   simLook(x: number, y: number) { this.look = { x, y }; }
-  /** GazeTracker.lookAt for callers that hold the interface (same as simLook) */
-  lookAt(x: number, y: number) { this.simLook(x, y); }
+  /** GazeTracker.lookAt (contract-v1.4: one options object) for callers that hold the interface (same as simLook) */
+  lookAt(opts: { x: number; y: number }) { this.simLook(opts.x, opts.y); }
+  /** synthetic only: the head distance every later sample reports (the demo matches the calibration's distCm) */
+  setDistCm(distCm: number) { if (distCm > 0) this.o = { ...this.o, distCm }; }
   async calibrate(opts: CalibrateOptions): Promise<CalibrateResult> {
     const base = { phase: opts.phase, ok: true, fit: null, model: null, samples: this.calSamples, code: null } as CalibrateResult;
     if (opts.phase === "begin") { this.calibrating = true; this.calSamples = 0; this.windows = []; this.setState({ state: "calibrating" }); return { ...base, samples: 0 }; }

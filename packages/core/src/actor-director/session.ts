@@ -140,7 +140,7 @@ export class ActorDirectorSession {
   start(): void {
     const tabVisible = this.o.sessionType === "tab_visible";
     this.emit({
-      type: "session_start", profile: "actor-director", contract: "contract-v1.3", userId: this.o.userId, session_type: this.o.sessionType,
+      type: "session_start", profile: "actor-director", contract: "contract-v1.4", userId: this.o.userId, session_type: this.o.sessionType,
       tab: tabVisible ? "visible" : "hidden", arm: this.o.arm, p_inject: this.pInject, ...(tabVisible ? {} : { sealed: true as const, ...(this.o.blind ? { blind: this.o.blind } : {}) }),
       actor_prompt_id: ACTOR_PROMPT_ID, director_prompt_id: this.o.directorPrompt?.id ?? DIRECTOR_PROMPT_ID, director_format_id: DIRECTOR_FORMAT_SLOT.id,
       director_examples_id: DIRECTOR_EXAMPLES_SLOT.id, director_assembled_sha8: this.o.directorPrompt ? sha8(this.o.directorPrompt.assemble(true)) : DIRECTOR_ASSEMBLED_SHA8, pipeline_version: PIPELINE_VERSION,

@@ -1,6 +1,6 @@
 # Actor/Director shared contracts
 
-**Version: contract-v1.3** (additive over contract-v1, v1.1 and v1.2; see Changes) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
+**Version: contract-v1.4** (additive over contract-v1 to v1.3 except the optional sim-only lookAt signature; see Changes) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
 
 Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/ad-contracts/`, published copy at
 `/workspace/actor-director/contracts/`. Import in TS from `@brianharness/core/ad-contracts` (subpath export, added in E1; nothing is re-exported from the core index, so protocol-4 is untouched), or use the JSON Schemas.
@@ -73,6 +73,26 @@ Researcher rulings of 5:33 PM PT.
    `synthetic`. Simulator builds set `AD_SIM_BUILD=1`.
 7. Semantics (no field change): `tab_occluded` time is also excluded from the expected-reading-time denominator and
    from the baseline-wpm update, not only from paragraph attribution.
+
+### contract-v1.4 (2026-11-04; every v1-v1.3 log line still validates)
+IOS Dev I5 notes (native 9fc02ce).
+1. **Gaze plugin API, `lookAt` signature change**: `lookAt?(opts: {x, y})` (new `LookAtOptions`, JSON Schema
+   `definitions.LookAtOptions`), replacing `lookAt?(x, y)`. A Capacitor plugin call passes one options object, so the
+   positional form never reached native. Simulator-only as before.
+2. **Capability, not typeof**: the web layer calls `lookAt` only when the tracker's `getStatus().mode` is `"synthetic"`
+   (a Capacitor proxy answers `typeof` with "function" for every property). Device bundles still strip the call
+   (`__BH_AD_SIM__` false unless `AD_SIM_BUILD=1`); `tools/ad/check_device_build.mjs` also looks for the sim-look
+   marker `bh-ad-sim-look/1`.
+3. `GazeStatus` (and so the `status` event) gains optional **`orientation`** (`Orientation`): a native-pushed
+   interface orientation. The web layer's orientation detector treats it as one more source (WKWebView fires no
+   resize on landscape_left <-> landscape_right), deduped with screen.orientation, matchMedia and a 1 s poll.
+4. `session_start.contract` accepts `"contract-v1.4"` (new logs write v1.4). No event, field or blinding change.
+5. Semantics (no field change): a blinded session started by the web layer passes `blind {index, total, scheduleHash}`
+   (native hint `__BH_AD__.blind` or `?blind=<i>/<n>&scheduleHash=<sha256>`; invalid or absent is logged without it,
+   never guessed). The synthetic demo reader reports the calibration's `distCm` (42 cm only when uncalibrated).
+
+Native impact (IOS Dev): `@objc func lookAt(_ call: CAPPluginCall)` reads `call.getDouble("x")`/`"y"` (the I5 plugin
+already does); optionally push `status` with `orientation` on a UIKit interface-orientation change.
 
 ## Change policy
 
@@ -168,10 +188,12 @@ One gaze estimate from an on-device tracker (ARKit on iOS, MediaPipe on the Mac,
 MediaPipe tracker (Electron Web Worker). The methods are `getStatus`, `requestPermission`, `getScreenInfo`,
 `start({mode: camera|synthetic, synthetic?, webNow, maxHz?})`, `stop`, `pause`/`resume` (the tab's one-tap pause),
 `calibrate({phase: begin|target|end|cancel})`, `restoreCalibration`, `syncClock`, and the events `gaze` (a batch of
-samples about every 100 ms) and `status`. v1.2: optional `lookAt?(x, y)` is a **simulator-only aid** (the synthetic
-tracker's simulated gaze point, called by the calibration screens). Device trackers omit it or make it a no-op;
-detect it with `typeof tracker.lookAt === "function"` (not `"lookAt" in tracker`: the Capacitor plugin proxy has no `has`
-trap, so `in` is false even when the native method exists).
+samples about every 100 ms) and `status`. v1.4: optional `lookAt?({x, y})` (one options object; v1.2 had `(x, y)`)
+is a **simulator-only aid** (the synthetic tracker's simulated gaze point, called by the calibration screens). Device
+trackers omit it or make it a no-op. Support is the explicit capability `(await getStatus()).mode === "synthetic"`;
+never `typeof` (a Capacitor proxy returns a function for every name) or `in` (no `has` trap). It is unreachable in
+device web builds (stripped unless `AD_SIM_BUILD=1`). v1.4: a `status` event MAY carry `orientation` (native-pushed
+interface orientation).
 - Permission states: `prompt | granted | denied | restricted`. An unsupported device has `supported:false` with
   `gaze.arkit_unsupported` or `gaze.model_missing`.
 - Tracker states: `idle | starting | running | calibrating | paused | stopped | error`. Pause reasons:
@@ -581,7 +603,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.3",
+  "contract": "contract-v1.4",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -623,7 +645,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.3",
+  "contract": "contract-v1.4",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -669,7 +691,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "seq": 0,
   "type": "session_start",
   "profile": "actor-director",
-  "contract": "contract-v1.3",
+  "contract": "contract-v1.4",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
   "director_prompt_id": "dir1-b1d2fd77",
@@ -987,7 +1009,7 @@ Every other event type has an example in `examples/event-*.json`, and all of the
   "appVersion": "0.1.0",
   "platform": "ios",
   "build": "20261105.0900",
-  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.3\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
+  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.4\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
 }
 ```
 <!-- example: worker-role-cap-error -->

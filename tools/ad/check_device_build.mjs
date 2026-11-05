@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// contract-v1.3 (ruling B2): a DEVICE web bundle (vite build --config vite.ad.config.ts, no AD_SIM_BUILD) must have no
-// path to a native gaze plugin's lookAt. Scans every .js file under <dir> for a lookAt call or a computed "lookAt"
-// access, and for the sim-only module marker. Exit 0 = clean, 1 = found, 2 = usage.
+// contract-v1.3 (ruling B2) / v1.4: a DEVICE web bundle (vite build --config vite.ad.config.ts, no AD_SIM_BUILD) must
+// have no path to a native gaze plugin's lookAt. Scans every .js file under <dir> for a lookAt call (v1.4 form
+// `lookAt?.({x, y})` included) or a computed "lookAt" access, for the sim-only module marker (sim-look.ts SIM_LOOK_AID)
+// and for an unreplaced __BH_AD_SIM__. Exit 0 = clean, 1 = found, 2 = usage.
 //   node tools/ad/check_device_build.mjs apps/desktop/dist-ad          # device build: must be clean
 //   node tools/ad/check_device_build.mjs <dir> --expect-sim             # a simulator build: must contain the aid (self-check)
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
@@ -13,6 +14,7 @@ const PATTERNS = [
   ["lookAt call", /\.lookAt\s*(?:\?\.)?\s*\(/g],
   ["computed lookAt", /\[\s*["'`]lookAt["'`]\s*\]/g],
   ["unreplaced __BH_AD_SIM__", /__BH_AD_SIM__/g],
+  ["sim-look module (SIM_LOOK_AID)", /bh-ad-sim-look\/1/g],
 ];
 const files = [];
 const walk = (d) => { for (const n of readdirSync(d)) { const f = join(d, n); if (statSync(f).isDirectory()) walk(f); else if (/\.(m?js)$/.test(n)) files.push(f); } };

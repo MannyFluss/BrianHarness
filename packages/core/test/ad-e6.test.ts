@@ -78,7 +78,7 @@ async function calibrate(screen: ScreenInfo, distortion?: [number, number, numbe
   await tr.calibrate({ phase: "begin", orientation: run.orientation, targets: run.sequence });
   for (const tg of run.sequence) {
     if (moveAtValidation && tg.id === "v1") tr.setDistortion([1.06, 0, 24 + 140, 0, 1.06, -30 + 120]);
-    tr.lookAt(tg.x + screen.webview.x, tg.y + screen.webview.y);
+    tr.lookAt({ x: tg.x + screen.webview.x, y: tg.y + screen.webview.y });
     const w = run.show(tg.id, now);
     now += run.timing.dotMs; tr.pump(now);
     await tr.calibrate({ phase: "target", targetId: tg.id, ...w });

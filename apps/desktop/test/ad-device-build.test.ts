@@ -27,4 +27,6 @@ test("B2: lookAt is stripped from a device build and present only in a simulator
   // and the scanner flags it when pointed at the simulator bundle as if it were a device bundle
   const neg = spawnSync(process.execPath, [check, join(dir, "sim")], { encoding: "utf8" });
   assert.equal(neg.status, 1); assert.match(neg.stdout, /DEVICE-LEAK .*lookAt call/);
+  assert.match(neg.stdout, /DEVICE-LEAK .*sim-look module \(SIM_LOOK_AID\)/, "v1.4: the sim-look marker is in a sim build and caught");
+  assert.match(sim.stdout, /SIM .*lookAt\?\.\(\{/, "v1.4: the sim bundle calls lookAt with one options object");
 });

@@ -22,23 +22,36 @@ const of = <T extends BhAdEvent["type"]>(ls: BhAdEvent[], t: T) => ls.filter((l)
 const boxesFor = (msg: string, x0 = 60, w = 900) => PARAS.map((text, p) => ({ msg, p, x: x0, y: 120 + p * 110, w, h: 72, text, words: text.split(/\s+/).length, line_h: 24 }));
 const rec = (orientation: CalibrationRecord["orientation"]): CalibrationRecord => ({ v: 1, deviceModel: "iPad13,4", orientation, fit: "core", affine: [1, 0, 0, 0, 1, 0], model: null, distCm: 44, yaw: 2, errPx: 10, errDeg: 0.3, errParas: 0.1, mode: "gaze", at: 0, t: 0 } as CalibrationRecord);
 
-test("I4.1 lookAt (simulator builds only, v1.3): typeof detection works through a Capacitor-style proxy; absent -> undefined; a rejected call is swallowed", async () => {
-  const calls: Array<[number, number]> = [];
-  // Capacitor's plugin proxy: get returns a wrapper for any name, no `has` trap
-  const proxy = new Proxy({}, { get: (_t, prop) => (prop === "lookAt" ? (x: number, y: number) => { calls.push([x, y]); return Promise.resolve(); } : undefined) }) as unknown as GazeTracker;
-  assert.equal("lookAt" in proxy, false, "the old `in` check would miss it");
-  nativeSimLookAt(proxy)!(10, 20);
-  assert.deepEqual(calls, [[10, 20]]);
-  // v1.3: the core (device-reachable) aid never touches a native plugin, only the JS synthetic tracker
-  assert.equal(simLookAt(proxy), undefined);
-  assert.equal(typeof simLookAt(new SyntheticGazeTracker({ screen: IPAD, now: () => 0 })), "function");
-  const device = { getStatus: async () => ({}) } as unknown as GazeTracker;
-  assert.equal(nativeSimLookAt(device), undefined);
-  assert.equal(nativeSimLookAt(null), undefined);
-  const rejecting = { lookAt: () => Promise.reject(new Error("UNIMPLEMENTED")) } as unknown as GazeTracker;
-  nativeSimLookAt(rejecting)!(1, 1);
-  const throwing = { lookAt: () => { throw new Error("x"); } } as unknown as GazeTracker;
-  assert.doesNotThrow(() => nativeSimLookAt(throwing)!(1, 1));
+test("I4.1 / I5 lookAt (simulator builds only, v1.4): one {x,y} options object; support = status mode 'synthetic', not typeof; rejected calls swallowed", async () => {
+  const calls: unknown[] = [];
+  // Capacitor's plugin proxy: get returns a method wrapper for ANY name (typeof is always "function"), no `has` trap,
+  // and a call passes ONE options object
+  const capProxy = (mode: "synthetic" | "camera" | null) => new Proxy({}, { get: (_t, prop) => (prop === "then" ? undefined
+    : prop === "getStatus" ? async () => ({ mode })
+    : (opts?: unknown) => { calls.push([String(prop), opts]); return Promise.resolve(); }) }) as unknown as GazeTracker;
+  const sim = capProxy("synthetic");
+  assert.equal("lookAt" in sim, false, "the old `in` check would miss it");
+  (await nativeSimLookAt(sim))!(10, 20);
+  assert.deepEqual(calls, [["lookAt", { x: 10, y: 20 }]], "v1.4: a single {x, y} object, not (x, y)");
+  // typeof is "function" on a device proxy too: the capability check is the status mode, so a camera tracker gets no aid
+  const dev = capProxy("camera");
+  assert.equal(typeof (dev as { lookAt?: unknown }).lookAt, "function");
+  assert.equal(await nativeSimLookAt(dev), undefined);
+  assert.equal(await nativeSimLookAt(capProxy(null)), undefined);
+  assert.equal(calls.length, 1);
+  // the core (device-reachable) aid never touches a native plugin, only the JS synthetic tracker
+  assert.equal(simLookAt(sim), undefined);
+  const syn = new SyntheticGazeTracker({ screen: IPAD, now: () => 0 });
+  assert.equal(typeof simLookAt(syn), "function");
+  assert.equal((await nativeSimLookAt(syn))?.aid, "bh-ad-sim-look/1");
+  assert.equal(await nativeSimLookAt({ getStatus: async () => ({}) } as unknown as GazeTracker), undefined);
+  assert.equal(await nativeSimLookAt({ getStatus: async () => { throw new Error("gone"); } } as unknown as GazeTracker), undefined);
+  assert.equal(await nativeSimLookAt(null), undefined);
+  const rejecting = { getStatus: async () => ({ mode: "synthetic" }), lookAt: () => Promise.reject(new Error("UNIMPLEMENTED")) } as unknown as GazeTracker;
+  (await nativeSimLookAt(rejecting))!(1, 1);
+  const throwing = { getStatus: async () => ({ mode: "synthetic" }), lookAt: () => { throw new Error("x"); } } as unknown as GazeTracker;
+  const t = (await nativeSimLookAt(throwing))!;
+  assert.doesNotThrow(() => t(1, 1));
   await new Promise((r) => setTimeout(r, 5));
 });
 

@@ -80,7 +80,7 @@ export type BhAdEventBody =
   | {
       type: "session_start";
       profile: "actor-director";
-      contract: "contract-v1" | "contract-v1.1" | "contract-v1.2" | "contract-v1.3";
+      contract: "contract-v1" | "contract-v1.1" | "contract-v1.2" | "contract-v1.3" | "contract-v1.4";
       userId: string;
       session_type: SessionType;
       tab: "visible" | "hidden";
