@@ -23,6 +23,10 @@
     "./actor-director": {
       "types": "./dist/actor-director/index.d.ts",
       "import": "./dist/actor-director/index.js"
+    },
+    "./actor-director/browser": {
+      "types": "./dist/actor-director/browser.d.ts",
+      "import": "./dist/actor-director/browser.js"
     }
   },
   "scripts": {

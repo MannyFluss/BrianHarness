@@ -328,6 +328,28 @@ export class GazeStream {
     return l1Batch(lf, sac, st.gaps, w0, w1, this.c);
   }
 
+  /**
+   * E6 live tier (the tab's bottom layer, rendered at 10 Hz): cheap, no snapshot. Last valid gaze point (drift
+   * bias applied), the AOI of the fixation in progress (or the last one), tracking quality and face share over the
+   * last `windowMs`.
+   */
+  live(windowMs = 2000): LiveGaze {
+    const st = this.s;
+    const now = st.lastRawT;
+    const p = st.prevValid;
+    const point = p && p.x !== null && p.y !== null ? { x: p.x + st.bias.bx, y: p.y + st.bias.by } : null;
+    // the fixation in progress: the I-DT window being grown, else the tentative one, else the last final one
+    const ib = st.iBuf;
+    const growing = ib.length >= 2 ? { t0: ib[0]!.t, t1: ib[ib.length - 1]!.t, x: ib.reduce((a, b) => a + b.x, 0) / ib.length, y: ib.reduce((a, b) => a + b.y, 0) / ib.length } : null;
+    const fix = growing ?? st.tentative ?? st.fixations[st.fixations.length - 1] ?? null;
+    const target = fix && this.aois.length ? assign(fix, this.aois, this.ppd, this.c)[0] : null;
+    let raw = 0, face = 0, clean = 0;
+    for (let i = st.raw.length - 1; i >= 0 && st.raw[i]!.t > now - windowMs; i--) { raw++; if (st.raw[i]!.face) face++; }
+    for (let i = st.cleaned.length - 1; i >= 0 && st.cleaned[i]!.t > now - windowMs; i--) clean++;
+    const expected = Math.max(1, Math.round((windowMs * this.c.hz) / 1000));
+    return { t: Number.isFinite(now) ? now : null, point, target, fixationMs: fix ? fix.t1 - fix.t0 : null, quality: Math.min(1, clean / expected), faceFrac: raw ? face / raw : 0 };
+  }
+
   /** drop everything older than t (SignalSource.clear): raw/cleaned times, gaps and final fixations */
   clear(before: number): void {
     const st = this.s;
@@ -337,6 +359,8 @@ export class GazeStream {
     st.fixations = st.fixations.filter((f) => f.t1 >= before);
   }
 }
+
+export interface LiveGaze { t: number | null; point: { x: number; y: number } | null; target: string | null; fixationMs: number | null; quality: number; faceFrac: number }
 
 /** the per-turn bodies the app logs (bh-ad/1): aoi_layout, gaze_quality, aoi_dwell, attention_digest */
 export interface TurnBodies { aoi_layout: Record<string, unknown>; gaze_quality: Record<string, unknown>; aoi_dwell: Record<string, unknown>; attention_digest: Record<string, unknown> }
@@ -378,4 +402,8 @@ export class GazeSource {
     };
   }
   clear(before: number): void { this.stream.clear(before); }
+  /** the tab's 10 Hz bottom layer */
+  live(windowMs?: number): LiveGaze { return this.stream.live(windowMs); }
+  /** ruling 3: the calibration's head distance sets px/deg for everything classified from now on */
+  setPpd(ppd: number): void { if (Number.isFinite(ppd) && ppd > 0) this.stream.ppd = ppd; }
 }

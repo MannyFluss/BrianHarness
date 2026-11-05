@@ -47,6 +47,11 @@ export class AdStorage {
     this.cache.delete(k);
     this.queue = this.queue.then(() => this.kv.remove(k)).catch((e) => { this.failures.push(e); });
   }
+  /** E6: small mode-local records (calibrations per orientation) under ad/meta/<key>; never part of a session log */
+  setMeta(key: string, value: string): void { const k = `${AD_KV_PREFIX}meta/${key}`; this.cache.set(k, value); this.write(k); }
+  getMeta(key: string): string | null { return this.cache.get(`${AD_KV_PREFIX}meta/${key}`) ?? null; }
+  metaKeys(prefix = ""): string[] { const p = `${AD_KV_PREFIX}meta/${prefix}`; return [...this.cache.keys()].filter((k) => k.startsWith(p)).map((k) => k.slice(`${AD_KV_PREFIX}meta/`.length)).sort(); }
+  removeMeta(key: string): void { const k = `${AD_KV_PREFIX}meta/${key}`; this.cache.delete(k); this.queue = this.queue.then(() => this.kv.remove(k)).catch((e) => { this.failures.push(e); }); }
   /** await queued writes; throws the first write failure */
   async flush(): Promise<void> {
     await this.queue;
