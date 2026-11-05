@@ -17,7 +17,8 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
-import { networkVerdict } from "./ad-network.mjs";
+import { adOriginOf, isAllowedMediaRequest, networkVerdict } from "./ad-network.mjs";
+let mainWc = null; // our own window's webContents (E7c: media is granted only to it)
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_NAME = "BrianHarness Director";
@@ -74,12 +75,13 @@ function guardNetwork(ses) {
     cb({ cancel: true });
   });
   ses.setPermissionRequestHandler((wc, permission, cb, details) => {
-    const origin = (() => { try { return new URL(details.requestingUrl ?? wc.getURL()).origin; } catch { return ""; } })();
-    const media = permission === "media" && origin === ORIGIN && !(details.mediaTypes ?? []).includes("audio");
-    push(log.permissions, { t: rel(), permission, mediaTypes: details.mediaTypes ?? [], origin, granted: media });
+    const wcUrl = wc?.getURL?.() ?? "";
+    const media = isAllowedMediaRequest({ permission, isOwnWebContents: !!wc && wc === mainWc, wcUrl, requestingUrl: details.requestingUrl, mediaTypes: details.mediaTypes });
+    push(log.permissions, { t: rel(), permission, mediaTypes: details.mediaTypes ?? [], origin: adOriginOf(details.requestingUrl ?? wcUrl), granted: media });
     cb(media);
   });
-  ses.setPermissionCheckHandler((_wc, permission, origin) => permission === "media" && origin === ORIGIN);
+  ses.setPermissionCheckHandler((wc, permission, origin, details) =>
+    isAllowedMediaRequest({ permission, isOwnWebContents: !!wc && wc === mainWc, wcUrl: wc?.getURL?.() ?? "", requestingUrl: details?.requestingUrl, origin, mediaTypes: details?.mediaType === "audio" ? ["audio"] : ["video"] }));
 }
 
 const mapPermission = (s) => (s === "granted" ? "granted" : s === "denied" ? "denied" : s === "restricted" ? "restricted" : "prompt");
@@ -171,6 +173,7 @@ function createWindow() {
     webPreferences: { preload: join(here, "ad-preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
     show: false,
   });
+  mainWc = win.webContents;
   win.once("ready-to-show", () => win.show());
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith(ORIGIN)) e.preventDefault(); });

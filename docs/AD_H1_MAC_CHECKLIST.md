@@ -13,8 +13,8 @@ built-in simulators, and the demo replies are bundled.
 
 | | |
 |---|---|
-| File (on the box) | `/workspace/actor-director/release/E7b/BrianHarness Director-0.1.0-arm64-mac.zip` |
-| sha256 | `54d1ab40d796cccd71962be26c9ff135ce4e1eb38f75b375e5163ea7789346ba` (also in `SHA256SUMS` next to it). **E7b**, Nov 4 2026 18:08 PT; replaces the E7 zip `f4a50c67…` (that one has no `network.isolation` check: do not use it) |
+| File (on the box) | `/workspace/actor-director/release/E7c/BrianHarness Director-0.1.0-arm64-mac.zip` |
+| sha256 | `6702a08138a7cb6540a7aa76feec73f4a517969e83c34f617e7276be9c57b617` (also in `SHA256SUMS` next to it). **E7c**, Nov 4 2026 19:43 PT (camera permission fix); replaces E7b `54d1ab40…` (denied the camera: do not use it) |
 | Built from | branch `actor-director` at `3f2139b` (contract-v1.4), `npm run dist:ad-mac` in apps/desktop (Electron 45.2.1, arm64, **unsigned**). The asar holds `electron/ad-main.mjs`, `electron/ad-network.mjs` (the `net.request_escaped` verdict), `electron/ad-preload.cjs`, `dist-ad/` (device build: `check_device_build` clean) |
 | Bundled model | `Contents/Resources/gaze/face_landmarker.task`, 3,758,596 B, sha256 `64184e229b26…0bc9ff` (verified again in the worker before loading) |
 | Bundled wasm | `vision_wasm_module_internal.js/.wasm` from @mediapipe/tasks-vision 1.2.2 |
@@ -25,7 +25,7 @@ Copy the zip to the Mac, e.g. into `~/Downloads`.
 
 ```sh
 cd ~/Downloads
-shasum -a 256 "BrianHarness Director-0.1.0-arm64-mac.zip"      # must print 54d1ab40d796cccd71962be26c9ff135ce4e1eb38f75b375e5163ea7789346ba
+shasum -a 256 "BrianHarness Director-0.1.0-arm64-mac.zip"      # must print 6702a08138a7cb6540a7aa76feec73f4a517969e83c34f617e7276be9c57b617
 mkdir -p ~/BH-H1 && ditto -x -k "BrianHarness Director-0.1.0-arm64-mac.zip" ~/BH-H1/
 APP=~/BH-H1/"BrianHarness Director.app"
 xattr -cr "$APP"                                  # drop the download quarantine

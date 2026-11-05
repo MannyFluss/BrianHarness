@@ -12,3 +12,20 @@ export function networkVerdict({ requests = [], workerBlocked = [] }, bundleOrig
   if (workerBlocked.length) return { check: "network.isolation", ok: true, code: "net.worker_blocked", pilotFail: null, escaped: 0, origins: [...new Set(workerBlocked.map(originOf))].slice(0, 5) };
   return { check: "network.isolation", ok: true, code: null, pilotFail: null, escaped: 0, origins: [] };
 }
+
+// E7c: camera permission decision (pure, unit-tested). Node's WHATWG URL reports origin "null" for custom schemes
+// (bh-app is "standard" only inside Chromium), which denied getUserMedia in H1 Run A. Parse scheme://host ourselves.
+export const AD_ORIGIN = "bh-app://app";
+export function adOriginOf(url) {
+  const m = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)/i.exec(String(url ?? ""));
+  return m ? `${m[1].toLowerCase()}://${m[2].toLowerCase()}` : "null";
+}
+// grant media only to our own window's webContents, on bh-app://app, video only (any audio -> deny)
+export function isAllowedMediaRequest({ permission, isOwnWebContents, wcUrl, requestingUrl, origin, mediaTypes }) {
+  if (permission !== "media" || !isOwnWebContents) return false;
+  if (adOriginOf(wcUrl) !== AD_ORIGIN) return false;
+  const reqOrigin = requestingUrl ? adOriginOf(requestingUrl) : origin && origin !== "null" ? adOriginOf(origin + "/") : AD_ORIGIN;
+  if (reqOrigin !== AD_ORIGIN) return false;
+  const types = mediaTypes ?? [];
+  return types.length > 0 && types.every((t) => t === "video");
+}
