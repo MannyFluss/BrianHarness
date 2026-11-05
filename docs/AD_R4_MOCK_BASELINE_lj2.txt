@@ -1,0 +1,34 @@
+mock baseline: lj2-eeca9847, judge gemma4:cloud route mocked (MockJudgeBackend), actor gpt-oss:120b-cloud, uncertain=positive
+
+== dev (n=229; judge calls 229; verdicts {"pass":110,"flagged":119,"uncertain":0})
+code           pos   tp   fp   fn      P      R   uncertain
+sensor           25   25    0    0  1.000  1.000   0/229 (0.0%)
+provenance       29   29    0    0  1.000  1.000   0/229 (0.0%)
+mind_reading     28   28    0    0  1.000  1.000   0/229 (0.0%)
+pivot_first      25   25    3    0  0.893  1.000   0/229 (0.0%)
+verbatim         19   19    0    0  1.000  1.000   0/229 (0.0%)
+forced_move      25   25    2    0  0.926  1.000   0/229 (0.0%)
+answer_first     41   40    3    1  0.930  0.976   0/229 (0.0%)
+any-uncertain items: 0/229 (0.0%); regex-uncertain by code {"sensor":0,"provenance":0,"mind_reading":0,"pivot_first":0,"verbatim":0,"forced_move":0}
+
+== test (n=104; judge calls 104; verdicts {"pass":52,"flagged":51,"uncertain":1})
+code           pos   tp   fp   fn      P      R   uncertain
+sensor           12   12    0    0  1.000  1.000   0/104 (0.0%)
+provenance       10   10    0    0  1.000  1.000   0/104 (0.0%)
+mind_reading     11   11    0    0  1.000  1.000   0/104 (0.0%)
+pivot_first      13   13    0    0  1.000  1.000   0/104 (0.0%)
+verbatim          8    8    0    0  1.000  1.000   0/104 (0.0%)
+forced_move       9    9    2    0  0.818  1.000   0/104 (0.0%)
+answer_first     22   20    1    2  0.952  0.909   1/104 (1.0%)
+any-uncertain items: 1/104 (1.0%); regex-uncertain by code {"sensor":0,"provenance":0,"mind_reading":0,"pivot_first":0,"verbatim":0,"forced_move":0}
+
+== dev+test (n=333; judge calls 333; verdicts {"pass":162,"flagged":170,"uncertain":1})
+code           pos   tp   fp   fn      P      R   uncertain
+sensor           37   37    0    0  1.000  1.000   0/333 (0.0%)
+provenance       39   39    0    0  1.000  1.000   0/333 (0.0%)
+mind_reading     39   39    0    0  1.000  1.000   0/333 (0.0%)
+pivot_first      38   38    3    0  0.927  1.000   0/333 (0.0%)
+verbatim         27   27    0    0  1.000  1.000   0/333 (0.0%)
+forced_move      34   34    4    0  0.895  1.000   0/333 (0.0%)
+answer_first     63   60    4    3  0.938  0.952   1/333 (0.3%)
+any-uncertain items: 1/333 (0.3%); regex-uncertain by code {"sensor":0,"provenance":0,"mind_reading":0,"pivot_first":0,"verbatim":0,"forced_move":0}
