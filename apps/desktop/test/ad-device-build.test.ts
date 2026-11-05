@@ -29,4 +29,8 @@ test("B2: lookAt is stripped from a device build and present only in a simulator
   assert.equal(neg.status, 1); assert.match(neg.stdout, /DEVICE-LEAK .*lookAt call/);
   assert.match(neg.stdout, /DEVICE-LEAK .*sim-look module \(SIM_LOOK_AID\)/, "v1.4: the sim-look marker is in a sim build and caught");
   assert.match(sim.stdout, /SIM .*lookAt\?\.\(\{/, "v1.4: the sim bundle calls lookAt with one options object");
+  // I5b: liveDemoGaze's native lookAt walker is in the sim bundle only
+  assert.match(sim.stdout, /SIM .*sim-look reading walker/, "I5b: the sim bundle has the liveDemoGaze lookAt walker");
+  assert.match(neg.stdout, /DEVICE-LEAK .*sim-look reading walker/, "I5b: and it is caught in device mode");
+  assert.doesNotMatch(dev.stdout, /DEVICE-LEAK/);
 });

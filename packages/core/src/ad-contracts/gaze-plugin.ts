@@ -50,8 +50,9 @@ export interface GazeStatus {
   code: HealthCode | null;
   /**
    * v1.4, optional: the interface orientation as native sees it. A tracker MAY push a `status` event when it changes
-   * (WKWebView fires no resize on a landscape_left <-> landscape_right rotation); the web layer treats it as one more
-   * orientation source (deduped with screen.orientation / matchMedia / the 1 s poll).
+   * (WKWebView fires no resize on a landscape_left <-> landscape_right rotation). v1.4.1 clarification: when present it
+   * is the source of truth (a differing web reading never overrides it; web readings are only the fallback), and the
+   * names follow native UIInterfaceOrientation (iOS WKWebView landscape-primary = landscape_right).
    */
   orientation?: Orientation;
 }
@@ -136,7 +137,8 @@ export interface GazeTracker {
   addListener(event: "status", cb: (e: GazeStatusEvent) => void): Promise<{ remove(): Promise<void> }>;
   /**
    * v1.4 (was v1.2 `lookAt(x, y)`), optional, SIMULATOR / SYNTHETIC ONLY: sets the simulated gaze point (screen pt)
-   * the synthetic tracker reports next (the calibration screens call it when they show a dot). ONE options object
+   * the synthetic tracker reports next (the calibration screens call it when they show a dot; v1.4.1: also outside
+   * calibration, where the synthetic tracker reports cal:true samples at that point: the demo reader). ONE options object
    * `{x, y}`, because a Capacitor plugin call takes a single options object. Support is an explicit capability:
    * call it only when `(await getStatus()).mode === "synthetic"`. Never detect it with `typeof` (a Capacitor proxy
    * returns a function for every property) or `in` (the proxy has no `has` trap). Unreachable in device web builds

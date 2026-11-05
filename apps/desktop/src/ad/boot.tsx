@@ -1,12 +1,15 @@
 // E6: builds the actor-director app element from the URL (demo snapshot or live in-process session).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AdStorage, CalibrationStore, SyntheticGazeTracker, demoReadingPath, loadO200kBrowser, simActor, simDirector, type CalibrationRecord, type LiveGaze, type SimReplay } from "@brianharness/core/actor-director/browser";
-import type { Arm, BhAdEvent, ScreenInfo, SessionType } from "@brianharness/core/ad-contracts";
+import type { Arm, BhAdEvent, GazeTracker, ScreenInfo, SessionType } from "@brianharness/core/ad-contracts";
+
+declare const __BH_AD_SIM__: boolean | undefined;
 import { LocalStorageKV, MemoryKV } from "@brianharness/core/browser";
 import { AdApp, type AdLayout } from "./AdApp";
 import { CalibrationFlow, type CalibrationOutcome, type CalibrationStage } from "./Calibration";
 import { MacBoot, macBridge } from "./mac/MacBoot";
-import { browserOrientationEnv, watchOrientation } from "./orientation";
+import { browserOrientationEnv, isIosWebView, landscapeName, watchOrientation } from "./orientation";
+import { nativeSimLookAt, playSimLook, type SimLookTimers } from "./sim-look";
 import { LiveAdController, blindedView, calibrationSummary, staticController, visibleView, type AdChatMsg, type PendingNote } from "./controller";
 
 /** demo snapshot (scripts/ad-demo.mts). Blinded snapshots carry chat only: there are no lines to leak. */
@@ -20,10 +23,11 @@ export type AdDemo =
  * browser has it), so a rotation gives a new orientation and its own calibration key. widthMm follows the side
  * that is horizontal now.
  */
-export function webScreen(w = innerWidth, h = innerHeight, orientationType: string | null = typeof screen !== "undefined" && "orientation" in screen ? screen.orientation.type : null): ScreenInfo {
+export function webScreen(w = innerWidth, h = innerHeight, orientationType: string | null = typeof screen !== "undefined" && "orientation" in screen ? screen.orientation.type : null, ios: boolean = isIosWebView()): ScreenInfo {
   const phone = Math.min(w, h) < 768;
   const landscape = w > h;
-  const orientation: ScreenInfo["orientation"] = landscape ? (orientationType === "landscape-secondary" ? "landscape_right" : "landscape_left") : orientationType === "portrait-secondary" ? "portrait_upside_down" : "portrait";
+  // I5b: landscape names follow native UIInterfaceOrientation (iOS WKWebView landscape-primary = landscapeRight)
+  const orientation: ScreenInfo["orientation"] = landscape ? landscapeName(orientationType, ios) : orientationType === "portrait-secondary" ? "portrait_upside_down" : "portrait";
   const base = { platform: "web" as const, orientation, widthPt: w, heightPt: h, webview: { x: 0, y: 0, width: w, height: h } };
   return phone
     ? { ...base, deviceModel: "iPhone18,1", scale: globalThis.devicePixelRatio || 3, widthMm: landscape ? 143.2 : 65.9 }
@@ -48,13 +52,41 @@ export const demoDistCm = (rec: CalibrationRecord | null | undefined): number =>
  * the live demo's onReadingLayout: a simulated reader over the real paragraph boxes at the CURRENT calibration's
  * distance (so the synthetic head never reads as "distance changed" and prompts a false recalibration). The hold
  * samples between replies use the same distance.
+ *
+ * I5b: any tracker with the sim lookAt capability (contract-v1.4: `getStatus().mode === "synthetic"`, sim-look.ts):
+ *  - the JS SyntheticGazeTracker: the reading path is played as samples (play + setDistCm), as before;
+ *  - any other tracker (the iOS-simulator native plugin): ONLY in a simulator build (`__BH_AD_SIM__`, AD_SIM_BUILD=1;
+ *    the branch and sim-look.ts are stripped from device bundles), the same reading path is walked as fixations with
+ *    `lookAt({x, y})` on a JS timer, then the eyes rest at `hold`. The native synthetic player reports the look point
+ *    (cal:true) at its own synthetic head distance, the same one its calibration measured. Capability is re-checked
+ *    per reply; a tracker without it (camera mode, a device build) gets nothing.
+ * `stop()` cancels a walk in progress (teardown).
  */
-export function liveDemoGaze(tracker: SyntheticGazeTracker, calibration: () => CalibrationRecord | null, hold: () => { x: number; y: number }, now: () => number = () => performance.now()) {
-  return (_msg: string, boxes: Array<{ x: number; y: number; w: number; h: number; words: number }>) => {
-    const distCm = demoDistCm(calibration());
-    tracker.setDistCm(distCm);
-    tracker.play(demoReadingPath([...boxes].sort((a, b) => a.y - b.y), { distCm }), now(), { hold: hold() });
-  };
+export type DemoGazeHandler = ((msg: string, boxes: Array<{ x: number; y: number; w: number; h: number; words: number }>) => void) & { stop(): void };
+export function liveDemoGaze(tracker: GazeTracker, calibration: () => CalibrationRecord | null, hold: () => { x: number; y: number }, now: () => number = () => performance.now(), o: { timers?: SimLookTimers } = {}): DemoGazeHandler {
+  if (tracker instanceof SyntheticGazeTracker) {
+    const fn = (_msg: string, boxes: Array<{ x: number; y: number; w: number; h: number; words: number }>) => {
+      const distCm = demoDistCm(calibration());
+      tracker.setDistCm(distCm);
+      tracker.play(demoReadingPath([...boxes].sort((a, b) => a.y - b.y), { distCm }), now(), { hold: hold() });
+    };
+    return Object.assign(fn, { stop() {} });
+  }
+  if (typeof __BH_AD_SIM__ !== "undefined" && __BH_AD_SIM__) {
+    let stopWalk: (() => void) | null = null;
+    let gen = 0;
+    const fn = (_msg: string, boxes: Array<{ x: number; y: number; w: number; h: number; words: number }>) => {
+      const path = demoReadingPath([...boxes].sort((a, b) => a.y - b.y), { distCm: demoDistCm(calibration()) });
+      const mine = ++gen;
+      void nativeSimLookAt(tracker).then((look) => {
+        if (mine !== gen) return; // a newer reply's layout arrived meanwhile
+        stopWalk?.(); stopWalk = null;
+        if (look) stopWalk = playSimLook(look, path, hold(), o.timers);
+      });
+    };
+    return Object.assign(fn, { stop() { gen++; stopWalk?.(); stopWalk = null; } });
+  }
+  return Object.assign(() => {}, { stop() {} });
 }
 
 /** the native shell's launch hints (IOS Dev: -BHADSession blinded -> __BH_AD__.session; the blind schedule position) */
@@ -126,17 +158,20 @@ function LiveBoot({ q, screen, layout, reduce, replaysUrl }: { q: URLSearchParam
     if (sessionType === "blinded" && !blind) console.warn("[ad] blinded session without a valid blind {index,total,scheduleHash}: logged without it");
     let ctl: LiveAdController | null = null;
     boot.tracker.setDistCm(demoDistCm(rec));
+    const demoGaze = q.get("gaze") === "r2" ? null : liveDemoGaze(boot.tracker, () => ctl?.calibrationRecord ?? rec, () => ({ x: innerWidth / 2, y: innerHeight - 40 }));
     const c = await LiveAdController.open({ sessionType, arm, sessionId: `web-${Date.now()}`, userId: "local", actor: simActor(boot.replays), director: simDirector(), counter: boot.counter, kv: boot.kv, tracker: boot.tracker, screen, calibration: rec, calStore: boot.calStore,
       ...(blind ? { blind } : {}),
       // demo gaze from the REAL paragraph boxes (I4) at the calibration's distance (I5); ?gaze=r2 keeps the raw R2 loop
-      ...(q.get("gaze") === "r2" ? {} : { onReadingLayout: liveDemoGaze(boot.tracker, () => ctl?.calibrationRecord ?? rec, () => ({ x: innerWidth / 2, y: innerHeight - 40 })) }), consent: { camera: true, rawGaze: false } });
+      ...(demoGaze ? { onReadingLayout: demoGaze } : {}), consent: { camera: true, rawGaze: false } });
     ctl = c;
     // rotation / resize (I5: WKWebView fires no resize on landscape_left <-> landscape_right): every source, deduped
     teardown.current?.();
     const env = browserOrientationEnv();
-    const w = env ? watchOrientation({ env, initial: screen, read: (wd, h, t) => webScreen(wd, h, t), onChange: (s) => { void c.orientationChanged(s).then(() => boot.tracker.setDistCm(demoDistCm(c.calibrationRecord))); } }) : null;
+    // I5b: a native-pushed orientation is the truth whenever present (seeded from the tracker's status, if it has one)
+    const st0 = await boot.tracker.getStatus().catch(() => null);
+    const w = env ? watchOrientation({ env, initial: screen, ...(st0?.orientation ? { initialNative: st0.orientation } : {}), read: (wd, h, t) => webScreen(wd, h, t), onChange: (s) => { void c.orientationChanged(s).then(() => boot.tracker.setDistCm(demoDistCm(c.calibrationRecord))); } }) : null;
     const sub = await boot.tracker.addListener("status", (st) => { if (st.orientation) w?.native(st.orientation); });
-    teardown.current = () => { w?.stop(); void sub.remove(); c.dispose(); };
+    teardown.current = () => { w?.stop(); demoGaze?.stop(); void sub.remove(); c.dispose(); };
     setEl(<AdApp store={c} {...(layout ? { layout } : {})} {...(reduce !== undefined ? { reduceMotion: reduce } : {})} onCalibrate={() => setCalibrating(true)} />);
   }, [q, screen, layout, reduce]);
   useEffect(() => {

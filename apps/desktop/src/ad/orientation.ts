@@ -7,6 +7,15 @@
  *   - a low-rate poll (default 1 s) of screen.orientation.type, falling back to window.orientation
  *   - a native push: the gaze plugin's `status` event carrying `orientation` (contract-v1.4, optional)
  * onChange gets a ScreenInfo once per distinct (orientation, width x height); repeats from several sources are dropped.
+ *
+ * I5b (IOS Dev, native 2d66504), contract-v1.4.1 clarification:
+ *   - names follow NATIVE UIInterfaceOrientation. In iOS WKWebView `landscape-primary` (window.orientation 90) is
+ *     landscapeRight, so on iOS primary -> landscape_right and secondary -> landscape_left (landscapeName).
+ *   - a native-pushed orientation is the source of truth whenever present: a differing web reading never overrides
+ *     it. The web sources still report size changes and are the orientation fallback only while there is no native
+ *     orientation. If the aspect contradicts the native orientation (portrait vs landscape: a rotation whose native
+ *     push is still in flight), nothing is reported for up to `nativeGraceMs` (default 2 s); only if native stays
+ *     silent that long does the web reading take over, until the next native push.
  */
 import type { Orientation, ScreenInfo } from "@brianharness/core/ad-contracts";
 
@@ -29,6 +38,22 @@ export function orientationType(env: Pick<OrientationEnv, "win" | "screenOrienta
 }
 const isLandscape = (o: Orientation) => o === "landscape_left" || o === "landscape_right";
 
+/**
+ * iOS WKWebView under Capacitor: the Capacitor platform ("ios"), else the iOS-only BHGaze plugin being available.
+ * No user-agent guessing. Outside Capacitor (browser dev server, Electron, node tests) -> false.
+ */
+export function isIosWebView(g: unknown = globalThis): boolean {
+  const cap = (g as { Capacitor?: { getPlatform?: () => string; isPluginAvailable?: (name: string) => boolean } } | null)?.Capacitor;
+  if (!cap) return false;
+  try { const p = cap.getPlatform?.(); if (typeof p === "string" && p) return p === "ios"; } catch { /* fall through */ }
+  try { return cap.isPluginAvailable?.("BHGaze") === true; } catch { return false; }
+}
+/** the landscape contract name for a screen.orientation type (native naming: on iOS primary = landscapeRight) */
+export function landscapeName(type: string | null, ios: boolean): "landscape_left" | "landscape_right" {
+  const secondary = type === "landscape-secondary";
+  return ios ? (secondary ? "landscape_left" : "landscape_right") : secondary ? "landscape_right" : "landscape_left";
+}
+
 export function watchOrientation(o: {
   env: OrientationEnv;
   /** builds the ScreenInfo from (w, h, orientation type): boot.tsx webScreen */
@@ -36,21 +61,33 @@ export function watchOrientation(o: {
   onChange: (screen: ScreenInfo, source: string) => void;
   /** the screen the session started with (not reported) */
   initial?: ScreenInfo;
+  /** the native orientation at start (e.g. getStatus().orientation or the plugin's ScreenInfo), when known */
+  initialNative?: Orientation | null;
   pollMs?: number;
-}): { stop(): void; native(orientation: Orientation): void; check(source?: string): void } {
+  /** how long an aspect that contradicts the native orientation waits for the native push (default 2000 ms) */
+  nativeGraceMs?: number;
+  now?: () => number;
+}): { stop(): void; native(orientation: Orientation): void; check(source?: string): void; nativeOrientation(): Orientation | null } {
   const { env } = o;
-  let native: Orientation | null = null;
+  const now = o.now ?? (() => Date.now());
+  const grace = o.nativeGraceMs ?? 2000;
+  let native: { o: Orientation; at: number } | null = o.initialNative ? { o: o.initialNative, at: now() } : null;
+  let contra: number | null = null;
   const key = (s: ScreenInfo) => `${s.orientation}|${s.webview.width}x${s.webview.height}`;
   let last = o.initial ? key(o.initial) : null;
-  let lastWeb: Orientation | null = o.initial?.orientation ?? null;
   const check = (source = "check") => {
-    let s = o.read(env.win.innerWidth, env.win.innerHeight, orientationType(env));
-    // the web sources saw a change of their own: they win over an older native push
-    if (lastWeb !== null && s.orientation !== lastWeb) native = null;
-    lastWeb = s.orientation;
-    // a native-pushed orientation is authoritative while it agrees with the aspect (a stale push after the next
-    // portrait/landscape flip is ignored)
-    if (native && isLandscape(native) === isLandscape(s.orientation)) s = { ...s, orientation: native };
+    const web = o.read(env.win.innerWidth, env.win.innerHeight, orientationType(env));
+    let s = web;
+    if (native) {
+      if (isLandscape(native.o) === isLandscape(web.orientation)) { contra = null; s = { ...web, orientation: native.o }; }
+      else {
+        // the aspect says the device turned portrait <-> landscape but native has not pushed yet: wait for it
+        const t = now();
+        contra ??= t;
+        if (t - Math.max(contra, native.at) < grace) return;
+        native = null; contra = null; // native stayed silent: the web reading is the fallback until the next push
+      }
+    }
     const k = key(s);
     if (k === last) return;
     last = k;
@@ -65,8 +102,9 @@ export function watchOrientation(o: {
   const timer = env.setInterval(() => check("poll"), o.pollMs ?? 1000);
   return {
     stop() { env.clearInterval(timer); for (const [t, ev, cb] of handlers) t.removeEventListener(ev, cb); handlers.length = 0; },
-    native(orientation) { native = orientation; check("native"); },
+    native(orientation) { native = { o: orientation, at: now() }; contra = null; check("native"); },
     check,
+    nativeOrientation: () => native?.o ?? null,
   };
 }
 /** the browser's environment (null outside a browser) */

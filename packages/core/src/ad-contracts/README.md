@@ -1,6 +1,6 @@
 # Actor/Director shared contracts
 
-**Version: contract-v1.4** (additive over contract-v1 to v1.3 except the optional sim-only lookAt signature; see Changes) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
+**Version: contract-v1.4** (additive over contract-v1 to v1.3 except the optional sim-only lookAt signature; see Changes) · v1.4.1 clarification (docs only) · **Frozen: 2026-11-04** · schema tag `bh-ad/1` · owner: Harness Engineer
 
 Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/ad-contracts/`, published copy at
 `/workspace/actor-director/contracts/`. Import in TS from `@brianharness/core/ad-contracts` (subpath export, added in E1; nothing is re-exported from the core index, so protocol-4 is untouched), or use the JSON Schemas.
@@ -93,6 +93,21 @@ IOS Dev I5 notes (native 9fc02ce).
 
 Native impact (IOS Dev): `@objc func lookAt(_ call: CAPPluginCall)` reads `call.getDouble("x")`/`"y"` (the I5 plugin
 already does); optionally push `status` with `orientation` on a UIKit interface-orientation change.
+
+### contract-v1.4.1 clarification (2026-11-04; docs only, no type/schema/enum change, `contract` stays `"contract-v1.4"`)
+IOS Dev I5b notes (native 2d66504).
+1. **`Orientation` landscape names follow native `UIInterfaceOrientation`.** In iOS WKWebView `screen.orientation`
+   `landscape-primary` (`window.orientation` 90) is `landscapeRight`, so a web reading on iOS maps primary ->
+   `landscape_right` and secondary -> `landscape_left` (iOS is detected from the Capacitor platform / the BHGaze plugin,
+   not the user agent). Non-iOS web readings are unchanged.
+2. **`GazeStatus.orientation`, when present, is the source of truth** for the interface orientation. A differing web
+   reading never overrides it; web readings are the fallback only while no native orientation is known (or when the
+   aspect has contradicted the last push for more than 2 s with no new push). Web sources still report size changes.
+3. **`lookAt({x, y})` steers the synthetic stream at any time in synthetic mode**, not only during calibration: outside
+   a calibration window a synthetic tracker reports calibrated samples (`cal:true`, web CSS px == pt) at the latest
+   look point, at its own synthetic head distance. The web demo reader (`liveDemoGaze`) walks a reply's reading path
+   with it in simulator builds only (`AD_SIM_BUILD=1`; marker `bh-ad-sim-walk/1`, also caught by
+   `tools/ad/check_device_build.mjs`).
 
 ## Change policy
 
@@ -193,7 +208,7 @@ is a **simulator-only aid** (the synthetic tracker's simulated gaze point, calle
 trackers omit it or make it a no-op. Support is the explicit capability `(await getStatus()).mode === "synthetic"`;
 never `typeof` (a Capacitor proxy returns a function for every name) or `in` (no `has` trap). It is unreachable in
 device web builds (stripped unless `AD_SIM_BUILD=1`). v1.4: a `status` event MAY carry `orientation` (native-pushed
-interface orientation).
+interface orientation; v1.4.1: authoritative when present, names follow native UIInterfaceOrientation).
 - Permission states: `prompt | granted | denied | restricted`. An unsupported device has `supported:false` with
   `gaze.arkit_unsupported` or `gaze.model_missing`.
 - Tracker states: `idle | starting | running | calibrating | paused | stopped | error`. Pause reasons:

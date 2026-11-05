@@ -62,7 +62,8 @@ function fakeEnv(w: number, h: number, type: string | null, angle?: number) {
 test("I5.3 orientation: a same-size landscape_left -> landscape_right rotation is caught without resize (poll, screen.orientation, matchMedia, native push), deduped", () => {
   const f = fakeEnv(1194, 834, "landscape-primary");
   const seen: Array<[string, string]> = [];
-  const w = watchOrientation({ env: f.env, initial: webScreen(1194, 834, "landscape-primary"), read: webScreen, onChange: (s, src) => seen.push([s.orientation, src]) });
+  let clock = 0;
+  const w = watchOrientation({ env: f.env, initial: webScreen(1194, 834, "landscape-primary"), read: webScreen, onChange: (s, src) => seen.push([s.orientation, src]), now: () => clock });
   f.poll(); assert.equal(seen.length, 0, "no change, nothing reported");
   // WKWebView: the type flips, no resize, no change event -> the 1 s poll catches it
   f.so.type = "landscape-secondary"; f.poll();
@@ -76,9 +77,12 @@ test("I5.3 orientation: a same-size landscape_left -> landscape_right rotation i
   // a native-pushed orientation (plugin status event, v1.4) when the web sources stay stale
   w.native("landscape_right"); f.poll();
   assert.deepEqual(seen.at(-1), ["landscape_right", "native"]); assert.equal(seen.length, 3);
-  // a real portrait flip (resize) wins over the older native push
+  // a portrait flip (resize) whose native push never comes: I5b, native is the truth, so the web reading waits out
+  // the grace period (2 s) and only then takes over as the fallback
   f.win.innerWidth = 834; f.win.innerHeight = 1194; f.so.type = "portrait-primary"; f.win.fire("resize");
-  assert.deepEqual(seen.at(-1), ["portrait", "resize"]);
+  assert.equal(seen.length, 3, "within the grace period the native landscape_right still stands");
+  clock += 2001; f.poll();
+  assert.deepEqual(seen.at(-1), ["portrait", "poll"]);
   w.stop(); assert.equal(f.polling, false); f.so.type = "landscape-primary"; f.so.fire("change"); assert.equal(seen.length, 4, "stopped: no more reports");
   // legacy window.orientation (no screen.orientation): -90 -> landscape-secondary -> landscape_right
   const g = fakeEnv(1194, 834, null, -90);
