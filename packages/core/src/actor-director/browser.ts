@@ -31,3 +31,4 @@ export * from "./tab-model.js";
 export * from "./sim-session.js";
 // leak-judge set
 export * from "./leak-judge.js";
+export * from "./leak-predict.js";
