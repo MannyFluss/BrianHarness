@@ -18,19 +18,32 @@ export const O200K_ASSET_BYTES = 1692666;
 
 export type AssetFetch = (path: string) => Promise<{ ok: boolean; status?: number; arrayBuffer(): Promise<ArrayBuffer>; body?: unknown }>;
 
-async function gunzip(buf: ArrayBuffer): Promise<string> {
+export type GunzipPath = "native" | "fallback";
+
+/**
+ * Gunzip the rank asset. DecompressionStream when the engine has it (Safari 16.4+, Chrome 80+); otherwise
+ * (older WKWebView: we do NOT raise the iOS minimum) the small pure-JS fflate gunzip (lazy chunk, bundled, no
+ * network). Either way the caller sha256-checks the TEXT, so a broken decoder can never yield a wrong tokenizer.
+ */
+export async function gunzipAsset(buf: ArrayBuffer, opts: { force?: GunzipPath } = {}): Promise<{ text: string; path: GunzipPath }> {
   const DS = (globalThis as { DecompressionStream?: new (f: string) => unknown }).DecompressionStream;
-  if (!DS) throw new Error("o200k_base: DecompressionStream unavailable (needs Safari 16.4+ / Chrome 80+)");
-  const stream = new Blob([buf]).stream().pipeThrough(new DS("gzip") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>);
-  return new Response(stream).text();
+  if (DS && opts.force !== "fallback") {
+    const stream = new Blob([buf]).stream().pipeThrough(new DS("gzip") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>);
+    return { text: await new Response(stream).text(), path: "native" };
+  }
+  const { gunzipSync, strFromU8 } = await import("fflate");
+  return { text: strFromU8(gunzipSync(new Uint8Array(buf))), path: "fallback" };
 }
+
+/** which path the last successful load used (diagnostics / health detail) */
+export let lastGunzipPath: GunzipPath | null = null;
 
 let pending: Promise<BpeTokenizer> | null = null;
 /**
  * Lazily load and verify the rank file. `fetchImpl` defaults to the global fetch of a same-origin relative path
  * (the bundled asset); `baseUrl` defaults to document.baseURI.
  */
-export function loadO200kBrowser(opts: { fetchImpl?: AssetFetch; baseUrl?: string; path?: string } = {}): Promise<BpeTokenizer> {
+export function loadO200kBrowser(opts: { fetchImpl?: AssetFetch; baseUrl?: string; path?: string; forceGunzip?: GunzipPath } = {}): Promise<BpeTokenizer> {
   if (pending && !opts.fetchImpl) return pending;
   const run = (async () => {
     const f: AssetFetch = opts.fetchImpl ?? ((p) => fetch(p));
@@ -40,9 +53,10 @@ export function loadO200kBrowser(opts: { fetchImpl?: AssetFetch; baseUrl?: strin
     if (base && !isBundledAssetUrl(url, base)) throw new Error("o200k_base: the rank asset must come from the app bundle");
     const res = await f(url);
     if (!res.ok) throw new Error(`o200k_base asset missing (${res.status ?? "?"})`);
-    const text = await gunzip(await res.arrayBuffer());
+    const { text, path: via } = await gunzipAsset(await res.arrayBuffer(), { force: opts.forceGunzip });
     const sha = sha256HexSync(text);
-    if (sha !== O200K_RANKS_SHA256) throw new Error(`o200k_base rank asset sha256 mismatch (${sha.slice(0, 12)})`);
+    if (sha !== O200K_RANKS_SHA256) throw new Error(`o200k_base rank asset sha256 mismatch (${sha.slice(0, 12)}, ${via} gunzip)`);
+    lastGunzipPath = via;
     return new BpeTokenizer(text);
   })();
   if (!opts.fetchImpl) { pending = run; run.catch(() => { pending = null; }); }

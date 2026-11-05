@@ -20,7 +20,8 @@
     "test:web-stream": "node scripts/stream-smoke.mjs"
   },
   "dependencies": {
-    "@brianharness/core": "0.1.0"
+    "@brianharness/core": "0.1.0",
+    "@mediapipe/tasks-vision": "1.2.2"
   },
   "devDependencies": {
     "@fontsource-variable/jetbrains-mono": "^5.2.0",
