@@ -22,6 +22,7 @@ export * as gazeRef from "./gaze-ref.js";
 export * from "./gaze-stream.js";
 export * from "./gaze-replay.js";
 export * from "./visibility.js";
+export * from "./pointer.js";
 // E6
 export * from "./ad-signal.js";
 export * from "./keystrokes.js";

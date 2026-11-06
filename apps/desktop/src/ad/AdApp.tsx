@@ -6,10 +6,11 @@
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { PanelRightIcon, CameraIcon, CameraOffIcon } from "lucide-react";
-import { collectParaBoxes, evidenceParagraphs, type NoteCard } from "@brianharness/core/actor-director/browser";
+import { collectInteractiveBoxes, collectParaBoxes, evidenceParagraphs, type NoteCard } from "@brianharness/core/actor-director/browser";
 import { Message } from "../components/Message";
 import { Composer } from "../components/Composer";
 import { cn } from "../lib";
+import { AdModelPicker, InputModePicker, PointerDogfoodControls } from "./AdSessionControls";
 import { DirectorTab } from "./DirectorTab";
 import { InjectionLine, usePrefersReducedMotion } from "./InjectionLine";
 import type { AdStore, AdView, VisibleView } from "./controller";
@@ -53,7 +54,7 @@ export function AdApp(props: AdAppProps) {
   const onKey = useCallback((e: React.KeyboardEvent) => store.composerKey?.(e.timeStamp), [store]);
   const send = useCallback(() => { const t = draft; setDraft(""); void store.send?.(t); }, [draft, store]);
 
-  // tagged paragraph boxes, 4 Hz (the tab is outside the chat root, so it's never an AOI)
+  // tagged paragraph + interactive AOI boxes, 4 Hz (the tab is outside the chat root, so it's never an AOI)
   useEffect(() => {
     if (!store.paragraphs || typeof window === "undefined") return;
     const id = setInterval(() => {
@@ -61,25 +62,64 @@ export function AdApp(props: AdAppProps) {
       const sheet = document.querySelector('[data-ad-tab="sheet"][data-ad-tab-open="true"]')?.getBoundingClientRect();
       const all = collectParaBoxes(root);
       const boxes = all.filter((b) => !sheet || b.x + b.w <= sheet.left);
+      const interactive = collectInteractiveBoxes(root).filter((b) => !sheet || b.x + b.w <= sheet.left);
       const t = performance.now();
       // phone: the sheet covers the chat -> no paragraph is attributable; the controller logs tab_occluded (I4)
       store.occlusion?.(!!sheet && all.length > 0 && boxes.length === 0, t);
-      store.paragraphs!(boxes, t, view.chat.some((m) => m.streaming));
+      store.paragraphs!(boxes, t, view.chat.some((m) => m.streaming), interactive);
     }, 250);
     return () => clearInterval(id);
   }, [store, view.chat]);
+
+  // pointer mode: interactive-AOI enter/leave/click/select (never on plain paragraphs or the composer)
+  useEffect(() => {
+    if (!store.pointer || store.inputMode !== "pointer" || typeof window === "undefined") return;
+    const root = chatRef.current; if (!root) return;
+    const aoiOf = (t: EventTarget | null) => {
+      const el = (t as Element | null)?.closest?.("[data-interactive][data-aoi]") as HTMLElement | null;
+      if (!el || el.closest("[data-ad-composer]")) return null;
+      return el.getAttribute("data-aoi");
+    };
+    const onOver = (e: PointerEvent) => {
+      const a = aoiOf(e.target); const rel = aoiOf(e.relatedTarget as EventTarget | null);
+      if (a && a !== rel) store.pointer!("enter", a, e.timeStamp);
+    };
+    const onOut = (e: PointerEvent) => {
+      const a = aoiOf(e.target); const rel = aoiOf(e.relatedTarget as EventTarget | null);
+      if (a && a !== rel) store.pointer!("leave", a, e.timeStamp);
+    };
+    const onClick = (e: MouseEvent) => { const a = aoiOf(e.target); if (a) store.pointer!("click", a, e.timeStamp); };
+    const onUp = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+      const node = sel.anchorNode?.parentElement;
+      const el = node?.closest?.("[data-interactive][data-aoi]") as HTMLElement | null;
+      const a = el?.getAttribute("data-aoi");
+      if (a && !el!.closest("[data-ad-composer]")) store.pointer!("select", a, performance.now());
+    };
+    root.addEventListener("pointerover", onOver, true);
+    root.addEventListener("pointerout", onOut, true);
+    root.addEventListener("click", onClick, true);
+    root.addEventListener("mouseup", onUp, true);
+    return () => {
+      root.removeEventListener("pointerover", onOver, true);
+      root.removeEventListener("pointerout", onOut, true);
+      root.removeEventListener("click", onClick, true);
+      root.removeEventListener("mouseup", onUp, true);
+    };
+  }, [store, store.inputMode, view.chat.length]);
 
   useEffect(() => { chatRef.current?.scrollTo?.({ top: chatRef.current.scrollHeight }); }, [view.chat.length]);
 
   return (
     <div className="eeg-app flex h-dvh flex-col bg-background text-foreground" data-ad-app={view.sessionType === "tab_visible" ? "visible" : "plain"}>
-      <TopBar view={view} layout={layout} tabOpen={open} {...(view.sessionType === "tab_visible" ? { onTab: () => setOpen((o) => !o) } : {})} onCalibrate={props.onCalibrate} onPause={() => void (view.camera.on ? store.pauseTracking?.() : store.resumeTracking?.())} />
+      <TopBar view={view} layout={layout} tabOpen={open} store={store} {...(view.sessionType === "tab_visible" ? { onTab: () => setOpen((o) => !o) } : {})} onCalibrate={props.onCalibrate} onPause={() => void (view.camera.on ? store.pauseTracking?.() : store.resumeTracking?.())} />
       {view.sessionType === "tab_visible"
         ? <VisibleBody {...props} open={open} setOpen={setOpen} view={view} layout={layout} chatRef={chatRef} draft={draft} setDraft={setDraft} send={send} onPointer={onPointer} onKey={onKey} />
         : (
           <div className="flex min-h-0 flex-1">
             <main className="flex min-w-0 flex-1 flex-col">
-              <Chat view={view} chatRef={chatRef} />
+              <Chat view={view} chatRef={chatRef} pointerMode={store.inputMode === "pointer"} />
               <div className="mx-auto w-full max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))]" onPointerDownCapture={onPointer} onKeyDownCapture={onKey} data-ad-composer>
                 <Composer value={draft} onChange={setDraft} onSend={send} busy={view.busy} />
               </div>
@@ -90,22 +130,40 @@ export function AdApp(props: AdAppProps) {
   );
 }
 
-function TopBar({ view, layout, onCalibrate, onPause, onTab, tabOpen }: { view: AdView; layout: AdLayout; onCalibrate?: () => void; onPause: () => void; onTab?: () => void; tabOpen?: boolean }) {
+function TopBar({ view, layout, onCalibrate, onPause, onTab, tabOpen, store }: { view: AdView; layout: AdLayout; onCalibrate?: () => void; onPause: () => void; onTab?: () => void; tabOpen?: boolean; store: AdStore }) {
+  const [modelsOpen, setModelsOpen] = useState(false);
+  const mode = store.inputMode;
+  const liveModels = store.models;
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 pt-[env(safe-area-inset-top)] font-ui text-xs">
+    <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-1.5 pt-[max(0.25rem,env(safe-area-inset-top))] font-ui text-xs">
       <span className="font-title text-base">BrianHarness</span>
       <span className="rounded-sm bg-accent px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground" data-ad-badge>{view.sessionType === "tab_visible" ? "Director tab" : "Study session"}</span>
+      {mode && <span className="rounded-sm border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground" data-ad-mode-badge>{mode}</span>}
       <span className="flex-1" />
-      {onCalibrate && <button className="eeg-tap rounded-sm px-2 py-1 text-muted-foreground hover:bg-accent" onClick={onCalibrate}>{layout === "phone" ? "Calib." : "Calibrate"}</button>}
-      <button onClick={onPause} className={cn("eeg-tap flex items-center gap-1 rounded-sm px-2 py-1", view.camera.on ? "text-signal" : "text-muted-foreground")} data-ad-camera-indicator={view.camera.on ? "on" : "off"} aria-label={view.camera.on ? "Camera on: tap to pause" : "Camera paused: tap to resume"}>
-        {view.camera.on ? <CameraIcon className="size-4" /> : <CameraOffIcon className="size-4" />}{layout !== "phone" && (view.camera.on ? "Camera on" : "Paused")}
-      </button>
+      {store.changeModel && liveModels && (
+        <button type="button" onClick={() => setModelsOpen((o) => !o)} className="eeg-tap rounded-sm px-2 py-1 font-mono text-[10px] text-muted-foreground hover:bg-accent" data-ad-models-toggle>
+          {layout === "phone" ? "Models" : `${liveModels.actor.replace(/-cloud$/, "")} / ${liveModels.director.replace(/-cloud$/, "")}`}
+        </button>
+      )}
+      {onCalibrate && mode === "gaze" && <button className="eeg-tap rounded-sm px-2 py-1 text-muted-foreground hover:bg-accent" onClick={onCalibrate}>{layout === "phone" ? "Calib." : "Calibrate"}</button>}
+      {mode === "gaze" && (
+        <button onClick={onPause} className={cn("eeg-tap flex items-center gap-1 rounded-sm px-2 py-1", view.camera.on ? "text-signal" : "text-muted-foreground")} data-ad-camera-indicator={view.camera.on ? "on" : "off"} aria-label={view.camera.on ? "Camera on: tap to pause" : "Camera paused: tap to resume"}>
+          {view.camera.on ? <CameraIcon className="size-4" /> : <CameraOffIcon className="size-4" />}{layout !== "phone" && (view.camera.on ? "Camera on" : "Paused")}
+        </button>
+      )}
       {onTab && <button onClick={onTab} aria-pressed={tabOpen} aria-label={tabOpen ? "Hide Director tab" : "Show Director tab"} className={cn("eeg-tap flex size-8 items-center justify-center rounded-md hover:bg-accent", tabOpen ? "text-foreground" : "text-muted-foreground")} data-ad-tab-toggle><PanelRightIcon className="size-4" /></button>}
+      {modelsOpen && store.changeModel && liveModels && (
+        <div className="flex w-full flex-col gap-3 border-t border-border/60 pt-2 sm:flex-row" data-ad-models-panel>
+          <AdModelPicker role="actor" value={liveModels.actor} onChange={(to) => store.changeModel!("actor", to)} />
+          <AdModelPicker role="director" value={liveModels.director} onChange={(to) => store.changeModel!("director", to)} />
+          <div className="opacity-80"><InputModePicker value={mode ?? "pointer"} onChange={() => {}} locked /></div>
+        </div>
+      )}
     </header>
   );
 }
 
-function Chat({ view, chatRef, marks, onMark, highlight }: { view: AdView; chatRef: React.RefObject<HTMLDivElement | null>; marks?: Record<string, string>; onMark?: (msg: string) => void; highlight?: string[] }) {
+function Chat({ view, chatRef, marks, onMark, highlight, pointerMode }: { view: AdView; chatRef: React.RefObject<HTMLDivElement | null>; marks?: Record<string, string>; onMark?: (msg: string) => void; highlight?: string[]; pointerMode?: boolean }) {
   // evidence ids are a<k>.p<n> (1-based); the DOM tags data-p 0-based
   const css = highlight?.length ? highlight.map((a) => { const [m, p] = a.split(".p"); return `[data-msg="${m}"][data-p="${Number(p) - 1}"]`; }).join(",") + "{background:color-mix(in srgb,var(--signal) 22%,transparent);border-radius:3px;box-shadow:0 0 0 2px color-mix(in srgb,var(--signal) 22%,transparent)}" : "";
   return (
@@ -116,6 +174,7 @@ function Chat({ view, chatRef, marks, onMark, highlight }: { view: AdView; chatR
           <div key={m.id} className="relative">
             {marks?.[m.id] && <button className="ad-mark" aria-label={`Used Director note ${marks[m.id]}`} data-ad-mark={marks[m.id]} onClick={() => onMark?.(m.id)} />}
             <Message msg={m} aoi={m.role === "assistant" ? { msg: m.id } : undefined} />
+            {pointerMode && m.role === "assistant" && !m.streaming && <PointerDogfoodControls msgId={m.id} />}
           </div>
         ))}
         {view.busy && <div className="text-xs text-muted-foreground">…</div>}
@@ -150,7 +209,7 @@ function VisibleBody(p: AdAppProps & { open: boolean; setOpen: (f: (o: boolean) 
     <>
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
-          <Chat view={view} chatRef={p.chatRef} marks={view.tab.marks} onMark={onMark} highlight={highlight} />
+          <Chat view={view} chatRef={p.chatRef} marks={view.tab.marks} onMark={onMark} highlight={highlight} pointerMode={p.store.inputMode === "pointer"} />
           <div className="mx-auto w-full max-w-3xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {view.pending?.state === "waiting" && (
               <button className="mb-2 flex items-center gap-1.5 rounded-sm px-1 text-xs text-signal" data-ad-waiting onClick={() => setOpen(true)}>

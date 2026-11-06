@@ -84,6 +84,22 @@ export function renderDirectorInput(d: DigestInput, dropOldest = 0, keepLedger =
   if (chatLines.length) lines.push("[CHAT] " + chatLines.join("\n"));
   const g = d.digest;
   if (g) {
+    const mode = g.input_mode ?? "gaze";
+    if (mode === "pointer" || mode === "none") {
+      // v1.5: no gaze reading labels from pointer/none; pointer digests list p* so rails can cite them
+      lines.push(`[ATTENTION DIGEST · after ${g.msg} · window ${Math.round(g.windowMs / 1000)} s · ${mode}${mode === "pointer" ? ` · ${(g.pointer?.length ?? 0)} pointer events` : ""}]`);
+      if (mode === "pointer" && g.pointer?.length) {
+        lines.push(g.pointer.map((p) => {
+          const kind = p.kind.replace(/^pointer_/, "");
+          const dwell = p.kind === "pointer_dwell" && p.dwell_ms !== undefined ? ` ${p.dwell_ms} ms` : "";
+          return `${p.id} ${kind}${dwell} on ${p.aoi} ${q(p.excerpt)}`;
+        }).join(" · "));
+      } else if (mode === "none") {
+        lines.push("no gaze or pointer evidence this window");
+      } else {
+        lines.push("no pointer events this window");
+      }
+    } else {
     const bad = invalidEventIds(d);
     const windowBad = g.quality < MIN_QUALITY || (d.faceFrac !== null && d.faceFrac < MIN_FACE);
     const base = d.baselineParagraphs >= BASELINE_PARAGRAPHS ? `baseline: ${d.baselineParagraphs} paragraphs` : `baseline: ${d.baselineParagraphs} of ${BASELINE_PARAGRAPHS} paragraphs, no z yet`;
@@ -105,6 +121,7 @@ export function renderDirectorInput(d: DigestInput, dropOldest = 0, keepLedger =
     if (paras.length) lines.push(paras.join(" · "));
     for (const lb of g.lookBacks) if (!(windowBad && bad.has(lb.ev))) lines.push(`look-back to ${lb.aoi} ${q(lb.excerpt)} ${(lb.ms / 1000).toFixed(1)} s ${lb.ev}`);
     lines.push(`off-screen ${Math.round(g.offscreenMs / 1000)} s · composer pauses >2 s: ${g.composerPauses}`);
+    }
   }
   if (keepLedger && d.ledger?.length) lines.push("Session ledger: " + d.ledger.join(" · "));
   lines.push(...footprintLines(d.footprint));

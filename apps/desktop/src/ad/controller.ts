@@ -8,11 +8,11 @@
  * marks by construction; buildTabModel is never called and the session's full (sealed) lines never leave here.
  */
 import {
-  ActorDirectorSession, AdSessionLog, AdStorage, GazeSource, KeystrokeTimes, ParagraphVisibility, buildTabModel, calibrateBatch, calibrationStatus,
+  ActorDirectorSession, AdSessionLog, AdStorage, GazeSource, KeystrokeTimes, ParagraphVisibility, PointerCapture, emptyModeDigest, buildTabModel, calibrateBatch, calibrationStatus,
   gazeOptionsFromCalibration, accuracyWords, layoutFromScreen, gazeRef, Preflight, type Probe, type MultiProbe,
-  type AdChatBackend, type CalibrationRecord, type LiveGaze, type ParaBox, type TabModel, type TokenCounter,
+  type AdChatBackend, type CalibrationRecord, type InteractiveAoiBox, type LiveGaze, type ParaBox, type TabModel, type TokenCounter,
 } from "@brianharness/core/actor-director/browser";
-import type { Arm, AttentionEvent, BhAdEvent, DirectorOutput, GazeSrc, GazeStatus, GazeTracker, RailCode, ScreenInfo, SessionType } from "@brianharness/core/ad-contracts";
+import { DEFAULT_ACTOR_MODEL, DEFAULT_DIRECTOR_MODEL, DEFAULT_POINTER_CONFIG, type Arm, type AttentionEvent, type BhAdEvent, type DirectorOutput, type GazeSrc, type GazeStatus, type GazeTracker, type InputMode, type ModelRole, type PointerConfig, type RailCode, type ScreenInfo, type SessionType } from "@brianharness/core/ad-contracts";
 import type { KeyValueStore } from "@brianharness/core/browser";
 
 export interface AdChatMsg { id: string; role: "user" | "assistant"; text: string; streaming?: boolean }
@@ -46,11 +46,18 @@ export interface AdStore {
   send?(text: string): Promise<void>;
   composerKey?(t: number): void;
   composerTap?(x: number, y: number, t: number): void;
-  paragraphs?(boxes: ParaBox[], t: number, streaming: boolean): void;
+  paragraphs?(boxes: ParaBox[], t: number, streaming: boolean, interactive?: InteractiveAoiBox[]): void;
   /** the tab covers the chat (phone sheet open over it) from t; false when it stops covering */
   occlusion?(covered: boolean, t: number): void;
   pauseTracking?(): Promise<void>;
   resumeTracking?(): Promise<void>;
+  /** v1.5 pointer mode: interactive-AOI events only (enter/leave/click/select) */
+  pointer?(kind: "enter" | "leave" | "click" | "select", aoi: string, t: number): void;
+  /** v1.5: mid-session Actor/Director model change (refuses non-:cloud); null = ok */
+  changeModel?(role: ModelRole, to: string): string | null;
+  /** v1.5: fixed for the session */
+  inputMode?: InputMode;
+  models?: { actor: string; director: string };
 }
 
 export function staticController(view: AdView, liveFrames: LiveGaze[] = []): AdStore {
@@ -109,6 +116,11 @@ export interface LiveOptions {
   /** v1.3: probes for a preflight the controller builds itself, its health lines going to this session's log
    * (the Mac shell's network.isolation). Ignored when `preflight` is given. */
   preflightProbes?: Array<Probe | MultiProbe>;
+  /** v1.5: Director input mode, fixed for the session (Mac pilot default: pointer) */
+  inputMode?: InputMode;
+  pointerConfig?: PointerConfig;
+  /** v1.5: Actor + Director models at session start (defaults: 20b / 120b cloud suggestions) */
+  models?: { actor: string; director: string };
 }
 
 export class LiveAdController implements AdStore {
@@ -136,8 +148,12 @@ export class LiveAdController implements AdStore {
   private occStart: number | null = null;
   /** occluded spans [t0,t1] in the current reading window */
   private occSpans: Array<[number, number]> = [];
+  private interactive: InteractiveAoiBox[] = [];
+  private pointerCap: PointerCapture | null = null;
+  readonly inputMode: InputMode;
 
   private constructor(private o: LiveOptions) {
+    this.inputMode = o.inputMode ?? "gaze";
     this.now = o.now ?? (() => performance.now());
     const g = gazeOptionsFromCalibration(o.screen, o.calibration);
     this.gaze = new GazeSource({ ppd: g.ppd, viewport: g.viewport });
@@ -151,14 +167,23 @@ export class LiveAdController implements AdStore {
     c.log = new AdSessionLog(storage, o.sessionId, o.sessionType, clock);
     if (!o.preflight && o.preflightProbes?.length) o.preflight = new Preflight({ probes: o.preflightProbes, emit: (h) => c.session?.logGaze(h), now: () => c.now() });
     const kind = o.trackerKind ?? (o.tracker ? trackerLabel(await o.tracker.getStatus().catch(() => null)) : "none");
+    const models = o.models ?? { actor: DEFAULT_ACTOR_MODEL, director: DEFAULT_DIRECTOR_MODEL };
+    const inputMode = o.inputMode ?? "gaze";
     c.session = new ActorDirectorSession({
       log: c.log, userId: o.userId, sessionType: o.sessionType, arm: o.arm, actor: o.actor, director: o.director, counter: o.counter, consent: o.consent,
       gaze: { tracker: kind, permission: o.consent.camera ? "granted" : "denied" },
       ...(o.preflight ? { preflight: o.preflight } : {}),
       device: { deviceModel: o.screen.deviceModel, platform: o.screen.platform, orientation: o.screen.orientation, widthPt: o.screen.widthPt, heightPt: o.screen.heightPt },
       ...(o.blind ? { blind: o.blind } : {}),
+      models, inputMode, ...(inputMode === "pointer" ? { pointerConfig: o.pointerConfig ?? DEFAULT_POINTER_CONFIG } : {}),
     });
-    if (o.tracker) {
+    if (inputMode === "pointer") {
+      c.pointerCap = new PointerCapture(o.pointerConfig ?? DEFAULT_POINTER_CONFIG, {
+        onBatch: (b) => c.session?.logPointer({ type: "pointer_l1", t0: b.t0, t1: b.t1, events: b.events }),
+      });
+    }
+    // gaze samples only feed the Director in gaze mode (pointer/none: parked; never invent e*)
+    if (o.tracker && inputMode === "gaze") {
       await o.tracker.addListener("gaze", (e) => {
         if (c.paused) return;
         const batch = calibrateBatch(e.samples, o.calibration, o.screen.webview);
@@ -188,7 +213,7 @@ export class LiveAdController implements AdStore {
   subscribe = (cb: () => void) => { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; };
   getSnapshot = () => this.view;
   live = (): LiveGaze | null => {
-    if (this.o.sessionType !== "tab_visible" || this.paused) return null;
+    if (this.o.sessionType !== "tab_visible" || this.paused || this.inputMode !== "gaze") return null;
     const g = this.gaze.live();
     return g && this.occStart !== null ? { ...g, target: null } : g;
   }
@@ -218,19 +243,21 @@ export class LiveAdController implements AdStore {
 
   private openReading() { this.openT = this.now(); this.streamDoneT = this.openT; this.closed = false; this.emit(); }
   /** the visible tagged paragraphs (the tab is not tagged, so its area is never an AOI) */
-  paragraphs = (boxes: ParaBox[], t: number, streaming: boolean) => {
+  paragraphs = (boxes: ParaBox[], t: number, streaming: boolean, interactive: InteractiveAoiBox[] = []) => {
+    this.interactive = interactive;
     this.vis.update(t, boxes, streaming); this.gaze.setAois(this.vis.aois(t));
+    if (this.pointerCap) this.pointerCap.setInteractive(interactive.map((b) => ({ aoi: b.aoi, msg: b.msg, excerpt: b.excerpt })));
     const msg = `a${this.turn}`;
-    if (!streaming && (this.layoutDirty || this.layoutLoggedFor !== msg) && boxes.some((b) => b.msg === msg)) this.logLayout();
+    if (!streaming && (this.layoutDirty || this.layoutLoggedFor !== msg) && (boxes.some((b) => b.msg === msg) || interactive.some((b) => b.msg === msg))) this.logLayout();
   }
   /** aoi_layout for the current reply: once when it is first fully laid out, again after a rotation / resize */
   private logLayout() {
     if (!this.log) return;
     const msg = `a${this.turn}`;
     this.layoutDirty = false; this.layoutLoggedFor = msg;
-    const boxes = this.vis.layoutBoxes(msg);
+    const boxes = this.vis.layoutBoxes(msg, this.interactive);
     this.session.logGaze({ type: "aoi_layout", turn: this.turn, msg, orientation: this.o.screen.orientation, boxes });
-    this.o.onReadingLayout?.(msg, boxes);
+    this.o.onReadingLayout?.(msg, boxes.map(({ aoi, words, x, y, w, h }) => ({ aoi, words, x, y, w, h })));
   }
   /**
    * phone sheet over the chat (I4, contract v1.2 tab_occluded): while covered, gaze is not attributed to paragraphs
@@ -295,12 +322,23 @@ export class LiveAdController implements AdStore {
     if (wasCovered) this.endOcclusion(endT);
     const covered = this.occSpans.length > 0, spans = this.occSpans;
     const w0 = this.openT;
+    const windowMs = endT - w0;
+    this.occSpans = [];
+    if (wasCovered) this.occStart = endT;
+
+    // v1.5: pointer / none digests never invent gaze-style deep/skim/skip or e* events
+    if (this.inputMode === "pointer" || this.inputMode === "none") {
+      const closed = this.pointerCap && this.inputMode === "pointer" ? this.pointerCap.closeWindow(endT) : { batches: [], pointer: [] };
+      // pointer_l1 batches are emitted via PointerCapture.onBatch (including the final flush)
+      const digest = emptyModeDigest(msg, windowMs, this.inputMode, closed.pointer);
+      this.session.observeReading({ digest, events: [], faceFrac: null, baselineParagraphs: this.history.length });
+      return;
+    }
+
     // a paragraph never uncovered-and-visible in this window is excluded (not "skipped") when the tab covered the chat;
     // a kept one demands reading time only for its uncovered share (contract-v1.3: expected time excludes tab_occluded)
     const aois = this.vis.aois(endT).filter((a) => a.msg === msg && (!covered || (a.visible ?? []).some(([x, y]) => y > w0 && x < endT && y > x)))
       .map((a) => (covered ? { ...a, expect_frac: gazeRef.occlusionExpectFrac(a.visible ?? [], spans, w0, endT) } : a));
-    this.occSpans = [];
-    if (wasCovered) this.occStart = endT;
     if (!aois.length) return;
     const layout = layoutFromScreen(this.o.screen);
     const run = (as: typeof aois) => this.gaze.closeTurn({ layout, aois: as, msg, open_t: this.openT!, stream_done_t: this.streamDoneT ?? this.openT!, end_t: endT, turn: this.turn, history: this.history, first_event_id: this.turn * 10 + 1, anchors: [] });
@@ -330,6 +368,15 @@ export class LiveAdController implements AdStore {
     this.keys.clear(t);
     this.openReading();
   }
+  pointer = (kind: "enter" | "leave" | "click" | "select", aoi: string, t: number) => {
+    if (!this.pointerCap || this.inputMode !== "pointer" || this.closed) return;
+    if (kind === "enter") this.pointerCap.enter(aoi, t);
+    else if (kind === "leave") this.pointerCap.leave(aoi, t);
+    else if (kind === "click") this.pointerCap.click(aoi, t);
+    else this.pointerCap.select(aoi, t);
+  }
+  changeModel = (role: ModelRole, to: string): string | null => { const r = this.session.changeModel(role, to); if (!r) this.emit(); return r; };
+  get models() { return this.session.models; }
   pauseTracking = async () => { this.paused = true; await this.o.tracker?.pause(); this.emit(); }
   resumeTracking = async () => { this.paused = false; await this.o.tracker?.resume(); this.emit(); }
   async end() { this.dispose(); await this.session.end("user"); this.emit(); }

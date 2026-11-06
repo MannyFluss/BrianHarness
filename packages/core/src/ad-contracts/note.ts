@@ -131,5 +131,5 @@ export const DIRECTOR_OUTPUT_FORMAT_TEXT = `Reply with ONE JSON object, no prose
    "value":str<=500,"evidence":[id]1..24,"confidence":0..1,"expires_after_turns":1},
  "no_note_reason":null | str<=400}
 Rules: a note needs observation or suggestion (or both). note null <=> no_note_reason is a non-empty string.
-id = "e<k>" (event) | "u<k>" | "a<k>" | "a<k>.p<k>" | "a<k>.p<k>.s<k>", and must appear in this input.
+id = "e<k>" (gaze) | "p<k>" (pointer) | "u<k>" | "a<k>" | "a<k>.p<k>" | "a<k>.p<k>.s<k>", and must appear in this input.
 No other keys anywhere.`;

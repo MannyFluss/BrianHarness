@@ -21,8 +21,8 @@
  * sealed-only, and counts toward the leak breaker (2 = health director.leak_breaker, every later note blocked).
  * Without a gate (leakGate: null, E3 behaviour): 1 safety leak after an injected note = flag, 2 = breaker.
  */
-import { DEFAULT_POINTER_CONFIG, DIRECTOR_HOLD_MS, SAFETY_LEAKS, noteKind } from "../ad-contracts/index.js";
-import type { InputMode, PointerConfig } from "../ad-contracts/index.js";
+import { DEFAULT_POINTER_CONFIG, DIRECTOR_HOLD_MS, SAFETY_LEAKS, modelRefusal, noteKind } from "../ad-contracts/index.js";
+import type { InputMode, ModelRole, PointerConfig } from "../ad-contracts/index.js";
 import type { Arm, AttentionEvent, BhAdEventBody, DirectorFootprint, DirectorNote, DirectorOutput, HealthCode, RailCode, ReadingDigest, SessionType, Usage } from "../ad-contracts/index.js";
 import { OPENER_CUE } from "../backends.js";
 import { makeRng, type Rng } from "../rng.js";
@@ -120,7 +120,7 @@ export class ActorDirectorSession {
   private holdMs: number;
   private pInject: number;
   readonly gate: LeakGate | null;
-  readonly models: { actor: string; director: string };
+  models: { actor: string; director: string };
   /** contract-v1.5: fixed for the session (a change = a new session) */
   readonly inputMode: InputMode;
 
@@ -160,10 +160,27 @@ export class ActorDirectorSession {
     if (!this.enabled()) this.emit({ type: "health", check: "director.enabled", ok: false, code: "director.kill_switch" });
   }
 
+  /**
+   * v1.5: change Actor or Director model mid-session. Emits model_change {at, role, from, to}; does NOT start a new
+   * session. Refuses non-:cloud tags (and optional Worker allowlist). `at` = the next request turn that will use `to`.
+   * Returns null on success, or the refusal reason.
+   */
+  changeModel(role: ModelRole, to: string, workerAllowlist?: readonly string[]): string | null {
+    const reason = modelRefusal(to, workerAllowlist);
+    if (reason) return reason;
+    const from = this.models[role];
+    if (from === to) return null;
+    this.models = { ...this.models, [role]: to };
+    this.emit({ type: "model_change", at: this.turn + 1, role, from, to });
+    return null;
+  }
+
   async opener(): Promise<string> { return this.actorTurn(null, null); }
 
   /** the app's gaze-side lines (layout after a rotation / resize, calibration health); nothing else goes through here */
   logGaze(b: Extract<BhAdEventBody, { type: "aoi_layout" | "health" | "tab_occluded" }>): void { this.emit(b); }
+  /** v1.5: pointer_l1 batches from the Mac pointer capture (mode "pointer" only) */
+  logPointer(b: Extract<BhAdEventBody, { type: "pointer_l1" }>): void { this.emit(b); }
 
   /** the reading window of the latest Actor message closed (E5 provides the digest + events) */
   observeReading(r: { digest: ReadingDigest; events: AttentionEvent[]; faceFrac?: number | null; baselineParagraphs?: number; ledger?: string[] }): void {

@@ -24,7 +24,7 @@ const FAKE: SimReplay[] = [{ name: "fake", file: { screen: IPAD, samples: [] }, 
 
 /** tab DOM: every data-ad-* attribute that only the tab layer may render */
 const TAB_DOM = ["data-ad-tab", "data-ad-card", "data-ad-mark", "data-ad-share", "data-ad-waiting", "data-ad-injection", "data-ad-minimap", "data-ad-live", "data-ad-summary", "data-ad-hypotheses", "data-ad-ticker", "data-ad-hint", "data-ad-evidence", "data-ad-highlight", "data-ad-tab-toggle", "data-ad-session-line"];
-const BLINDED_DOM_OK = new Set(["data-ad-app", "data-ad-badge", "data-ad-camera-indicator", "data-ad-chat", "data-ad-composer"]);
+const BLINDED_DOM_OK = new Set(["data-ad-app", "data-ad-badge", "data-ad-camera-indicator", "data-ad-chat", "data-ad-composer", "data-ad-mode-badge", "data-ad-models-toggle"]);
 const TAB_ONLY = Object.values(TAB_ONLY_FIELDS).flat();
 
 function assertNoTab(html: string, lines: readonly BhAdEvent[], label: string) {

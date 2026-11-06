@@ -13,6 +13,8 @@
 import type { Aoi } from "./gaze-ref.js";
 
 export interface ParaBox { msg: string; p: number; x: number; y: number; w: number; h: number; words?: number; text?: string; line_h?: number }
+/** an interactive control / selectable span (data-interactive + data-aoi); never a whole paragraph */
+export interface InteractiveAoiBox { msg: string; aoi: string; x: number; y: number; w: number; h: number; words: number; excerpt: string }
 export interface VisibilityConfig { minVisibleFrac: number; minViewportFrac: number }
 export const VISIBILITY_DEFAULTS: VisibilityConfig = { minVisibleFrac: 0.5, minViewportFrac: 0.5 };
 
@@ -81,10 +83,28 @@ export class ParagraphVisibility {
         ...(tr.complete_t !== undefined ? { complete_t: tr.complete_t } : {}), visible: v };
     });
   }
-  /** contract aoi_layout boxes */
-  layoutBoxes(msg: string) {
-    return [...this.tracks.entries()].filter(([, tr]) => tr.box.msg === msg).map(([id, tr]) => ({ aoi: id, words: tr.box.words ?? wordCount(tr.box.text ?? ""), x: tr.box.x, y: tr.box.y, w: tr.box.w, h: tr.box.h }));
+  /** contract aoi_layout boxes; paragraphs are never interactive; pass interactive controls separately */
+  layoutBoxes(msg: string, interactive: readonly InteractiveAoiBox[] = []) {
+    const paras = [...this.tracks.entries()].filter(([, tr]) => tr.box.msg === msg).map(([id, tr]) => ({ aoi: id, words: tr.box.words ?? wordCount(tr.box.text ?? ""), x: tr.box.x, y: tr.box.y, w: tr.box.w, h: tr.box.h }));
+    const ctrls = interactive.filter((b) => b.msg === msg).map((b) => ({ aoi: b.aoi, words: b.words, x: b.x, y: b.y, w: b.w, h: b.h, interactive: true as const }));
+    return [...paras, ...ctrls];
   }
+}
+
+/** browser helper: interactive controls tagged [data-msg][data-aoi][data-interactive] (viewport CSS px). Paragraphs are excluded. */
+export function collectInteractiveBoxes(root: { querySelectorAll(sel: string): ArrayLike<unknown> }): InteractiveAoiBox[] {
+  const out: InteractiveAoiBox[] = [];
+  const els = root.querySelectorAll("[data-msg][data-aoi][data-interactive]");
+  const para = /^a[0-9]+\.p[0-9]+$/;
+  for (let i = 0; i < els.length; i++) {
+    const el = els[i] as { getAttribute(n: string): string | null; getBoundingClientRect(): { x: number; y: number; width: number; height: number }; textContent: string | null };
+    const aoi = el.getAttribute("data-aoi") ?? "";
+    if (!aoi || para.test(aoi) || aoi === "composer") continue;
+    const r = el.getBoundingClientRect();
+    const excerpt = (el.getAttribute("data-excerpt") ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
+    out.push({ msg: el.getAttribute("data-msg") ?? "", aoi, x: r.x, y: r.y, w: r.width, h: r.height, words: wordCount(excerpt), excerpt });
+  }
+  return out;
 }
 
 /** browser helper: read the tagged paragraph boxes out of the DOM (viewport CSS px). */

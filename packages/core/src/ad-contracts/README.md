@@ -152,9 +152,9 @@ only. Every v1-v1.4 line still validates; a `contract-v1.5` session_start must c
    upload: `input_mode_mismatch`, `pointer_not_interactive`, `pointer_text_presence`, `pointer_invalid`
    (`inputModeViolation`, blinding.ts). The Worker's vendored `blinding.json` needs a re-sync (InfrastructureBot)
    before it accepts the two new types; the input-mode fence is client-side until the Worker mirrors it.
-9. Not changed: `DIRECTOR_OUTPUT_FORMAT_TEXT` (its id grammar line still lists e/u/a forms; adding `p<k>` there
-   changes `director_format_id` and is left to the Director prompt update for the Mac pointer path), the leak-judge
-   prompt and model, the actor_text byte rule.
+9. `DIRECTOR_OUTPUT_FORMAT_TEXT` id grammar now lists `"p<k>" (pointer)` alongside e/u/a (Mac pointer path Step 2);
+   this changes `director_format_id` / assembled sha8. R3 system/examples narrative is unchanged (Researcher may
+   still revise examples for pointer digests). Leak-judge prompt/model and actor_text byte rule unchanged.
 
 ### contract-v1.4.1 clarification (2026-11-04; docs only, no type/schema/enum change, `contract` stays `"contract-v1.4"`)
 IOS Dev I5b notes (native 2d66504).
