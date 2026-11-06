@@ -22,11 +22,11 @@ const R3 = join(import.meta.dirname, "fixtures/r3");
 const fixtures = () => [...readdirSync(join(R3, "fixtures_invalid")).map((f) => ["fixtures_invalid/" + f]), ...readdirSync(join(R3, "examples")).map((f) => ["examples/" + f])].map(([f]) => ({ f: f!, d: JSON.parse(readFileSync(join(R3, f!), "utf8")) }));
 const o200k = loadO200k();
 
-test("E3: prompt slots: each id = sha256[:8] of its text; system slot = R3 system_prompt_v1.txt (dir1-b1d2fd77), byte-exact", () => {
+test("E3: prompt slots: each id = sha256[:8] of its text; system slot = R3 system_prompt_v1.txt (dir1-cf98dd5e), byte-exact", () => {
   const vend = join(import.meta.dirname, "..", "vendor", "r3");
   assert.equal(readFileSync(join(vend, "system_prompt_v1.txt"), "utf8"), R3_SYSTEM_PROMPT_V1);
   assert.equal(readFileSync(join(vend, "examples_block_v1.txt"), "utf8"), R3_EXAMPLES_BLOCK_V1);
-  assert.equal(DIRECTOR_PROMPT_ID, "dir1-b1d2fd77");
+  assert.equal(DIRECTOR_PROMPT_ID, "dir1-cf98dd5e");
   assert.equal(DIRECTOR_SYSTEM_SLOT.id, "dir1-" + sha(DIRECTOR_SYSTEM_SLOT.text).slice(0, 8));
   assert.equal(DIRECTOR_FORMAT_SLOT.id, "fmt1-" + sha(DIRECTOR_OUTPUT_FORMAT_TEXT).slice(0, 8));
   assert.equal(DIRECTOR_EXAMPLES_SLOT.id, "dex1-" + sha(DIRECTOR_EXAMPLES_SLOT.text).slice(0, 8));
@@ -35,7 +35,7 @@ test("E3: prompt slots: each id = sha256[:8] of its text; system slot = R3 syste
   assert.equal(asm, [R3_SYSTEM_PROMPT_V1.trimEnd(), DIRECTOR_OUTPUT_FORMAT_TEXT, R3_EXAMPLES_BLOCK_V1.trimEnd()].join("\n\n"));
   assert.equal(DIRECTOR_ASSEMBLED_SHA8, sha(asm).slice(0, 8));
   const st = slotTokens((t) => o200k.count(t), "digest", true);
-  assert.equal(st.system, 649); // R3's count of system_prompt_v1.txt (trailing newline trimmed)
+  assert.equal(st.system, 752); // R3 Pointer pass system_prompt_v1.txt (trailing newline trimmed)
   assert.equal(st.examples, o200k.count("\n\n" + R3_EXAMPLES_BLOCK_V1.trimEnd()));
   assert.equal(st.format, o200k.count("\n\n" + DIRECTOR_OUTPUT_FORMAT_TEXT));
   assert.equal(sumSlots(st), st.system + st.format + st.examples + st.digest);
@@ -167,7 +167,7 @@ test("E3: a 20-turn mock session end to end (tab_visible, arm on): events, rails
   const L = log.lines;
   assert.equal(L[0]!.type, "session_start");
   const ss = L[0] as Extract<BhAdEvent, { type: "session_start" }>;
-  assert.equal(ss.director_prompt_id, "dir1-b1d2fd77"); assert.equal(ss.director_format_id, DIRECTOR_FORMAT_SLOT.id); assert.equal(ss.director_assembled_sha8, DIRECTOR_ASSEMBLED_SHA8);
+  assert.equal(ss.director_prompt_id, "dir1-cf98dd5e"); assert.equal(ss.director_format_id, DIRECTOR_FORMAT_SLOT.id); assert.equal(ss.director_assembled_sha8, DIRECTOR_ASSEMBLED_SHA8);
   assert.equal(L.filter((l) => l.type === "actor_turn").length, 20);
   assert.equal(L.filter((l) => l.type === "context_share").length, 20);
   const calls = L.filter((l) => l.type === "director_call") as Array<Extract<BhAdEvent, { type: "director_call" }>>;

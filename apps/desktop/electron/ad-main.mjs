@@ -10,10 +10,12 @@
 //   - H1 report            --h1-report[=<file>] [--h1-seconds=N] [--h1-calibrate]: runs the tracker for N s
 //                          (default 120), samples app.getAppMetrics() every 2 s, writes JSON and quits.
 //                          Without --h1-report the app just runs (Hermes can use it by hand).
+//   - H1 pointer JSONL     renderer appends bh-ad/1 main-log lines to userData/h1-pointer/<sessionId>.jsonl
+//                          (Pointer pilot dogfood; fps/camera N/A).
 import { app, BrowserWindow, ipcMain, protocol, screen, session, systemPreferences } from "electron";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
@@ -103,6 +105,26 @@ ipcMain.handle("ad:screen", () => {
   return { deviceModel: "Mac" + process.arch /* contract: "Mac" + process.arch */, platform: "mac", orientation: "landscape_left", widthPt: d.size.width, heightPt: d.size.height, scale: d.scaleFactor, webview: { x: c.x - d.bounds.x, y: c.y - d.bounds.y, width: c.width, height: c.height }, widthMm: mm };
 });
 ipcMain.handle("ad:network", () => log.network.map((n) => ({ url: n.url })));
+function resolveJsonl(rel) {
+  const clean = String(rel ?? "").replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!clean || clean.includes("..") || clean.startsWith("/") || !/^[A-Za-z0-9._\/-]+$/.test(clean) || !clean.endsWith(".jsonl")) {
+    throw new Error("bad jsonl path");
+  }
+  const root = join(app.getPath("userData"), "h1-pointer");
+  const under = clean.startsWith("h1-pointer/") ? clean.slice("h1-pointer/".length) : clean;
+  const f = join(root, under);
+  if (!(f === root || f.startsWith(root + sep))) throw new Error("jsonl path escape");
+  return f;
+}
+ipcMain.handle("ad:jsonl-path", (_e, rel) => resolveJsonl(rel));
+ipcMain.handle("ad:append-jsonl", (_e, rel, line) => {
+  const f = resolveJsonl(rel);
+  const s = String(line ?? "");
+  if (!s || s.includes("\n") || s.includes("\r")) throw new Error("one JSON line at a time");
+  mkdirSync(dirname(f), { recursive: true });
+  appendFileSync(f, s + "\n", { encoding: "utf8", mode: 0o600 });
+  return f;
+});
 ipcMain.on("ad:h1", (_e, r) => { lastRenderer = r; push(log.renderer, { t: rel(), fps: r?.stats?.fps ?? null, state: r?.status?.state ?? null, code: r?.status?.code ?? null }); });
 
 function sampleMetrics() {

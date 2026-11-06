@@ -13,6 +13,7 @@ import { cn } from "../lib";
 import { AdModelPicker, InputModePicker, PointerDogfoodControls } from "./AdSessionControls";
 import { DirectorTab } from "./DirectorTab";
 import { InjectionLine, usePrefersReducedMotion } from "./InjectionLine";
+import { PointerOverlay, PointerOverlayToggle } from "./PointerOverlay";
 import type { AdStore, AdView, VisibleView } from "./controller";
 
 export type AdLayout = "phone" | "tablet";
@@ -39,6 +40,8 @@ export interface AdAppProps {
   /** monotonic clock for 5 s highlights (demo: the snapshot's mono) */
   now?: () => number;
   onCalibrate?: () => void;
+  /** Step 3: absolute H1 pointer JSONL path (Mac dogfood footer) */
+  pointerJsonlPath?: string | null;
 }
 
 export function AdApp(props: AdAppProps) {
@@ -48,6 +51,11 @@ export function AdApp(props: AdAppProps) {
   const chatRef = useRef<HTMLDivElement>(null);
   const store = props.store;
   const [open, setOpen] = useState(props.tabOpen ?? layout !== "phone");
+  // Step 3 dogfood: pointer overlay (never for blinded; default off)
+  const [overlayOn, setOverlayOn] = useState(false);
+  const canOverlay = view.sessionType === "tab_visible" && store.inputMode === "pointer";
+  const overlayShow = canOverlay && overlayOn;
+  const pointerDebug = overlayShow ? (store.pointerDebug?.() ?? null) : null;
 
   // composer: tap positions -> drift anchors, key TIMES only (never the key) -> local reading-window close
   const onPointer = useCallback((e: React.PointerEvent) => store.composerTap?.(e.clientX, e.clientY, e.timeStamp), [store]);
@@ -113,7 +121,8 @@ export function AdApp(props: AdAppProps) {
 
   return (
     <div className="eeg-app flex h-dvh flex-col bg-background text-foreground" data-ad-app={view.sessionType === "tab_visible" ? "visible" : "plain"}>
-      <TopBar view={view} layout={layout} tabOpen={open} store={store} {...(view.sessionType === "tab_visible" ? { onTab: () => setOpen((o) => !o) } : {})} onCalibrate={props.onCalibrate} onPause={() => void (view.camera.on ? store.pauseTracking?.() : store.resumeTracking?.())} />
+      <TopBar view={view} layout={layout} tabOpen={open} store={store} {...(view.sessionType === "tab_visible" ? { onTab: () => setOpen((o) => !o) } : {})} onCalibrate={props.onCalibrate} onPause={() => void (view.camera.on ? store.pauseTracking?.() : store.resumeTracking?.())} {...(canOverlay ? { overlayOn, setOverlayOn } : {})} />
+      {overlayShow && <PointerOverlay show debug={pointerDebug} jsonlHint={props.pointerJsonlPath ?? null} />}
       {view.sessionType === "tab_visible"
         ? <VisibleBody {...props} open={open} setOpen={setOpen} view={view} layout={layout} chatRef={chatRef} draft={draft} setDraft={setDraft} send={send} onPointer={onPointer} onKey={onKey} />
         : (
@@ -130,7 +139,7 @@ export function AdApp(props: AdAppProps) {
   );
 }
 
-function TopBar({ view, layout, onCalibrate, onPause, onTab, tabOpen, store }: { view: AdView; layout: AdLayout; onCalibrate?: () => void; onPause: () => void; onTab?: () => void; tabOpen?: boolean; store: AdStore }) {
+function TopBar({ view, layout, onCalibrate, onPause, onTab, tabOpen, store, overlayOn, setOverlayOn }: { view: AdView; layout: AdLayout; onCalibrate?: () => void; onPause: () => void; onTab?: () => void; tabOpen?: boolean; store: AdStore; overlayOn?: boolean; setOverlayOn?: (v: boolean) => void }) {
   const [modelsOpen, setModelsOpen] = useState(false);
   const mode = store.inputMode;
   const liveModels = store.models;
@@ -140,6 +149,7 @@ function TopBar({ view, layout, onCalibrate, onPause, onTab, tabOpen, store }: {
       <span className="rounded-sm bg-accent px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground" data-ad-badge>{view.sessionType === "tab_visible" ? "Director tab" : "Study session"}</span>
       {mode && <span className="rounded-sm border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground" data-ad-mode-badge>{mode}</span>}
       <span className="flex-1" />
+      {setOverlayOn && typeof overlayOn === "boolean" && <PointerOverlayToggle on={overlayOn} setOn={setOverlayOn} />}
       {store.changeModel && liveModels && (
         <button type="button" onClick={() => setModelsOpen((o) => !o)} className="eeg-tap rounded-sm px-2 py-1 font-mono text-[10px] text-muted-foreground hover:bg-accent" data-ad-models-toggle>
           {layout === "phone" ? "Models" : `${liveModels.actor.replace(/-cloud$/, "")} / ${liveModels.director.replace(/-cloud$/, "")}`}

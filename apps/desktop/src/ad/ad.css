@@ -19,3 +19,7 @@
   .ad-travel .ad-path, .ad-travel .ad-runner { animation: ad-in 250ms ease-out forwards, ad-out 400ms 900ms ease-in forwards; stroke-dashoffset: 0; offset-distance: 100%; }
   .ad-swipe, .ad-fresh { transition: none; }
 }
+
+/* Step 3: pointer dogfood overlay */
+.ad-pointer-aoi { outline: none; }
+

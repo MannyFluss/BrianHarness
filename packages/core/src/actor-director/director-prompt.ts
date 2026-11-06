@@ -1,6 +1,6 @@
 /**
  * E3: the Director's system message, in three slots (DirectorBot decision 2026-11-04, 3:24 PM PT):
- *   system   = R3 system_prompt_v1.txt, byte-exact       -> director_prompt_id   "dir1-b1d2fd77" (sha256[:8] of the file)
+ *   system   = R3 system_prompt_v1.txt, byte-exact       -> director_prompt_id   "dir1-cf98dd5e" (sha256[:8] of the file)
  *   format   = DIRECTOR_OUTPUT_FORMAT_TEXT (contracts)     -> director_format_id   "fmt1-<sha8>"
  *   examples = R3 examples_block_v1.txt, byte-exact        -> director_examples_id "dex1-<sha8>"
  * The assembled system message joins the slots (trailing newlines trimmed) with "\n\n"; its sha256[:8] is logged as
@@ -15,7 +15,7 @@ import { R3_EXAMPLES_BLOCK_V1, R3_SYSTEM_PROMPT_V1 } from "./director-prompt-tex
 
 export const sha8 = (s: string) => sha256HexSync(s).slice(0, 8);
 export interface PromptSlot { id: string; text: string }
-export const DIRECTOR_SYSTEM_SLOT: PromptSlot = { id: "dir1-b1d2fd77", text: R3_SYSTEM_PROMPT_V1 };
+export const DIRECTOR_SYSTEM_SLOT: PromptSlot = { id: "dir1-cf98dd5e", text: R3_SYSTEM_PROMPT_V1 };
 export const DIRECTOR_FORMAT_SLOT: PromptSlot = { id: "fmt1-" + sha8(DIRECTOR_OUTPUT_FORMAT_TEXT), text: DIRECTOR_OUTPUT_FORMAT_TEXT };
 export const DIRECTOR_EXAMPLES_SLOT: PromptSlot = { id: "dex1-" + sha8(R3_EXAMPLES_BLOCK_V1), text: R3_EXAMPLES_BLOCK_V1 };
 export const DIRECTOR_PROMPT_ID = DIRECTOR_SYSTEM_SLOT.id;

@@ -55,7 +55,7 @@ export const directorOutputNoNote = {
 export const actorText = renderActorText(directorOutputNote.note);
 
 const device = { deviceModel: "iPhone18,1", platform: "ios", orientation: "portrait", widthPt: 402, heightPt: 874 } as const;
-const common = { profile: "actor-director", contract: "contract-v1.5", userId: "manny", actor_prompt_id: "ap1-3c9e1b07", director_prompt_id: "dir1-b1d2fd77", pipeline_version: "gp1.0.0", tokenizer: "o200k_base", models: { actor: "gpt-oss:20b-cloud", director: "gpt-oss:120b-cloud" }, actor_model: "gpt-oss:20b-cloud", director_model: "gpt-oss:120b-cloud", input_mode: "gaze", consent: { camera: true, rawGaze: false }, gaze: { tracker: "arkit", permission: "granted" }, device, director_enabled: true } as const;
+const common = { profile: "actor-director", contract: "contract-v1.5", userId: "manny", actor_prompt_id: "ap1-3c9e1b07", director_prompt_id: "dir1-cf98dd5e", pipeline_version: "gp1.0.0", tokenizer: "o200k_base", models: { actor: "gpt-oss:20b-cloud", director: "gpt-oss:120b-cloud" }, actor_model: "gpt-oss:20b-cloud", director_model: "gpt-oss:120b-cloud", input_mode: "gaze", consent: { camera: true, rawGaze: false }, gaze: { tracker: "arkit", permission: "granted" }, device, director_enabled: true } as const;
 const blind = { index: 3, total: 10, scheduleHash: "9f2c4e1a7b3d5c6e8f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e" };
 const usage = { prompt_tokens: 1788, completion_tokens: 212, reasoning_tokens: 64 };
 

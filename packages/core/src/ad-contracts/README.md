@@ -25,7 +25,7 @@ Branch `actor-director` (from release-p4 `a7e49fd`), folder `packages/core/src/a
 4. Optional prompt-slot ids (DirectorBot decision, Nov 4): `session_start.director_format_id` (`fmt1-<sha8>` over
    `DIRECTOR_OUTPUT_FORMAT_TEXT`), `director_examples_id` (`dex1-<sha8>` over the examples slot),
    `director_assembled_sha8` (sha256[:8] of the assembled Director system message). `director_prompt_id` stays
-   `dir1-b1d2fd77` over R3's `system_prompt_v1.txt` only.
+   `dir1-cf98dd5e` over R3's `system_prompt_v1.txt` only.
 5. Optional `director_call.assembled_prompt_sha8` and `director_call.input_tokens_by_slot {system, format, examples,
    digest}` (o200k_base; the four add up to `input_tokens`).
 
@@ -686,7 +686,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "contract": "contract-v1.5",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
-  "director_prompt_id": "dir1-b1d2fd77",
+  "director_prompt_id": "dir1-cf98dd5e",
   "pipeline_version": "gp1.0.0",
   "tokenizer": "o200k_base",
   "models": {
@@ -731,7 +731,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "contract": "contract-v1.5",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
-  "director_prompt_id": "dir1-b1d2fd77",
+  "director_prompt_id": "dir1-cf98dd5e",
   "pipeline_version": "gp1.0.0",
   "tokenizer": "o200k_base",
   "models": {
@@ -780,7 +780,7 @@ shown in the app, and uploaded as its own envelope with `sessionId + ".sealed"`.
   "contract": "contract-v1.5",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
-  "director_prompt_id": "dir1-b1d2fd77",
+  "director_prompt_id": "dir1-cf98dd5e",
   "pipeline_version": "gp1.0.0",
   "tokenizer": "o200k_base",
   "models": {
@@ -1096,7 +1096,7 @@ pilot is Pointer only. A Pointer session logs its dwell settings and has no came
   "contract": "contract-v1.5",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
-  "director_prompt_id": "dir1-b1d2fd77",
+  "director_prompt_id": "dir1-cf98dd5e",
   "pipeline_version": "gp1.0.0",
   "tokenizer": "o200k_base",
   "models": {
@@ -1318,7 +1318,7 @@ A model change mid-session (no new session):
   "appVersion": "0.1.0",
   "platform": "ios",
   "build": "20261105.0900",
-  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.5\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-b1d2fd77\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"actor_model\":\"gpt-oss:20b-cloud\",\"director_model\":\"gpt-oss:120b-cloud\",\"input_mode\":\"gaze\",\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
+  "jsonl": "{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:00.000Z\",\"mono\":0,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":0,\"type\":\"session_start\",\"profile\":\"actor-director\",\"contract\":\"contract-v1.5\",\"userId\":\"manny\",\"actor_prompt_id\":\"ap1-3c9e1b07\",\"director_prompt_id\":\"dir1-cf98dd5e\",\"pipeline_version\":\"gp1.0.0\",\"tokenizer\":\"o200k_base\",\"models\":{\"actor\":\"gpt-oss:20b-cloud\",\"director\":\"gpt-oss:120b-cloud\"},\"actor_model\":\"gpt-oss:20b-cloud\",\"director_model\":\"gpt-oss:120b-cloud\",\"input_mode\":\"gaze\",\"consent\":{\"camera\":true,\"rawGaze\":false},\"gaze\":{\"tracker\":\"arkit\",\"permission\":\"granted\"},\"device\":{\"deviceModel\":\"iPhone18,1\",\"platform\":\"ios\",\"orientation\":\"portrait\",\"widthPt\":402,\"heightPt\":874},\"director_enabled\":true,\"session_type\":\"tab_visible\",\"tab\":\"visible\",\"arm\":\"on\",\"p_inject\":0.5}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:10:01.200Z\",\"mono\":1200,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":5,\"type\":\"health\",\"check\":\"budget\",\"ok\":false,\"code\":\"budget.director_cap\",\"detail\":\"Director paused: daily cap reached; chat continues without notes\",\"http_status\":429,\"worker_code\":\"role_cap_director\",\"role\":\"director\"}\n{\"schema\":\"bh-ad/1\",\"t\":\"2026-11-04T23:30:00.100Z\",\"mono\":1200100,\"sessionId\":\"ad-2026-11-04-7f3a\",\"seq\":401,\"type\":\"session_end\",\"turns\":21,\"reason\":\"user\"}\n"
 }
 ```
 <!-- example: worker-role-cap-error -->
@@ -1381,7 +1381,7 @@ A model change mid-session (no new session):
     runs and the hold applies in every arm. The blinded main log contains no key that `tools/phaseD/check_blinding.mjs`
     treats as an arm key.
 17. **Prompt ids**: Actor `ap<k>-<8 hex>`. Director `dir<k>-<8 hex>`, which matches the Researcher's R3 proposed id
-    `dir1-b1d2fd77` (= sha256 of `system_prompt_v1.txt`, checked). The Director prompt id never uses `dp` (that's
+    `dir1-cf98dd5e` (= sha256 of `system_prompt_v1.txt`, checked). The Director prompt id never uses `dp` (that's
     protocol 4's chat prompt, `dp4-23e5a648`).
 18. **Shares are logged unrounded** in 0..1 (not %). `mean_turn_share` and `max_turn_share` are taken over injected
     turns and are null when no note was injected.

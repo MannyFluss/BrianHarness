@@ -5,7 +5,7 @@
  * Shell: bh-app://app/ad.html?tracker=mediapipe[&calibrate=1][&h1=1][&mode=pointer|gaze|none].
  */
 import { useEffect, useRef, useState } from "react";
-import { AdStorage, CalibrationStore, loadO200kBrowser, networkIsolationProbe, simActor, simDirector, type CalibrationRecord, type SimReplay } from "@brianharness/core/actor-director/browser";
+import { AdStorage, CalibrationStore, h1PointerJsonlRelPath, h1PointerPreamble, loadO200kBrowser, networkIsolationProbe, simActor, simDirector, type CalibrationRecord, type SimReplay } from "@brianharness/core/actor-director/browser";
 import { DEFAULT_ACTOR_MODEL, DEFAULT_DIRECTOR_MODEL, DEFAULT_POINTER_CONFIG, type InputMode, type ScreenInfo } from "@brianharness/core/ad-contracts";
 import { LocalStorageKV, MemoryKV } from "@brianharness/core/browser";
 import { AdApp, type AdLayout } from "../AdApp";
@@ -47,6 +47,7 @@ export function MacBoot({ q, replaysUrl, layout, reduce }: { q: URLSearchParams;
   const [rec, setRec] = useState<CalibrationRecord | null | undefined>(undefined);
   const [ctl, setCtl] = useState<LiveAdController | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [jsonlPath, setJsonlPath] = useState<string | null>(null);
   const once = useRef(false);
 
   useEffect(() => {
@@ -88,25 +89,43 @@ export function MacBoot({ q, replaysUrl, layout, reduce }: { q: URLSearchParams;
     if (!boot || !ready || rec === undefined || ctl) return;
     let c: LiveAdController | null = null;
     const useGaze = mode === "gaze" && boot.tracker;
-    void LiveAdController.open({
-      sessionType: q.get("type") === "blinded" ? "blinded" : "tab_visible",
-      arm: "on",
-      sessionId: `mac-${Date.now()}`,
-      userId: "local",
-      actor: simActor(boot.replays),
-      director: simDirector(),
-      counter: boot.counter,
-      kv: boot.kv,
-      tracker: useGaze ? boot.tracker : null,
-      screen: boot.screen,
-      calibration: useGaze ? rec : null,
-      calStore: boot.calStore,
-      consent: { camera: !!useGaze, rawGaze: false },
-      inputMode: mode,
-      models: { actor: actorModel, director: directorModel },
-      ...(mode === "pointer" ? { pointerConfig: DEFAULT_POINTER_CONFIG } : {}),
-      ...(useGaze && boot.tracker ? { preflightProbes: [macNetworkProbe(boot.tracker)] } : {}),
-    }).then((x) => { c = x; setCtl(x); });
+    const sessionId = `mac-${Date.now()}`;
+    const bridge = macBridge();
+    const rel = h1PointerJsonlRelPath(sessionId);
+    const mirror = bridge?.appendJsonl
+      ? async (line: string) => { try { const abs = await bridge.appendJsonl!(rel, line); setJsonlPath(abs); } catch { /* dogfood only */ } }
+      : null;
+    void (async () => {
+      if (mirror) {
+        const pre = h1PointerPreamble({ sessionId, input_mode: mode, actor_model: actorModel, director_model: directorModel });
+        await mirror(JSON.stringify(pre));
+        if (bridge?.jsonlPath) { try { setJsonlPath(await bridge.jsonlPath(rel)); } catch { /* ignore */ } }
+      } else {
+        // no Mac shell: still surface the relative AD path for dogfood docs
+        setJsonlPath(`localStorage:brianharness/ad/${q.get("type") === "blinded" ? "blinded" : "visible"}/${sessionId} (+ ${rel} when packaged)`);
+      }
+      const x = await LiveAdController.open({
+        sessionType: q.get("type") === "blinded" ? "blinded" : "tab_visible",
+        arm: "on",
+        sessionId,
+        userId: "local",
+        actor: simActor(boot.replays),
+        director: simDirector(),
+        counter: boot.counter,
+        kv: boot.kv,
+        tracker: useGaze ? boot.tracker : null,
+        screen: boot.screen,
+        calibration: useGaze ? rec : null,
+        calStore: boot.calStore,
+        consent: { camera: !!useGaze, rawGaze: false },
+        inputMode: mode,
+        models: { actor: actorModel, director: directorModel },
+        ...(mode === "pointer" ? { pointerConfig: DEFAULT_POINTER_CONFIG } : {}),
+        ...(useGaze && boot.tracker ? { preflightProbes: [macNetworkProbe(boot.tracker)] } : {}),
+        ...(mirror ? { onMainLine: (ev) => { void mirror(JSON.stringify(ev)); } } : {}),
+      });
+      c = x; setCtl(x);
+    })();
     return () => { c?.dispose(); };
   }, [boot, ready, rec, ctl, q, mode, actorModel, directorModel]);
 
@@ -145,5 +164,5 @@ export function MacBoot({ q, replaysUrl, layout, reduce }: { q: URLSearchParams;
 
   if (mode === "gaze" && rec === undefined) return <CalibrationFlow screen={boot.screen} tracker={boot.tracker!} store={boot.calStore} onDone={(r) => setRec(r)} />;
   if (!ctl) return <div className="p-6 text-muted-foreground">Starting…</div>;
-  return <AdApp store={ctl} {...(layout ? { layout } : {})} {...(reduce !== undefined ? { reduceMotion: reduce } : {})} onCalibrate={mode === "gaze" ? () => { ctl.dispose(); setCtl(null); setRec(undefined); } : undefined} />;
+  return <AdApp store={ctl} {...(layout ? { layout } : {})} {...(reduce !== undefined ? { reduceMotion: reduce } : {})} onCalibrate={mode === "gaze" ? () => { ctl.dispose(); setCtl(null); setRec(undefined); } : undefined} pointerJsonlPath={jsonlPath} />;
 }

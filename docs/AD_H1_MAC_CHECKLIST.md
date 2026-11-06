@@ -119,3 +119,53 @@ These numbers do not predict the Mac, which runs the GPU delegate on Metal. Only
 
 The box can't run the macOS build. It was cross-built on Linux, and `codesign` was skipped. Everything
 macOS-specific is checked only by H1: the TCC prompt, the `systemPreferences` camera status, the Metal GPU delegate, and Gatekeeper.
+
+## 8. Pointer pilot addendum (Step 3 — overlay + local JSONL)
+
+Gaze H1 (`--h1-report`) still answers camera / MediaPipe / fps. The **first Mac pilot is Pointer**: no
+camera, no fps. After a Pointer dogfood pass, inspect the session-local JSONL instead.
+
+### Where the file lands
+
+| | |
+|---|---|
+| On Mac (Director shell) | `~/Library/Application Support/BrianHarness-Director/h1-pointer/<sessionId>.jsonl` |
+| Relative (in userData) | `h1-pointer/<sessionId>.jsonl` |
+| Also in-app (AdStorage) | `localStorage` key `brianharness/ad/visible/<sessionId>` (tab_visible) or `…/ad/blinded/<sessionId>` (blinded main) |
+
+`sessionId` looks like `mac-1730845123456` (set at Start). The overlay footer (when Overlay is on) prints the absolute path.
+
+### File shape (`schema: bh-h1-pointer-session/1`)
+
+- **Line 0 (preamble):** `{ schema, sessionId, input_mode, fps: null, camera: "n/a", actor_model?, director_model?, t, note }`.
+  fps/camera are always N/A in pointer mode.
+- **Following lines:** the AD **main** log (`bh-ad/1`), same bytes AdSessionLog writes to `ad/visible|blinded/<id>`:
+  `session_start` (with `input_mode`, `pointer_config`, `actor_model` / `director_model`, `director_prompt_id`,
+  `director_format_id`), `aoi_layout`, `pointer_l1`, `attention_digest` (pointer items, no gaze deep/skim/skip),
+  `model_change`, `health`, turns, etc.
+
+### Dogfood recipe (overlay on, chip pass)
+
+1. Launch BrianHarness Director (Pointer is the Mac pilot default). Confirm setup: **Pointer**, Actor/Director cloud tags.
+2. Start session → TopBar **Overlay off** → tap **Overlay on**. Interactive chips under Actor replies should outline; the bottom-left panel lists recent `p*` (hover/click/dwell/select).
+3. Hover a chip briefly (<200 ms), dwell ≥500 ms, click each dogfood chip, select one interactive span if present. Move over plain paragraph text — it must **not** grow `p*` rows.
+4. Type a short follow-up and Send (closes the reading window → digest + Director).
+5. Open the JSONL path from the overlay footer (or the table above):
+   ```sh
+   ls ~/Library/Application\ Support/BrianHarness-Director/h1-pointer/
+   head -n 5 ~/Library/Application\ Support/BrianHarness-Director/h1-pointer/mac-*.jsonl
+   ```
+6. **Check:** preamble `input_mode:"pointer"`, `fps:null`, `camera:"n/a"`; a `session_start` with the same models you picked and `director_prompt_id` / `director_format_id`; at least one `pointer_l1` (or `attention_digest.pointer` with `p*`); no `e*` / gaze deep-skim-skip labels; `health` lines if anything failed.
+
+### Blinded
+
+Overlay toggle and overlay DOM stay **off** in blinded sessions (no AOI outlines, no recent `p*` panel). The JSONL mirror still writes the redacted main log when the Mac shell is present.
+
+### Pins (Mac Pointer builds)
+
+| Field | Value |
+|---|---|
+| `director_prompt_id` | `dir1-cf98dd5e` (R3 `system_prompt_v1.txt`) |
+| `director_format_id` | `fmt1-f3cad037` |
+| `director_assembled_sha8` (with examples) | `75307cae` (moved from `905176d8` after the R3 Pointer system text) |
+

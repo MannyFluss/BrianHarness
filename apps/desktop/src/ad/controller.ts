@@ -12,7 +12,7 @@ import {
   gazeOptionsFromCalibration, accuracyWords, layoutFromScreen, gazeRef, Preflight, type Probe, type MultiProbe,
   type AdChatBackend, type CalibrationRecord, type InteractiveAoiBox, type LiveGaze, type ParaBox, type TabModel, type TokenCounter,
 } from "@brianharness/core/actor-director/browser";
-import { DEFAULT_ACTOR_MODEL, DEFAULT_DIRECTOR_MODEL, DEFAULT_POINTER_CONFIG, type Arm, type AttentionEvent, type BhAdEvent, type DirectorOutput, type GazeSrc, type GazeStatus, type GazeTracker, type InputMode, type ModelRole, type PointerConfig, type RailCode, type ScreenInfo, type SessionType } from "@brianharness/core/ad-contracts";
+import { DEFAULT_ACTOR_MODEL, DEFAULT_DIRECTOR_MODEL, DEFAULT_POINTER_CONFIG, type Arm, type AttentionEvent, type BhAdEvent, type DirectorOutput, type GazeSrc, type GazeStatus, type GazeTracker, type InputMode, type ModelRole, type PointerConfig, type PointerEvent, type RailCode, type ScreenInfo, type SessionType } from "@brianharness/core/ad-contracts";
 import type { KeyValueStore } from "@brianharness/core/browser";
 
 export interface AdChatMsg { id: string; role: "user" | "assistant"; text: string; streaming?: boolean }
@@ -58,6 +58,16 @@ export interface AdStore {
   /** v1.5: fixed for the session */
   inputMode?: InputMode;
   models?: { actor: string; director: string };
+  /** Step 3 dogfood: interactive AOIs + recent p* (null when blinded / not pointer) */
+  pointerDebug?(): PointerDebug | null;
+  /** Step 3: main-log sink for H1 pointer JSONL mirror */
+  setMainLineSink?(fn: ((ev: BhAdEvent) => void) | null): void;
+  /** session id + main AdStorage namespace (for documenting the JSONL path) */
+  sessionMeta?(): { sessionId: string; mainNamespace: "visible" | "blinded" } | null; // main log only
+}
+export interface PointerDebug {
+  interactive: InteractiveAoiBox[];
+  recent: Array<Pick<PointerEvent, "id" | "kind" | "aoi" | "t0" | "t1"> & { dwell_ms?: number }>;
 }
 
 export function staticController(view: AdView, liveFrames: LiveGaze[] = []): AdStore {
@@ -121,6 +131,8 @@ export interface LiveOptions {
   pointerConfig?: PointerConfig;
   /** v1.5: Actor + Director models at session start (defaults: 20b / 120b cloud suggestions) */
   models?: { actor: string; director: string };
+  /** Step 3: called for each main-log line (H1 pointer JSONL mirror) */
+  onMainLine?: (ev: BhAdEvent) => void;
 }
 
 export class LiveAdController implements AdStore {
@@ -150,6 +162,7 @@ export class LiveAdController implements AdStore {
   private occSpans: Array<[number, number]> = [];
   private interactive: InteractiveAoiBox[] = [];
   private pointerCap: PointerCapture | null = null;
+  private recentPointer: PointerEvent[] = [];
   readonly inputMode: InputMode;
 
   private constructor(private o: LiveOptions) {
@@ -165,6 +178,7 @@ export class LiveAdController implements AdStore {
     const storage = await AdStorage.open(o.kv);
     const clock = { now: () => Date.now(), mono: () => c.now() };
     c.log = new AdSessionLog(storage, o.sessionId, o.sessionType, clock);
+    if (o.onMainLine) c.log.onMainLine = o.onMainLine;
     if (!o.preflight && o.preflightProbes?.length) o.preflight = new Preflight({ probes: o.preflightProbes, emit: (h) => c.session?.logGaze(h), now: () => c.now() });
     const kind = o.trackerKind ?? (o.tracker ? trackerLabel(await o.tracker.getStatus().catch(() => null)) : "none");
     const models = o.models ?? { actor: DEFAULT_ACTOR_MODEL, director: DEFAULT_DIRECTOR_MODEL };
@@ -330,6 +344,10 @@ export class LiveAdController implements AdStore {
     if (this.inputMode === "pointer" || this.inputMode === "none") {
       const closed = this.pointerCap && this.inputMode === "pointer" ? this.pointerCap.closeWindow(endT) : { batches: [], pointer: [] };
       // pointer_l1 batches are emitted via PointerCapture.onBatch (including the final flush)
+      if (this.pointerCap) {
+        const flushed = this.pointerCap.takePending();
+        if (flushed.length) this.recentPointer = [...this.recentPointer, ...flushed].slice(-24);
+      }
       const digest = emptyModeDigest(msg, windowMs, this.inputMode, closed.pointer);
       this.session.observeReading({ digest, events: [], faceFrac: null, baselineParagraphs: this.history.length });
       return;
@@ -374,7 +392,21 @@ export class LiveAdController implements AdStore {
     else if (kind === "leave") this.pointerCap.leave(aoi, t);
     else if (kind === "click") this.pointerCap.click(aoi, t);
     else this.pointerCap.select(aoi, t);
+    const got = this.pointerCap.takePending();
+    if (got.length) {
+      this.recentPointer = [...this.recentPointer, ...got].slice(-24);
+      this.emit();
+    }
   }
+  pointerDebug = (): PointerDebug | null => {
+    if (this.o.sessionType !== "tab_visible" || this.inputMode !== "pointer") return null;
+    return {
+      interactive: this.interactive.slice(),
+      recent: this.recentPointer.map((e) => ({ id: e.id, kind: e.kind, aoi: e.aoi, t0: e.t0, t1: e.t1, ...(e.dwell_ms !== undefined ? { dwell_ms: e.dwell_ms } : {}) })),
+    };
+  };
+  setMainLineSink = (fn: ((ev: BhAdEvent) => void) | null) => { this.log.onMainLine = fn; };
+  sessionMeta = () => this.log ? { sessionId: this.o.sessionId, mainNamespace: this.log.mainNamespace as "visible" | "blinded" } : null;
   changeModel = (role: ModelRole, to: string): string | null => { const r = this.session.changeModel(role, to); if (!r) this.emit(); return r; };
   get models() { return this.session.models; }
   pauseTracking = async () => { this.paused = true; await this.o.tracker?.pause(); this.emit(); }

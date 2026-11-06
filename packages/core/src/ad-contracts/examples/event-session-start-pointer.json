@@ -9,7 +9,7 @@
   "contract": "contract-v1.5",
   "userId": "manny",
   "actor_prompt_id": "ap1-3c9e1b07",
-  "director_prompt_id": "dir1-b1d2fd77",
+  "director_prompt_id": "dir1-cf98dd5e",
   "pipeline_version": "gp1.0.0",
   "tokenizer": "o200k_base",
   "models": {

@@ -87,6 +87,8 @@ export class AdSessionLog {
   readonly tabLines: BhAdEvent[] = [];
   /** main-log lines the guard refused to write (should stay 0; tests assert it) */
   guardDrops = 0;
+  /** optional sink for each main-log line (Mac H1 pointer JSONL mirror); never sealed-only bodies */
+  onMainLine: ((ev: BhAdEvent) => void) | null = null;
   constructor(readonly storage: AdStorage, readonly sessionId: string, readonly sessionType: SessionType, readonly clock: AdClock) {
     this.main = new SeqLog(storage, sessionType === "blinded" ? "blinded" : "visible", sessionId);
     this.sealed = new SeqLog(storage, "sealed", sessionId);
@@ -102,8 +104,14 @@ export class AdSessionLog {
       const code = sealedEverywhereViolation(line) ? "sealed_everywhere" : this.sessionType === "blinded" ? blindedMainLineViolation(line) : null;
       if (code) {
         this.guardDrops++;
-        this.tabLines.push(this.main.write(this.sessionId, this.clock, { type: "health", check: "upload", ok: false, code: "upload.blinded_guard", detail: code }));
-      } else this.tabLines.push(this.main.write(this.sessionId, this.clock, red));
+        const guard = this.main.write(this.sessionId, this.clock, { type: "health", check: "upload", ok: false, code: "upload.blinded_guard", detail: code });
+        this.tabLines.push(guard);
+        this.onMainLine?.(guard);
+      } else {
+        const main = this.main.write(this.sessionId, this.clock, red);
+        this.tabLines.push(main);
+        this.onMainLine?.(main);
+      }
     }
     return full;
   }
